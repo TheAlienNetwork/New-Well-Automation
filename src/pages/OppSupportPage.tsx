@@ -1,0 +1,734 @@
+import React, { useState, useRef, useEffect } from "react";
+import Navbar from "@/components/layout/Navbar";
+import StatusBar from "@/components/dashboard/StatusBar";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Brain,
+  Mic,
+  Send,
+  HelpCircle,
+  AlertTriangle,
+  Wrench,
+  Zap,
+  BookOpen,
+  FileText,
+  Lightbulb,
+  Volume2,
+  VolumeX,
+  Settings,
+  Download,
+  BarChart3,
+} from "lucide-react";
+
+interface Message {
+  id: string;
+  type: "user" | "ai";
+  text: string;
+  timestamp: Date;
+  spoken?: boolean;
+}
+
+const OppSupportPage = () => {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "welcome",
+      type: "ai",
+      text: "Hello, I'm Opp Support, your AI drilling assistant. How can I help you today?",
+      timestamp: new Date(),
+      spoken: true,
+    },
+  ]);
+  const [inputText, setInputText] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [activeTopic, setActiveTopic] = useState<string | null>(null);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [voiceVolume, setVoiceVolume] = useState(80);
+  const [voiceSpeed, setVoiceSpeed] = useState(1.0);
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Initialize speech synthesis
+  useEffect(() => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      speechSynthesisRef.current = new SpeechSynthesisUtterance();
+      // Set a more natural voice if available
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(
+        (voice) => voice.name.includes("Daniel") || voice.name.includes("Male"),
+      );
+      if (preferredVoice) {
+        speechSynthesisRef.current.voice = preferredVoice;
+      }
+      speechSynthesisRef.current.rate = voiceSpeed;
+      speechSynthesisRef.current.volume = voiceVolume / 100;
+    }
+
+    // Speak welcome message
+    if (voiceEnabled && messages.length === 1 && !messages[0].spoken) {
+      speakText(messages[0].text);
+      setMessages((prev) => [{ ...prev[0], spoken: true }, ...prev.slice(1)]);
+    }
+
+    return () => {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  // Update speech synthesis settings when they change
+  useEffect(() => {
+    if (speechSynthesisRef.current) {
+      speechSynthesisRef.current.rate = voiceSpeed;
+      speechSynthesisRef.current.volume = voiceVolume / 100;
+    }
+  }, [voiceSpeed, voiceVolume]);
+
+  // Function to speak text
+  const speakText = (text: string) => {
+    if (!voiceEnabled || !speechSynthesisRef.current) return;
+
+    // Cancel any ongoing speech
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+
+      // Set the text and speak
+      speechSynthesisRef.current.text = text;
+      window.speechSynthesis.speak(speechSynthesisRef.current);
+    }
+  };
+
+  // Handle sending a message
+  const handleSendMessage = () => {
+    if (!inputText.trim()) return;
+
+    // Add user message
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      type: "user",
+      text: inputText,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    setInputText("");
+
+    // Simulate AI thinking and responding
+    setTimeout(() => {
+      const aiResponse = generateAIResponse(userMessage.text);
+      const aiMessage: Message = {
+        id: Date.now().toString(),
+        type: "ai",
+        text: aiResponse,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMessage]);
+
+      // Speak the response
+      speakText(aiResponse);
+
+      // Scroll to bottom
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 1500);
+  };
+
+  // Generate AI response based on user input
+  const generateAIResponse = (userText: string) => {
+    const userTextLower = userText.toLowerCase();
+
+    if (userTextLower.includes("vibration")) {
+      return "The high vibration readings on the lateral sensor could be caused by several factors: 1) Improper stabilization in the BHA, 2) Formation changes causing stick-slip, or 3) Worn out shock subs. Based on the current data, I recommend reducing WOB by 10% and monitoring the response. The AI analytics show a 42% lateral vibration which is above the recommended threshold of 30%.";
+    } else if (
+      userTextLower.includes("signal loss") ||
+      userTextLower.includes("mwd signal")
+    ) {
+      return "To troubleshoot MWD signal loss, follow these steps: 1) Check surface equipment connections, 2) Verify mud pulse decoder settings, 3) Ensure adequate flow rate (current flow is 650 gpm, minimum recommended is 600 gpm), 4) Check for potential washout indicators. The current signal strength is 85%, which is good, but noise filtering could be increased from 30% to 50% to improve signal clarity.";
+    } else if (
+      userTextLower.includes("magnetometer") ||
+      userTextLower.includes("calibrat")
+    ) {
+      return "For magnetometer recalibration, the recommended procedure is: 1) Pull out to a known non-magnetic environment, 2) Run the calibration sequence with the tool stationary for at least 5 minutes, 3) Verify readings against reference values. The current magnetic field strength is 48.32 μT, which is within expected range, but the dip angle variation of ±1.2° suggests recalibration may be beneficial.";
+    } else if (
+      userTextLower.includes("tool failure") ||
+      userTextLower.includes("prediction")
+    ) {
+      return "The current tool failure prediction shows a 23% risk with the MWD Battery having the highest risk factor at 42%. The estimated time to failure is approximately 48 hours. I recommend scheduling a battery replacement during the next connection. The temperature trend shows a 1.5°F increase over the last 6 hours, which is contributing to the prediction.";
+    } else if (
+      userTextLower.includes("magnetic interference") ||
+      userTextLower.includes("formation")
+    ) {
+      return "The magnetic interference in the current formation is likely due to the high iron content in the shale layer you're currently drilling through (8000-7500 ft). The gamma readings confirm this with values between 80-120 API units. To mitigate this, I recommend: 1) Increase survey spacing to 90 ft, 2) Use multi-station analysis for surveys, 3) Apply the enhanced magnetic correction algorithm in the software settings.";
+    } else if (
+      userTextLower.includes("hey opp support") ||
+      userTextLower.includes("hello") ||
+      userTextLower.includes("hi")
+    ) {
+      return "Hello! I'm Opp Support, your AI drilling assistant. How can I help you with your MWD or directional drilling questions today?";
+    } else {
+      return (
+        "I understand you're asking about " +
+        userText.split(" ").slice(0, 3).join(" ") +
+        "... Based on the current drilling parameters and survey data, I recommend checking the latest AI analytics for insights. Would you like me to provide specific information about tool performance, survey quality, or drilling parameters?"
+      );
+    }
+  };
+
+  // Simulate speech recognition
+  const startListening = () => {
+    setIsListening(true);
+    // Simulate voice recognition after 2 seconds
+    setTimeout(() => {
+      const recognizedText = getRandomQuestion();
+      setInputText(recognizedText);
+      setIsListening(false);
+    }, 2000);
+  };
+
+  // Get a random question for demo purposes
+  const getRandomQuestion = () => {
+    const questions = [
+      "What could be causing the high vibration readings on the lateral sensor?",
+      "How do I troubleshoot MWD signal loss?",
+      "What's the recommended procedure for recalibrating the magnetometers?",
+      "Can you explain the current tool failure prediction?",
+      "What's causing the magnetic interference in the current formation?",
+    ];
+    return questions[Math.floor(Math.random() * questions.length)];
+  };
+
+  // Handle key press for sending message
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      handleSendMessage();
+    }
+  };
+
+  // Handle topic selection
+  const handleTopicSelect = (topic: string) => {
+    setActiveTopic(topic === activeTopic ? null : topic);
+  };
+
+  // Toggle voice output
+  const toggleVoice = () => {
+    if (
+      voiceEnabled &&
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window
+    ) {
+      window.speechSynthesis.cancel(); // Stop any ongoing speech
+    }
+    setVoiceEnabled(!voiceEnabled);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-gray-200">
+      <Navbar />
+      <StatusBar />
+
+      <div className="container mx-auto px-4 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Left sidebar with topics */}
+          <div className="lg:col-span-1">
+            <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden h-full">
+              <CardHeader className="p-4 pb-2 border-b border-gray-800">
+                <div className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-purple-400" />
+                  <CardTitle className="text-lg font-medium text-gray-200">
+                    Opp Support
+                  </CardTitle>
+                  <Badge
+                    variant="outline"
+                    className="ml-2 bg-purple-950/30 text-purple-400 border-purple-800"
+                  >
+                    AI
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4">
+                <div className="space-y-4">
+                  <div className="text-sm text-gray-400 mb-2">Topics</div>
+
+                  <TopicButton
+                    icon={<AlertTriangle className="h-4 w-4 text-yellow-400" />}
+                    title="Troubleshooting"
+                    isActive={activeTopic === "troubleshooting"}
+                    onClick={() => handleTopicSelect("troubleshooting")}
+                  />
+
+                  <TopicButton
+                    icon={<Wrench className="h-4 w-4 text-blue-400" />}
+                    title="Maintenance"
+                    isActive={activeTopic === "maintenance"}
+                    onClick={() => handleTopicSelect("maintenance")}
+                  />
+
+                  <TopicButton
+                    icon={<Zap className="h-4 w-4 text-cyan-400" />}
+                    title="Performance"
+                    isActive={activeTopic === "performance"}
+                    onClick={() => handleTopicSelect("performance")}
+                  />
+
+                  <TopicButton
+                    icon={<BookOpen className="h-4 w-4 text-green-400" />}
+                    title="Manuals & Guides"
+                    isActive={activeTopic === "manuals"}
+                    onClick={() => handleTopicSelect("manuals")}
+                  />
+
+                  <TopicButton
+                    icon={<FileText className="h-4 w-4 text-orange-400" />}
+                    title="Reports"
+                    isActive={activeTopic === "reports"}
+                    onClick={() => handleTopicSelect("reports")}
+                  />
+
+                  <TopicButton
+                    icon={<Lightbulb className="h-4 w-4 text-purple-400" />}
+                    title="Best Practices"
+                    isActive={activeTopic === "practices"}
+                    onClick={() => handleTopicSelect("practices")}
+                  />
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-gray-800">
+                  <div className="text-sm text-gray-400 mb-2">
+                    Suggested Questions
+                  </div>
+                  <SuggestedQuestion
+                    question="How do I troubleshoot MWD signal loss?"
+                    onClick={() => {
+                      setInputText("How do I troubleshoot MWD signal loss?");
+                      setActiveTopic("troubleshooting");
+                    }}
+                  />
+                  <SuggestedQuestion
+                    question="What's causing the high vibration readings?"
+                    onClick={() => {
+                      setInputText(
+                        "What's causing the high vibration readings?",
+                      );
+                      setActiveTopic("troubleshooting");
+                    }}
+                  />
+                  <SuggestedQuestion
+                    question="How to interpret the current AI predictions?"
+                    onClick={() => {
+                      setInputText(
+                        "How to interpret the current AI predictions?",
+                      );
+                      setActiveTopic("performance");
+                    }}
+                  />
+                </div>
+
+                {/* Voice Settings */}
+                <div className="mt-4 pt-4 border-t border-gray-800">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-400">Voice Output</div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-gray-400 hover:text-gray-300 hover:bg-gray-800"
+                      onClick={toggleVoice}
+                    >
+                      {voiceEnabled ? (
+                        <Volume2 className="h-4 w-4 text-green-400" />
+                      ) : (
+                        <VolumeX className="h-4 w-4 text-gray-500" />
+                      )}
+                    </Button>
+                  </div>
+
+                  {voiceEnabled && (
+                    <div className="mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full text-xs bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                        onClick={() => setShowVoiceSettings(!showVoiceSettings)}
+                      >
+                        <Settings className="h-3 w-3 mr-1" />
+                        Voice Settings
+                      </Button>
+
+                      {showVoiceSettings && (
+                        <div className="mt-2 space-y-2 p-2 bg-gray-800/50 rounded-md">
+                          <div>
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                              <span>Volume</span>
+                              <span>{voiceVolume}%</span>
+                            </div>
+                            <Slider
+                              value={[voiceVolume]}
+                              min={0}
+                              max={100}
+                              step={5}
+                              onValueChange={(value) =>
+                                setVoiceVolume(value[0])
+                              }
+                            />
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                              <span>Speed</span>
+                              <span>{voiceSpeed.toFixed(1)}x</span>
+                            </div>
+                            <Slider
+                              value={[voiceSpeed * 10]}
+                              min={5}
+                              max={20}
+                              step={1}
+                              onValueChange={(value) =>
+                                setVoiceSpeed(value[0] / 10)
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Analytics Button */}
+                <div className="mt-4">
+                  <Button
+                    variant="outline"
+                    className="w-full bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                    onClick={() => setIsAnalyticsOpen(!isAnalyticsOpen)}
+                  >
+                    <BarChart3 className="h-4 w-4 mr-2" />
+                    View Analytics
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Main chat area */}
+          <div className="lg:col-span-3">
+            <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden h-full flex flex-col">
+              <CardHeader className="p-4 pb-2 border-b border-gray-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-full bg-purple-600 flex items-center justify-center">
+                      <Brain className="h-4 w-4 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-medium text-gray-200">
+                        Opp Support Assistant
+                      </CardTitle>
+                      <div className="text-xs text-gray-400">
+                        AI-powered drilling operations support
+                      </div>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="ml-2 bg-green-900/30 text-green-400 border-green-800"
+                    >
+                      ONLINE
+                    </Badge>
+                    {voiceEnabled && (
+                      <Badge
+                        variant="outline"
+                        className="ml-1 bg-blue-900/30 text-blue-400 border-blue-800"
+                      >
+                        <Volume2 className="h-3 w-3 mr-1" />
+                        VOICE
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                      onClick={() => {}}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Export Chat
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                    >
+                      <HelpCircle className="h-4 w-4 mr-2" />
+                      Help
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="p-0 flex-grow flex flex-col">
+                {/* Messages area */}
+                <ScrollArea className="flex-grow p-4">
+                  <div className="space-y-4">
+                    {messages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
+                      >
+                        <div
+                          className={`max-w-[80%] rounded-lg p-3 ${message.type === "user" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-200"}`}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="font-medium">
+                              {message.type === "user" ? "You" : "Opp Support"}
+                            </span>
+                            {message.type === "ai" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 -mt-1 -mr-1 text-gray-400 hover:text-gray-300 hover:bg-gray-700"
+                                onClick={() => speakText(message.text)}
+                              >
+                                <Volume2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                          <p className="text-sm whitespace-pre-wrap">
+                            {message.text}
+                          </p>
+                          <div className="text-xs opacity-70 mt-1">
+                            {message.timestamp.toLocaleTimeString()}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </div>
+                </ScrollArea>
+
+                {/* Input area */}
+                <div className="p-4 border-t border-gray-800 bg-gray-900">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className={`h-10 w-10 ${isListening ? "bg-red-600 text-white border-red-700" : "bg-gray-800 border-gray-700 text-gray-300"}`}
+                      onClick={startListening}
+                    >
+                      <Mic className="h-5 w-5" />
+                    </Button>
+                    <Input
+                      placeholder={
+                        isListening
+                          ? "Listening..."
+                          : "Type your question here..."
+                      }
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      onKeyPress={handleKeyPress}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                      disabled={isListening}
+                    />
+                    <Button
+                      className="bg-purple-600 hover:bg-purple-700 text-white"
+                      onClick={handleSendMessage}
+                      disabled={!inputText.trim() || isListening}
+                    >
+                      <Send className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <div className="mt-2 text-xs text-gray-500 flex items-center">
+                    <Zap className="h-3 w-3 mr-1" />
+                    {isListening
+                      ? "Listening for your question..."
+                      : "Ask a question about drilling operations or MWD tools"}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Analytics Panel */}
+        {isAnalyticsOpen && (
+          <div className="mt-6">
+            <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
+              <CardHeader className="p-4 pb-2 border-b border-gray-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5 text-blue-400" />
+                    <CardTitle className="text-lg font-medium text-gray-200">
+                      Conversation Analytics
+                    </CardTitle>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-gray-400 hover:text-gray-300 hover:bg-gray-800"
+                    onClick={() => setIsAnalyticsOpen(false)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-4">
+                <Tabs defaultValue="topics">
+                  <TabsList className="bg-gray-800 mb-4">
+                    <TabsTrigger value="topics">Topics</TabsTrigger>
+                    <TabsTrigger value="sentiment">Sentiment</TabsTrigger>
+                    <TabsTrigger value="usage">Usage</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="topics" className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <TopicAnalyticsCard
+                        title="Troubleshooting"
+                        count={4}
+                        percentage={40}
+                        color="yellow"
+                      />
+                      <TopicAnalyticsCard
+                        title="Maintenance"
+                        count={2}
+                        percentage={20}
+                        color="blue"
+                      />
+                      <TopicAnalyticsCard
+                        title="Performance"
+                        count={3}
+                        percentage={30}
+                        color="cyan"
+                      />
+                      <TopicAnalyticsCard
+                        title="Manuals & Guides"
+                        count={0}
+                        percentage={0}
+                        color="green"
+                      />
+                      <TopicAnalyticsCard
+                        title="Reports"
+                        count={1}
+                        percentage={10}
+                        color="orange"
+                      />
+                      <TopicAnalyticsCard
+                        title="Best Practices"
+                        count={0}
+                        percentage={0}
+                        color="purple"
+                      />
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="sentiment" className="space-y-4">
+                    <div className="text-center p-8">
+                      <p className="text-gray-400">
+                        Sentiment analysis would be displayed here
+                      </p>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="usage" className="space-y-4">
+                    <div className="text-center p-8">
+                      <p className="text-gray-400">
+                        Usage statistics would be displayed here
+                      </p>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+interface TopicButtonProps {
+  icon: React.ReactNode;
+  title: string;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+const TopicButton = ({ icon, title, isActive, onClick }: TopicButtonProps) => (
+  <button
+    className={`w-full flex items-center gap-2 p-2 rounded-md text-left ${isActive ? "bg-purple-900/30 text-purple-400 border border-purple-800" : "hover:bg-gray-800"}`}
+    onClick={onClick}
+  >
+    {icon}
+    <span className="text-sm">{title}</span>
+  </button>
+);
+
+interface SuggestedQuestionProps {
+  question: string;
+  onClick: () => void;
+}
+
+const SuggestedQuestion = ({ question, onClick }: SuggestedQuestionProps) => (
+  <button
+    className="w-full text-left p-2 text-xs text-gray-400 hover:bg-gray-800 rounded-md hover:text-gray-300"
+    onClick={onClick}
+  >
+    {question}
+  </button>
+);
+
+interface TopicAnalyticsCardProps {
+  title: string;
+  count: number;
+  percentage: number;
+  color: string;
+}
+
+const TopicAnalyticsCard = ({
+  title,
+  count,
+  percentage,
+  color,
+}: TopicAnalyticsCardProps) => {
+  const getColorClass = () => {
+    switch (color) {
+      case "yellow":
+        return "text-yellow-400";
+      case "blue":
+        return "text-blue-400";
+      case "cyan":
+        return "text-cyan-400";
+      case "green":
+        return "text-green-400";
+      case "orange":
+        return "text-orange-400";
+      case "purple":
+        return "text-purple-400";
+      default:
+        return "text-gray-400";
+    }
+  };
+
+  return (
+    <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
+      <h3 className={`text-sm font-medium ${getColorClass()} mb-1`}>{title}</h3>
+      <div className="flex justify-between items-center">
+        <span className="text-xs text-gray-500">Questions</span>
+        <span className="text-sm text-gray-300 font-medium">{count}</span>
+      </div>
+      <div className="flex justify-between items-center">
+        <span className="text-xs text-gray-500">Percentage</span>
+        <span className="text-sm text-gray-300 font-medium">{percentage}%</span>
+      </div>
+      <div className="mt-2 bg-gray-700 h-1.5 rounded-full overflow-hidden">
+        <div
+          className={`h-full ${color === "yellow" ? "bg-yellow-500" : color === "blue" ? "bg-blue-500" : color === "cyan" ? "bg-cyan-500" : color === "green" ? "bg-green-500" : color === "orange" ? "bg-orange-500" : "bg-purple-500"}`}
+          style={{ width: `${percentage}%` }}
+        ></div>
+      </div>
+    </div>
+  );
+};
+
+export default OppSupportPage;
