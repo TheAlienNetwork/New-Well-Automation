@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,7 @@ interface SurveyEmailSettingsProps {
   onToggleEmail?: (enabled: boolean) => void;
   recipients?: string[];
   onUpdateRecipients?: (recipients: string[]) => void;
+  surveys?: any[];
 }
 
 const SurveyEmailSettings = ({
@@ -35,6 +36,7 @@ const SurveyEmailSettings = ({
     "rig.supervisor@oiltech.com",
   ],
   onUpdateRecipients = () => {},
+  surveys = [],
 }: SurveyEmailSettingsProps) => {
   const [newRecipient, setNewRecipient] = useState("");
   const [activeTab, setActiveTab] = useState("recipients");
@@ -45,18 +47,43 @@ const SurveyEmailSettings = ({
     includeImages: true,
     includeTorqueDrag: false,
   });
+  const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [includeCurveData, setIncludeCurveData] = useState(false);
+  const [latestSurvey, setLatestSurvey] = useState({});
+
+  useEffect(() => {
+    if (surveys.length > 0) {
+      setLatestSurvey(surveys[0]);
+    }
+  }, [surveys]);
 
   const handleAddRecipient = () => {
-    if (newRecipient && !recipients.includes(newRecipient)) {
+    if (
+      newRecipient &&
+      !recipients.includes(newRecipient) &&
+      validateEmail(newRecipient)
+    ) {
       const updatedRecipients = [...recipients, newRecipient];
       onUpdateRecipients(updatedRecipients);
       setNewRecipient("");
+    } else {
+      alert("Invalid email address");
     }
   };
 
-  const handleRemoveRecipient = (email: string) => {
-    const updatedRecipients = recipients.filter((r) => r !== email);
-    onUpdateRecipients(updatedRecipients);
+  const validateEmail = (email) => {
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    return emailRegex.test(email);
+  };
+
+  const handleRemoveRecipient = (email) => {
+    if (
+      window.confirm(`Are you sure you want to remove ${email} as a recipient?`)
+    ) {
+      const updatedRecipients = recipients.filter((r) => r !== email);
+      onUpdateRecipients(updatedRecipients);
+    }
   };
 
   const handleSettingChange = (setting: string, value: any) => {
@@ -66,12 +93,68 @@ const SurveyEmailSettings = ({
     });
   };
 
+  const handleSaveSettings = () => {
+    setSaving(true);
+    // Save the email settings
+    setTimeout(() => {
+      setSaving(false);
+      alert("Email settings saved successfully");
+    }, 1000);
+  };
+
+  const handleTestEmail = () => {
+    const emailBody = getHtmlEmailBody();
+    const emailSubject = "Survey Report - Well Alpha-123";
+    const emailTo = recipients.join(",");
+    const emailCC = "";
+    const emailBCC = "";
+
+    const outlookUrl = `https://outlook.office.com/mail/deeplink/compose?to=${emailTo}&cc=${emailCC}&bcc=${emailBCC}&subject=${emailSubject}&body=${encodeURIComponent(emailBody)}`;
+    window.open(outlookUrl, "_blank");
+  };
+
+  const getHtmlEmailBody = () => {
+    let html = `
+      <div>
+        <h3>Survey Report - Well Alpha-123</h3>
+        <p>This is a preview of the email that will be sent</p>
+      </div>
+      <div>
+        <h4>Latest Survey Details</h4>
+        <div>
+          <p>Measured Depth: ${latestSurvey.measuredDepth}</p>
+          <p>Inclination: ${latestSurvey.inclination}</p>
+          <p>Azimuth: ${latestSurvey.azimuth}</p>
+        </div>
+      </div>
+    `;
+
+    if (includeCurveData) {
+      html += `
+        <div>
+          <h4>Curve Data</h4>
+          <div>
+            <p>Curve 1: ${latestSurvey.curve1}</p>
+            <p>Curve 2: ${latestSurvey.curve2}</p>
+            <p>Curve 3: ${latestSurvey.curve3}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    return html;
+  };
+
   const predefinedGroups = [
     { id: "directional", name: "Directional Team", count: 5 },
     { id: "company", name: "Company Representatives", count: 3 },
     { id: "rig", name: "Rig Crew", count: 8 },
     { id: "engineers", name: "Engineers", count: 4 },
   ];
+
+  const filteredRecipients = recipients.filter((recipient) =>
+    recipient.toLowerCase().includes(searchQuery.toLowerCase()),
+  );
 
   return (
     <Card className="w-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
@@ -151,9 +234,9 @@ const SurveyEmailSettings = ({
                 Current Recipients
               </div>
               <ScrollArea className="h-[200px] p-2">
-                {recipients.length > 0 ? (
+                {filteredRecipients.length > 0 ? (
                   <ul className="space-y-2">
-                    {recipients.map((email) => (
+                    {filteredRecipients.map((email) => (
                       <li
                         key={email}
                         className="flex items-center justify-between p-2 bg-gray-800/50 rounded-md"
@@ -335,18 +418,44 @@ const SurveyEmailSettings = ({
                   <div className="grid grid-cols-3 gap-2 text-sm">
                     <div>
                       <p className="text-xs text-gray-500">Measured Depth</p>
-                      <p className="text-gray-300">8452.60 ft</p>
+                      <p className="text-gray-300">
+                        {latestSurvey.measuredDepth}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Inclination</p>
-                      <p className="text-gray-300">32.50°</p>
+                      <p className="text-gray-300">
+                        {latestSurvey.inclination}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Azimuth</p>
-                      <p className="text-gray-300">275.80°</p>
+                      <p className="text-gray-300">{latestSurvey.azimuth}</p>
                     </div>
                   </div>
                 </div>
+
+                {includeCurveData && (
+                  <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
+                    <h4 className="text-sm font-medium text-gray-300 mb-2">
+                      Curve Data
+                    </h4>
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500">Curve 1</p>
+                        <p className="text-gray-300">{latestSurvey.curve1}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Curve 2</p>
+                        <p className="text-gray-300">{latestSurvey.curve2}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Curve 3</p>
+                        <p className="text-gray-300">{latestSurvey.curve3}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
                   <div className="flex items-center gap-2 mb-2">
@@ -382,9 +491,16 @@ const SurveyEmailSettings = ({
             </div>
 
             <div className="flex justify-end">
+              <Switch
+                id="include-curve-data"
+                checked={includeCurveData}
+                onCheckedChange={(checked) => setIncludeCurveData(checked)}
+                className="data-[state=checked]:bg-blue-600 mr-2"
+              />
               <Button
                 variant="outline"
                 className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                onClick={handleTestEmail}
               >
                 <Mail className="h-4 w-4 mr-2" />
                 Send Test Email

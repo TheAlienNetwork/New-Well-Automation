@@ -1,3 +1,4 @@
+// ProfilePage.js
 import React, { useState } from "react";
 import Navbar from "@/components/layout/Navbar";
 import StatusBar from "@/components/dashboard/StatusBar";
@@ -25,6 +26,7 @@ import {
   Edit,
   CheckCircle,
   AlertTriangle,
+  Trash,
 } from "lucide-react";
 
 interface TimeEntry {
@@ -73,16 +75,16 @@ const ProfilePage = () => {
   });
 
   const [profileData, setProfileData] = useState({
-    firstName: "John",
-    lastName: "Doe",
-    email: "john.doe@newwelltech.com",
+    firstName: "Tyler",
+    lastName: "Newell",
+    email: "Tyler.Newell@newwelltech.com",
     phone: "(555) 123-4567",
     position: "Senior MWD Engineer",
     company: "New Well Technologies",
     location: "Houston, TX",
     bio: "Experienced MWD engineer with over 10 years in directional drilling operations. Specialized in high-temperature, high-pressure environments and complex well trajectories.",
     emailSignature:
-      "John Doe\nSenior MWD Engineer\nNew Well Technologies\nPhone: (555) 123-4567\nEmail: john.doe@newwelltech.com",
+      "Tyler Newell\nSenior MWD Engineer\nNew Well Technologies\nPhone: (555) 123-4567\nEmail: Tyler.Newell@newwelltech.com",
   });
 
   const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -149,6 +151,11 @@ const ProfilePage = () => {
       project: "Alpha-123 Well",
       description: "",
     });
+  };
+
+  const handleDeleteTimeEntry = (id: string) => {
+    const updatedEntries = timeEntries.filter((entry) => entry.id !== id);
+    setTimeEntries(updatedEntries);
   };
 
   const calculateTotalHours = () => {
@@ -606,6 +613,9 @@ ${profileData.emailSignature}
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                             Description
                           </th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            Actions
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800">
@@ -671,6 +681,17 @@ ${profileData.emailSignature}
                                   }}
                                   className="bg-transparent border-0 hover:bg-gray-800 focus:bg-gray-800 text-gray-300 text-sm h-7 p-1"
                                 />
+                              </td>
+                              <td className="px-4 py-2">
+                                <Button
+                                  variant="destructive"
+                                  className="bg-red-600 hover:bg-red-700 text-white"
+                                  onClick={() =>
+                                    handleDeleteTimeEntry(entry.id)
+                                  }
+                                >
+                                  <Trash className="h-4 w-4" />
+                                </Button>
                               </td>
                             </tr>
                           );

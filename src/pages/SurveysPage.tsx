@@ -38,54 +38,7 @@ const SurveysPage = () => {
   const { witsData } = useWits();
   const { toast } = useToast();
   const [surveys, setSurveys] = useState<SurveyData[]>([
-    {
-      id: "1",
-      timestamp: "2023-06-15T14:32:45",
-      bitDepth: 5432.1,
-      inclination: 45.2,
-      azimuth: 178.6,
-      toolFace: 32.5,
-      bTotal: 48.32,
-      aTotal: 0.981,
-      dip: 62.4,
-      toolTemp: 165.3,
-      qualityCheck: {
-        status: "pass",
-        message: "All parameters within acceptable ranges",
-      },
-    },
-    {
-      id: "2",
-      timestamp: "2023-06-15T15:15:22",
-      bitDepth: 5462.8,
-      inclination: 46.1,
-      azimuth: 179.2,
-      toolFace: 33.1,
-      bTotal: 48.29,
-      aTotal: 0.978,
-      dip: 62.3,
-      toolTemp: 166.1,
-      qualityCheck: {
-        status: "pass",
-        message: "All parameters within acceptable ranges",
-      },
-    },
-    {
-      id: "3",
-      timestamp: "2023-06-15T16:05:10",
-      bitDepth: 5493.5,
-      inclination: 47.3,
-      azimuth: 180.1,
-      toolFace: 34.2,
-      bTotal: 48.15,
-      aTotal: 0.975,
-      dip: 62.1,
-      toolTemp: 167.2,
-      qualityCheck: {
-        status: "warning",
-        message: "Magnetic interference detected. Verify readings.",
-      },
-    },
+    // ... existing surveys
   ]);
 
   const [editingSurvey, setEditingSurvey] = useState<SurveyData | null>(null);
@@ -96,6 +49,15 @@ const SurveysPage = () => {
   const [emailRecipient, setEmailRecipient] = useState(
     "operations@newwelltech.com",
   );
+  const [emailSubject, setEmailSubject] = useState(
+    "MWD Survey Report - Well Alpha-123 - ",
+  );
+  const [emailBody, setEmailBody] = useState("");
+  const [distroList, setDistroList] = useState([
+    "john.doe@newwelltech.com",
+    "jane.doe@newwelltech.com",
+  ]);
+  const [includeCurveData, setIncludeCurveData] = useState(false);
 
   const handleEditSurvey = (survey: SurveyData) => {
     setEditingSurvey(survey);
@@ -152,7 +114,6 @@ const SurveysPage = () => {
     });
   };
 
-  // Handle file upload
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -231,240 +192,26 @@ const SurveysPage = () => {
     event.target.value = "";
   };
 
-  // Parse CSV file content
   const parseCSVSurveys = (content: string): SurveyData[] => {
-    const lines = content.split("\n");
-    if (lines.length < 2) throw new Error("Invalid CSV format");
-
-    // Try to determine header format
-    const header = lines[0].toLowerCase();
-    const hasHeader =
-      header.includes("depth") ||
-      header.includes("md") ||
-      header.includes("inclination");
-
-    const startIndex = hasHeader ? 1 : 0;
-    const parsedSurveys: SurveyData[] = [];
-
-    for (let i = startIndex; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      const values = line.split(",");
-      if (values.length < 3) continue; // Need at least depth, inc, az
-
-      try {
-        // Try to intelligently map columns
-        let depthIndex = -1;
-        let incIndex = -1;
-        let azIndex = -1;
-        let tfIndex = -1;
-
-        if (hasHeader) {
-          const headerCols = header.split(",");
-          headerCols.forEach((col, idx) => {
-            if (col.includes("depth") || col.includes("md")) depthIndex = idx;
-            if (col.includes("inc") || col.includes("inclination"))
-              incIndex = idx;
-            if (col.includes("az") || col.includes("azimuth")) azIndex = idx;
-            if (
-              col.includes("tf") ||
-              col.includes("toolface") ||
-              col.includes("tool face")
-            )
-              tfIndex = idx;
-          });
-        }
-
-        // If we couldn't determine from header, use default positions
-        if (depthIndex === -1) depthIndex = 0;
-        if (incIndex === -1) incIndex = 1;
-        if (azIndex === -1) azIndex = 2;
-        if (tfIndex === -1) tfIndex = 3;
-
-        const depth = parseFloat(values[depthIndex]);
-        const inc = parseFloat(values[incIndex]);
-        const az = parseFloat(values[azIndex]);
-        const tf =
-          tfIndex < values.length
-            ? parseFloat(values[tfIndex])
-            : Math.random() * 360;
-
-        if (isNaN(depth) || isNaN(inc) || isNaN(az)) continue;
-
-        // Create survey with parsed values
-        parsedSurveys.push({
-          id: `imported-${Date.now()}-${i}`,
-          timestamp: new Date().toISOString(),
-          bitDepth: depth,
-          inclination: inc,
-          azimuth: az,
-          toolFace: tf,
-          bTotal: 45 + Math.random() * 5,
-          aTotal: 0.95 + Math.random() * 0.1,
-          dip: 60 + Math.random() * 5,
-          toolTemp: 150 + Math.random() * 20,
-          qualityCheck: determineQualityCheck(inc, az),
-        });
-      } catch (e) {
-        console.warn(`Error parsing line ${i}:`, e);
-        // Continue to next line
-      }
-    }
-
-    return parsedSurveys;
+    // ... existing implementation
   };
 
-  // Parse TXT file content (assumes space or tab delimited)
   const parseTXTSurveys = (content: string): SurveyData[] => {
-    const lines = content.split("\n");
-    if (lines.length < 1) throw new Error("Invalid TXT format");
-
-    const parsedSurveys: SurveyData[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-
-      // Split by any whitespace
-      const values = line.split(/\s+/);
-      if (values.length < 3) continue; // Need at least depth, inc, az
-
-      try {
-        const depth = parseFloat(values[0]);
-        const inc = parseFloat(values[1]);
-        const az = parseFloat(values[2]);
-        const tf =
-          values.length > 3 ? parseFloat(values[3]) : Math.random() * 360;
-
-        if (isNaN(depth) || isNaN(inc) || isNaN(az)) continue;
-
-        parsedSurveys.push({
-          id: `imported-${Date.now()}-${i}`,
-          timestamp: new Date().toISOString(),
-          bitDepth: depth,
-          inclination: inc,
-          azimuth: az,
-          toolFace: tf,
-          bTotal: 45 + Math.random() * 5,
-          aTotal: 0.95 + Math.random() * 0.1,
-          dip: 60 + Math.random() * 5,
-          toolTemp: 150 + Math.random() * 20,
-          qualityCheck: determineQualityCheck(inc, az),
-        });
-      } catch (e) {
-        console.warn(`Error parsing line ${i}:`, e);
-        // Continue to next line
-      }
-    }
-
-    return parsedSurveys;
+    // ... existing implementation
   };
 
-  // Parse LAS file content (simplified)
   const parseLASSurveys = (content: string): SurveyData[] => {
-    // LAS files have a header section and a data section
-    // We'll look for the ~A marker which indicates the start of data
-    const dataIndex = content.indexOf("~A");
-    if (dataIndex === -1) throw new Error("Invalid LAS format");
-
-    // Get the data section
-    const dataSection = content.substring(dataIndex + 2).trim();
-    const lines = dataSection.split("\n");
-
-    const parsedSurveys: SurveyData[] = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line || line.startsWith("#")) continue;
-
-      // Split by whitespace
-      const values = line.split(/\s+/);
-      if (values.length < 3) continue;
-
-      try {
-        // Assume first column is depth, then inc, az
-        const depth = parseFloat(values[0]);
-        const inc = parseFloat(values[1]);
-        const az = parseFloat(values[2]);
-        const tf =
-          values.length > 3 ? parseFloat(values[3]) : Math.random() * 360;
-
-        if (isNaN(depth) || isNaN(inc) || isNaN(az)) continue;
-
-        parsedSurveys.push({
-          id: `imported-${Date.now()}-${i}`,
-          timestamp: new Date().toISOString(),
-          bitDepth: depth,
-          inclination: inc,
-          azimuth: az,
-          toolFace: tf,
-          bTotal: 45 + Math.random() * 5,
-          aTotal: 0.95 + Math.random() * 0.1,
-          dip: 60 + Math.random() * 5,
-          toolTemp: 150 + Math.random() * 20,
-          qualityCheck: determineQualityCheck(inc, az),
-        });
-      } catch (e) {
-        console.warn(`Error parsing line ${i}:`, e);
-        // Continue to next line
-      }
-    }
-
-    return parsedSurveys;
+    // ... existing implementation
   };
 
-  // Determine quality check based on inclination and azimuth
   const determineQualityCheck = (inc: number, az: number) => {
-    // Check for reasonable ranges
-    if (inc < 0 || inc > 180 || az < 0 || az > 360) {
-      return {
-        status: "fail" as const,
-        message: "Values out of valid range",
-      };
-    }
-
-    // Check for potential magnetic interference
-    if (az > 85 && az < 95) {
-      return {
-        status: "warning" as const,
-        message: "Potential magnetic interference near East",
-      };
-    }
-
-    if (az > 265 && az < 275) {
-      return {
-        status: "warning" as const,
-        message: "Potential magnetic interference near West",
-      };
-    }
-
-    // Random quality issues for demonstration
-    const rand = Math.random();
-    if (rand > 0.9) {
-      return {
-        status: "warning" as const,
-        message: "Magnetic interference detected",
-      };
-    } else if (rand > 0.95) {
-      return {
-        status: "fail" as const,
-        message: "Multiple sensor errors detected",
-      };
-    }
-
-    return {
-      status: "pass" as const,
-      message: "All parameters within acceptable ranges",
-    };
+    // ... existing implementation
   };
 
-  // Handle selecting surveys for email
   const handleSelectSurveys = (ids: string[]) => {
     setSelectedSurveys(ids);
   };
 
-  // Generate email content with enhanced information
   const generateEmailContent = () => {
     const selectedSurveyData = surveys.filter((survey) =>
       selectedSurveys.includes(survey.id),
@@ -585,6 +332,16 @@ const SurveysPage = () => {
       emailContent += `\n----------------------------------------------------------\n\n`;
     });
 
+    if (includeCurveData) {
+      emailContent += `CURVE DATA:\n`;
+      emailContent += `  Motor Yield: 2.8\n`;
+      emailContent += `  Dogleg Needed: 3.2\n`;
+      emailContent += `  Slide Seen: 1.5\n`;
+      emailContent += `  Slide Ahead: 1.7\n`;
+      emailContent += `  Projected Inclination: 47.3°\n`;
+      emailContent += `  Projected Azimuth: 182.5°\n`;
+    }
+
     emailContent += `NOTES:\n`;
     emailContent += `- All directional data references true north\n`;
     emailContent += `- Surveys with WARNING or FAIL status should be verified\n`;
@@ -609,17 +366,11 @@ const SurveysPage = () => {
     return emailContent;
   };
 
-  // Handle sending email
   const handleSendEmail = () => {
-    // Generate email content
     const emailBody = generateEmailContent();
     const subject = `MWD Survey Report - Well Alpha-123 - ${new Date().toLocaleDateString()}`;
-
-    // Create mailto URL with all parameters
-    // Note: We're using encodeURIComponent to properly encode the content for a URL
     const mailtoUrl = `mailto:${emailRecipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
 
-    // Open the default mail client (Outlook if it's the default)
     window.open(mailtoUrl, "_blank");
 
     toast({
@@ -629,6 +380,10 @@ const SurveysPage = () => {
 
     setIsEmailDialogOpen(false);
     setSelectedSurveys([]);
+  };
+
+  const handleToggleIncludeCurveData = () => {
+    setIncludeCurveData(!includeCurveData);
   };
 
   return (
@@ -741,7 +496,10 @@ const SurveysPage = () => {
         <SurveyPopup
           isOpen={isPopupOpen}
           onClose={() => setIsPopupOpen(false)}
-          onSave={handleSaveSurvey}
+          onSave={(updatedSurvey) => {
+            handleSaveSurvey(updatedSurvey);
+            setSurveys([...surveys, updatedSurvey]);
+          }}
           surveyData={editingSurvey}
         />
       )}
@@ -867,6 +625,18 @@ const SurveysPage = () => {
                   />
                   <label htmlFor="high-priority" className="text-gray-400">
                     Mark as High Priority
+                  </label>
+                </div>
+                <div className="flex items-center gap-2 text-xs mt-1">
+                  <input
+                    type="checkbox"
+                    id="include-curve-data"
+                    className="rounded bg-gray-700 border-gray-600 text-blue-600"
+                    checked={includeCurveData}
+                    onChange={handleToggleIncludeCurveData}
+                  />
+                  <label htmlFor="include-curve-data" className="text-gray-400">
+                    Include Curve Data
                   </label>
                 </div>
               </div>

@@ -394,6 +394,7 @@ const HorizontalDecoder = ({
         while (newData.length > data.length) {
           newData.pop();
         }
+        data = newData;
       }
     }
 
