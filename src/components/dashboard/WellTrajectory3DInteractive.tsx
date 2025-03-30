@@ -285,7 +285,7 @@ const WellTrajectory3DInteractive = ({
 
       // Add glow effect
       ctx.shadowColor = "#00ffaa80";
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 1;
       ctx.fill();
       ctx.shadowBlur = 0;
 
@@ -869,7 +869,7 @@ const WellTrajectory3DInteractive = ({
     );
     ctx.lineTo(depthPoint.x, depthPoint.y);
     ctx.strokeStyle = "#aaaaaa";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 8;
     ctx.stroke();
 
     // Add glow to indicate active drilling
@@ -880,7 +880,7 @@ const WellTrajectory3DInteractive = ({
 
     // Add glow effect
     ctx.shadowColor = "#00aaff80";
-    ctx.shadowBlur = 15;
+    ctx.shadowBlur = 1;
     ctx.fill();
     ctx.shadowBlur = 0;
 
@@ -1157,7 +1157,7 @@ const WellTrajectory3DInteractive = ({
 
       // Add pulsating effect
       ctx.shadowColor = "#00aaff";
-      ctx.shadowBlur = 15;
+      ctx.shadowBlur = 1;
       ctx.beginPath();
       ctx.arc(projectedBit.x, projectedBit.y, 4, 0, Math.PI * 2);
       ctx.fill();
@@ -1316,7 +1316,7 @@ const WellTrajectory3DInteractive = ({
 
         // Add glow effect
         ctx.shadowColor = color;
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 1;
         ctx.globalAlpha = 0.7;
         ctx.fill();
         ctx.restore();
@@ -1368,7 +1368,7 @@ const WellTrajectory3DInteractive = ({
 
         // Add glow effect
         ctx.shadowColor = color;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 1;
         ctx.globalAlpha = 0.6;
         ctx.stroke();
         ctx.restore();
@@ -1434,7 +1434,7 @@ const WellTrajectory3DInteractive = ({
 
       // Add glow effect
       ctx.shadowColor = color;
-      ctx.shadowBlur = 5; // Increased blur for more dramatic effect
+      ctx.shadowBlur = 1; // Increased blur for more dramatic effect
       ctx.fill();
 
       ctx.restore();
