@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSurveys } from "@/context/SurveyContext";
 import {
   Bell,
   Settings,
@@ -50,16 +51,48 @@ const Header = ({
   onMenuToggle = () => {},
   menuOpen = false,
   profileImage,
-  wellName,
-  rigName,
+  wellName: propWellName,
+  rigName: propRigName,
 }: HeaderProps) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { userProfile } = useUser();
+  const { surveys } = useSurveys();
+
+  // State for well information
+  const [wellName, setWellName] = useState(propWellName || "Well Alpha-123");
+  const [rigName, setRigName] = useState(
+    propRigName || "Precision Drilling #42",
+  );
+  const [latestSurvey, setLatestSurvey] = useState<any>(null);
 
   // Use userProfile data if props are not provided
   const displayName =
     userName || `${userProfile.firstName} ${userProfile.lastName}`;
   const displayImage = profileImage || userProfile.profileImage;
+
+  // Update well information and latest survey when surveys change
+  useEffect(() => {
+    if (surveys.length > 0) {
+      // Sort surveys by timestamp (newest first)
+      const sortedSurveys = [...surveys].sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+
+      // Get the latest survey
+      const latest = sortedSurveys[0];
+      setLatestSurvey(latest);
+
+      // Update well name and rig name if available in the survey
+      if (latest.wellName) {
+        setWellName(latest.wellName);
+      }
+
+      if (latest.rigName) {
+        setRigName(latest.rigName);
+      }
+    }
+  }, [surveys]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -121,7 +154,14 @@ const Header = ({
           <div className="hidden md:block">
             <h1 className="text-white font-medium">New Well Technologies</h1>
             <p className="text-gray-400 text-xs">
-              {wellName || projectName} {rigName ? `- ${rigName}` : ""}
+              {wellName} {rigName ? `- ${rigName}` : ""}
+              {latestSurvey && (
+                <span className="ml-2 text-blue-400">
+                  Latest Survey:{" "}
+                  {new Date(latestSurvey.timestamp).toLocaleTimeString()} -{" "}
+                  {latestSurvey.bitDepth.toFixed(1)}ft
+                </span>
+              )}
             </p>
           </div>
         </div>
