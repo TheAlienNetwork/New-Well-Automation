@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import Navbar from "@/components/layout/Navbar";
 import StatusBar from "@/components/dashboard/StatusBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/components/ui/use-toast";
+import { useSurveys } from "@/context/SurveyContext";
+import { useWits } from "@/context/WitsContext";
 import {
   Brain,
   Mic,
@@ -25,6 +28,8 @@ import {
   Settings,
   Download,
   BarChart3,
+  X,
+  Bell,
 } from "lucide-react";
 
 interface Message {
@@ -35,7 +40,70 @@ interface Message {
   spoken?: boolean;
 }
 
+// Email utility function to generate and send automated emails
+const generateEmailContent = (survey, status) => {
+  const subject =
+    status === "warning"
+      ? `Survey Warning - Depth ${survey.bitDepth.toFixed(1)} ft`
+      : `CRITICAL: Survey Failure - Depth ${survey.bitDepth.toFixed(1)} ft`;
+
+  const body = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+      <h2 style="color: ${status === "warning" ? "#f59e0b" : "#ef4444"}; margin-top: 0;">
+        ${status === "warning" ? "Survey Warning" : "CRITICAL: Survey Failure"}
+      </h2>
+      <p><strong>Timestamp:</strong> ${new Date(survey.timestamp).toLocaleString()}</p>
+      <p><strong>Measured Depth:</strong> ${survey.bitDepth.toFixed(2)} ft</p>
+      <p><strong>Issue:</strong> ${survey.qualityCheck?.message || "Unknown issue"}</p>
+      <h3 style="margin-top: 20px;">Survey Details:</h3>
+      <ul style="padding-left: 20px;">
+        <li><strong>Inclination:</strong> ${survey.inclination?.toFixed(2)}°</li>
+        <li><strong>Azimuth:</strong> ${survey.azimuth?.toFixed(2)}°</li>
+        <li><strong>Tool Face:</strong> ${survey.toolFace?.toFixed(2)}°</li>
+        <li><strong>Tool Temp:</strong> ${survey.toolTemp?.toFixed(2)}°F</li>
+      </ul>
+      <p style="margin-top: 20px; padding: 10px; background-color: ${status === "warning" ? "#fef3c7" : "#fee2e2"}; border-radius: 4px;">
+        <strong>Action Required:</strong> Please review this survey data and take appropriate action.
+      </p>
+      <p style="font-size: 12px; color: #6b7280; margin-top: 30px; border-top: 1px solid #e5e7eb; padding-top: 10px;">
+        This is an automated message from the MWD Surface Software. Do not reply to this email.
+      </p>
+    </div>
+  `;
+
+  return { subject, body };
+};
+
+const sendAutomatedEmail = (survey, status, recipients) => {
+  const { subject, body } = generateEmailContent(survey, status);
+
+  // In a real implementation, this would call an API to send the email
+  console.log("Auto-sending email about survey issue", {
+    survey,
+    status,
+    recipients,
+    subject,
+    bodyPreview: body.substring(0, 100) + "...",
+  });
+
+  // For demonstration purposes, we'll simulate opening an email client
+  // This would be replaced with an actual API call in production
+  try {
+    const mailtoUrl = `mailto:${recipients.join(",")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.replace(/<[^>]*>/g, ""))}`;
+    // In a real implementation, we would use a server-side API instead of mailto
+    // window.open(mailtoUrl, '_blank');
+    return true;
+  } catch (error) {
+    console.error("Failed to send email:", error);
+    return false;
+  }
+};
+
 const OppSupportPage = () => {
+  const { toast } = useToast();
+  const { surveys } = useSurveys();
+  const { witsData, isConnected, isReceiving } = useWits();
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -53,6 +121,36 @@ const OppSupportPage = () => {
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState(() => {
+    // Try to load settings from localStorage
+    const savedSettings = localStorage.getItem(
+      "oppSupportNotificationSettings",
+    );
+    if (savedSettings) {
+      try {
+        return JSON.parse(savedSettings);
+      } catch (e) {
+        console.error("Failed to parse saved notification settings", e);
+      }
+    }
+    // Default settings if nothing is saved
+    return {
+      notifyOnWarning: true,
+      notifyOnFail: true,
+      autoSendEmail: false,
+      emailRecipients: ["operations@newwelltech.com"],
+    };
+  });
+  const [surveyNotifications, setSurveyNotifications] = useState<
+    {
+      id: string;
+      status: "warning" | "fail";
+      message: string;
+      timestamp: Date;
+      acknowledged: boolean;
+    }[]
+  >([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
 
@@ -84,6 +182,86 @@ const OppSupportPage = () => {
       }
     };
   }, []);
+
+  // Monitor surveys for warnings and failures
+  useEffect(() => {
+    if (surveys.length === 0) return;
+
+    // Check the most recent survey for warnings or failures
+    const latestSurvey = surveys[0];
+
+    if (!latestSurvey.qualityCheck) return;
+
+    const { status, message } = latestSurvey.qualityCheck;
+
+    // Only process warning or fail statuses
+    if (status !== "warning" && status !== "fail") return;
+
+    // Check if we already have a notification for this survey
+    const existingNotification = surveyNotifications.find(
+      (n) => n.id === latestSurvey.id,
+    );
+    if (existingNotification) return;
+
+    // Add new notification
+    const newNotification = {
+      id: latestSurvey.id,
+      status: status as "warning" | "fail",
+      message,
+      timestamp: new Date(latestSurvey.timestamp),
+      acknowledged: false,
+    };
+
+    setSurveyNotifications((prev) => [newNotification, ...prev]);
+
+    // Show toast notification
+    if (
+      (status === "warning" && notificationSettings.notifyOnWarning) ||
+      (status === "fail" && notificationSettings.notifyOnFail)
+    ) {
+      toast({
+        title: status === "warning" ? "Survey Warning" : "Survey Failure",
+        description: message,
+        variant: status === "warning" ? "default" : "destructive",
+      });
+
+      // Add AI message about the survey issue
+      const aiMessage = {
+        id: Date.now().toString(),
+        type: "ai" as const,
+        text: `Alert: ${status === "warning" ? "Warning" : "Critical issue"} detected in recent survey at depth ${latestSurvey.bitDepth.toFixed(1)} ft. ${message} Would you like me to analyze this further?`,
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
+
+      // Speak the alert if voice is enabled
+      if (voiceEnabled) {
+        speakText(aiMessage.text);
+      }
+
+      // Auto-send email if enabled and it's a failure or warning based on settings
+      if (
+        (status === "fail" &&
+          notificationSettings.notifyOnFail &&
+          notificationSettings.autoSendEmail) ||
+        (status === "warning" &&
+          notificationSettings.notifyOnWarning &&
+          notificationSettings.autoSendEmail)
+      ) {
+        // Generate and send the email
+        sendAutomatedEmail(
+          latestSurvey,
+          status,
+          notificationSettings.emailRecipients,
+        );
+        toast({
+          title: "Email Sent",
+          description: `Notification email sent to ${notificationSettings.emailRecipients.join(", ")}`,
+        });
+      }
+    }
+  }, [surveys, notificationSettings, voiceEnabled]);
 
   // Update speech synthesis settings when they change
   useEffect(() => {
@@ -228,6 +406,47 @@ const OppSupportPage = () => {
     setVoiceEnabled(!voiceEnabled);
   };
 
+  // Handle acknowledging a notification
+  const acknowledgeNotification = (id: string) => {
+    setSurveyNotifications((prev) =>
+      prev.map((notification) =>
+        notification.id === id
+          ? { ...notification, acknowledged: true }
+          : notification,
+      ),
+    );
+
+    toast({
+      title: "Notification Acknowledged",
+      description: "The survey issue has been marked as acknowledged.",
+    });
+  };
+
+  // Handle updating notification settings
+  const updateNotificationSettings = useCallback(
+    (setting: string, value: any) => {
+      setNotificationSettings((prev) => {
+        const newSettings = {
+          ...prev,
+          [setting]: value,
+        };
+
+        // Save to localStorage
+        try {
+          localStorage.setItem(
+            "oppSupportNotificationSettings",
+            JSON.stringify(newSettings),
+          );
+        } catch (e) {
+          console.error("Failed to save notification settings", e);
+        }
+
+        return newSettings;
+      });
+    },
+    [],
+  );
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200">
       <Navbar />
@@ -300,6 +519,74 @@ const OppSupportPage = () => {
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-gray-800">
+                  {/* Survey Notifications */}
+                  {surveyNotifications.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-gray-400 mb-2">
+                          Survey Alerts
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="bg-red-900/30 text-red-400 border-red-800"
+                        >
+                          {
+                            surveyNotifications.filter((n) => !n.acknowledged)
+                              .length
+                          }
+                        </Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {surveyNotifications
+                          .filter((n) => !n.acknowledged)
+                          .slice(0, 3)
+                          .map((notification) => (
+                            <div
+                              key={notification.id}
+                              className={`p-2 rounded-md border ${notification.status === "warning" ? "bg-yellow-900/20 border-yellow-800" : "bg-red-900/20 border-red-800"}`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <p
+                                    className={`text-xs font-medium ${notification.status === "warning" ? "text-yellow-400" : "text-red-400"}`}
+                                  >
+                                    {notification.status === "warning"
+                                      ? "Warning"
+                                      : "Critical Issue"}
+                                  </p>
+                                  <p className="text-xs text-gray-300 mt-1">
+                                    {notification.message}
+                                  </p>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs"
+                                  onClick={() =>
+                                    acknowledgeNotification(notification.id)
+                                  }
+                                >
+                                  Ack
+                                </Button>
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {notification.timestamp.toLocaleTimeString()}
+                              </p>
+                            </div>
+                          ))}
+                        {surveyNotifications.filter((n) => !n.acknowledged)
+                          .length > 3 && (
+                          <p className="text-xs text-gray-500 text-center">
+                            +
+                            {surveyNotifications.filter((n) => !n.acknowledged)
+                              .length - 3}{" "}
+                            more alerts
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="text-sm text-gray-400 mb-2">
                     Suggested Questions
                   </div>
@@ -328,6 +615,124 @@ const OppSupportPage = () => {
                       setActiveTopic("performance");
                     }}
                   />
+                </div>
+
+                {/* Notification Settings */}
+                <div className="mt-4 pt-4 border-t border-gray-800">
+                  <div className="text-sm text-gray-400 mb-2">
+                    Notifications
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label
+                        htmlFor="notify-warning"
+                        className="text-xs text-gray-400"
+                      >
+                        Notify on Warning
+                      </Label>
+                      <Switch
+                        id="notify-warning"
+                        checked={notificationSettings.notifyOnWarning}
+                        onCheckedChange={(checked) =>
+                          updateNotificationSettings("notifyOnWarning", checked)
+                        }
+                        className="data-[state=checked]:bg-yellow-600"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Label
+                        htmlFor="notify-fail"
+                        className="text-xs text-gray-400"
+                      >
+                        Notify on Failure
+                      </Label>
+                      <Switch
+                        id="notify-fail"
+                        checked={notificationSettings.notifyOnFail}
+                        onCheckedChange={(checked) =>
+                          updateNotificationSettings("notifyOnFail", checked)
+                        }
+                        className="data-[state=checked]:bg-red-600"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Label
+                        htmlFor="auto-email"
+                        className="text-xs text-gray-400"
+                      >
+                        Auto-send Email
+                      </Label>
+                      <Switch
+                        id="auto-email"
+                        checked={notificationSettings.autoSendEmail}
+                        onCheckedChange={(checked) =>
+                          updateNotificationSettings("autoSendEmail", checked)
+                        }
+                        className="data-[state=checked]:bg-blue-600"
+                      />
+                    </div>
+
+                    {notificationSettings.autoSendEmail && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center">
+                          <Input
+                            placeholder="Add email recipient"
+                            className="text-xs h-7 bg-gray-800 border-gray-700 text-gray-200"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && e.currentTarget.value) {
+                                const email = e.currentTarget.value.trim();
+                                if (
+                                  email &&
+                                  !notificationSettings.emailRecipients.includes(
+                                    email,
+                                  )
+                                ) {
+                                  updateNotificationSettings(
+                                    "emailRecipients",
+                                    [
+                                      ...notificationSettings.emailRecipients,
+                                      email,
+                                    ],
+                                  );
+                                  e.currentTarget.value = "";
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1 max-h-20 overflow-y-auto">
+                          {notificationSettings.emailRecipients.map(
+                            (email, index) => (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between text-xs bg-gray-800/50 p-1 rounded"
+                              >
+                                <span className="text-gray-300">{email}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 text-gray-400 hover:text-red-400"
+                                  onClick={() => {
+                                    updateNotificationSettings(
+                                      "emailRecipients",
+                                      notificationSettings.emailRecipients.filter(
+                                        (_, i) => i !== index,
+                                      ),
+                                    );
+                                  }}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Voice Settings */}

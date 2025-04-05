@@ -7,6 +7,7 @@ import SurveyPopup from "@/components/dashboard/SurveyPopup";
 import SurveyEmailSettings from "@/components/dashboard/SurveyEmailSettings";
 import SurveyImport from "@/components/dashboard/SurveyImport";
 import CurveDataWidget from "@/components/dashboard/CurveDataWidget";
+import WellInformationWidget from "@/components/dashboard/WellInformationWidget";
 import { SurveyData } from "@/components/dashboard/SurveyPopup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,13 +34,20 @@ import {
   Info,
 } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
+import { useSurveys } from "@/context/SurveyContext";
 
 const SurveysPage = () => {
   const { witsData } = useWits();
   const { toast } = useToast();
-  const [surveys, setSurveys] = useState<SurveyData[]>([
-    // ... existing surveys
-  ]);
+  const { surveys, addSurvey, updateSurvey, deleteSurvey, exportSurveys } =
+    useSurveys();
+
+  // Well information state
+  const [wellInfo, setWellInfo] = useState({
+    wellName: "Alpha-123",
+    rigName: "Precision Drilling #42",
+    sensorOffset: 0,
+  });
 
   const [editingSurvey, setEditingSurvey] = useState<SurveyData | null>(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
@@ -65,7 +73,7 @@ const SurveysPage = () => {
   };
 
   const handleDeleteSurvey = (id: string) => {
-    setSurveys(surveys.filter((survey) => survey.id !== id));
+    deleteSurvey(id);
     toast({
       title: "Survey Deleted",
       description: "The survey has been removed from the database.",
@@ -76,18 +84,14 @@ const SurveysPage = () => {
   const handleSaveSurvey = (updatedSurvey: SurveyData) => {
     if (editingSurvey) {
       // Update existing survey
-      setSurveys(
-        surveys.map((survey) =>
-          survey.id === updatedSurvey.id ? updatedSurvey : survey,
-        ),
-      );
+      updateSurvey(updatedSurvey);
       toast({
         title: "Survey Updated",
         description: `Survey at ${new Date(updatedSurvey.timestamp).toLocaleString()} has been updated.`,
       });
     } else {
       // Add new survey
-      setSurveys([...surveys, updatedSurvey]);
+      addSurvey(updatedSurvey);
       toast({
         title: "Survey Added",
         description: `New survey at ${new Date(updatedSurvey.timestamp).toLocaleString()} has been added.`,
@@ -98,7 +102,7 @@ const SurveysPage = () => {
   };
 
   const handleExportSurveys = () => {
-    console.log("Exporting surveys...");
+    exportSurveys();
     toast({
       title: "Surveys Exported",
       description: "Survey data has been exported to CSV format.",
@@ -106,7 +110,7 @@ const SurveysPage = () => {
   };
 
   const handleImportSurveys = (importedSurveys: SurveyData[]) => {
-    setSurveys([...surveys, ...importedSurveys]);
+    importedSurveys.forEach((survey) => addSurvey(survey));
     setIsImportOpen(false);
     toast({
       title: "Surveys Imported",
@@ -155,7 +159,7 @@ const SurveysPage = () => {
 
         // Add the parsed surveys
         if (parsedSurveys.length > 0) {
-          setSurveys([...parsedSurveys, ...surveys]);
+          parsedSurveys.forEach((survey) => addSurvey(survey));
           toast({
             title: "File Processed Successfully",
             description: `${parsedSurveys.length} surveys have been imported.`,
@@ -404,6 +408,8 @@ const SurveysPage = () => {
                     id: Date.now().toString(),
                     timestamp: new Date().toISOString(),
                     bitDepth: witsData.bitDepth,
+                    measuredDepth: witsData.bitDepth - wellInfo.sensorOffset,
+                    sensorOffset: wellInfo.sensorOffset,
                     inclination: witsData.inclination,
                     azimuth: witsData.azimuth,
                     toolFace: witsData.toolFace,
@@ -411,13 +417,20 @@ const SurveysPage = () => {
                     aTotal: witsData.gravity,
                     dip: witsData.dip,
                     toolTemp: witsData.toolTemp,
+                    wellName: wellInfo.wellName,
+                    rigName: wellInfo.rigName,
                     qualityCheck: {
                       status: "pass",
                       message: "All parameters within acceptable ranges",
                     },
                   };
-                  setEditingSurvey(newSurvey);
-                  setIsPopupOpen(true);
+                  // Set as new survey (not editing an existing one)
+                  setEditingSurvey(null);
+                  // Then set the new survey data and open the popup
+                  setTimeout(() => {
+                    setEditingSurvey(newSurvey);
+                    setIsPopupOpen(true);
+                  }, 0);
                 }}
               >
                 Take New Survey
@@ -455,10 +468,29 @@ const SurveysPage = () => {
 
             {/* Right Column */}
             <div className="lg:col-span-1 space-y-6">
+              {/* Well Information Widget */}
+              <div className="h-[250px] mb-6">
+                <WellInformationWidget
+                  wellName={wellInfo.wellName}
+                  rigName={wellInfo.rigName}
+                  sensorOffset={wellInfo.sensorOffset}
+                  onUpdate={(data) => {
+                    setWellInfo(data);
+                    toast({
+                      title: "Well Information Updated",
+                      description:
+                        "Well information has been updated successfully.",
+                    });
+                  }}
+                />
+              </div>
+
               {/* Email Settings */}
               <SurveyEmailSettings
                 emailEnabled={false}
                 onToggleEmail={() => {}}
+                wellName={wellInfo.wellName}
+                rigName={wellInfo.rigName}
               />
 
               {/* Curve Data Widget */}
@@ -498,7 +530,6 @@ const SurveysPage = () => {
           onClose={() => setIsPopupOpen(false)}
           onSave={(updatedSurvey) => {
             handleSaveSurvey(updatedSurvey);
-            setSurveys([...surveys, updatedSurvey]);
           }}
           surveyData={editingSurvey}
         />

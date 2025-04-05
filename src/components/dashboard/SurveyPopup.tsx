@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useSurveys } from "@/context/SurveyContext";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +18,8 @@ export interface SurveyData {
   id: string;
   timestamp: string;
   bitDepth: number;
+  measuredDepth?: number; // Added for calculated MD (Bit Depth - Offset)
+  sensorOffset?: number; // Added for sensor offset
   inclination: number;
   azimuth: number;
   toolFace: number;
@@ -29,6 +32,8 @@ export interface SurveyData {
     message: string;
     details?: string;
   };
+  wellName?: string; // Added for well information
+  rigName?: string; // Added for rig information
 }
 
 interface SurveyPopupProps {
@@ -44,19 +49,47 @@ const SurveyPopup = ({
   onSave,
   surveyData,
 }: SurveyPopupProps) => {
+  const { addSurvey, updateSurvey } = useSurveys();
   const [editedSurvey, setEditedSurvey] = useState<SurveyData>(surveyData);
   const [activeTab, setActiveTab] = useState("data");
 
   const handleInputChange = (field: keyof SurveyData, value: any) => {
-    setEditedSurvey((prev) => ({
-      ...prev,
-      [field]: field === "bitDepth" ? parseFloat(value) : value,
-    }));
+    setEditedSurvey((prev) => {
+      const updatedSurvey = {
+        ...prev,
+        [field]:
+          field === "bitDepth" || field === "sensorOffset"
+            ? parseFloat(value)
+            : value,
+      };
+
+      // Auto-calculate measured depth when bit depth or sensor offset changes
+      if (field === "bitDepth" || field === "sensorOffset") {
+        const bitDepth =
+          field === "bitDepth" ? parseFloat(value) : prev.bitDepth;
+        const sensorOffset =
+          field === "sensorOffset" ? parseFloat(value) : prev.sensorOffset || 0;
+        updatedSurvey.measuredDepth = bitDepth - sensorOffset;
+      }
+
+      return updatedSurvey;
+    });
   };
 
   const handleSave = () => {
+    // Update the survey in the global context
+    if (editedSurvey.id === surveyData.id) {
+      updateSurvey(editedSurvey);
+    } else {
+      addSurvey(editedSurvey);
+    }
+
+    // Call the local onSave handler for component-specific logic
     onSave(editedSurvey);
     onClose();
+
+    // Log confirmation that the survey was saved to the global context
+    console.log("Survey saved to global context:", editedSurvey);
   };
 
   const getQualityStatusColor = (status: string) => {
@@ -130,22 +163,58 @@ const SurveyPopup = ({
           <TabsList className="bg-gray-800">
             <TabsTrigger value="data">Survey Data</TabsTrigger>
             <TabsTrigger value="quality">Quality Check</TabsTrigger>
+            <TabsTrigger value="well">Well Info</TabsTrigger>
           </TabsList>
 
           <TabsContent value="data" className="space-y-4 mt-4">
             <div className="grid grid-cols-2 gap-6">
               <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="bitDepth">Bit Depth (ft)</Label>
+                    <Input
+                      id="bitDepth"
+                      type="number"
+                      step="0.1"
+                      value={editedSurvey.bitDepth.toFixed(2)}
+                      onChange={(e) => {
+                        handleInputChange(
+                          "bitDepth",
+                          parseFloat(e.target.value),
+                        );
+                      }}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="sensorOffset">Sensor Offset (ft)</Label>
+                    <Input
+                      id="sensorOffset"
+                      type="number"
+                      step="0.1"
+                      value={(editedSurvey.sensorOffset || 0).toFixed(2)}
+                      onChange={(e) => {
+                        handleInputChange(
+                          "sensorOffset",
+                          parseFloat(e.target.value),
+                        );
+                      }}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
+                </div>
                 <div className="space-y-2">
-                  <Label htmlFor="bitDepth">Bit Depth (ft)</Label>
+                  <Label htmlFor="measuredDepth">Measured Depth (ft)</Label>
                   <Input
-                    id="bitDepth"
+                    id="measuredDepth"
                     type="number"
                     step="0.1"
-                    value={editedSurvey.bitDepth.toFixed(2)}
-                    onChange={(e) =>
-                      handleInputChange("bitDepth", parseFloat(e.target.value))
-                    }
-                    className="bg-gray-800 border-gray-700 text-gray-200"
+                    value={(
+                      editedSurvey.measuredDepth ||
+                      editedSurvey.bitDepth - (editedSurvey.sensorOffset || 0)
+                    ).toFixed(2)}
+                    readOnly
+                    className="bg-gray-800/50 border-gray-700 text-gray-400"
                   />
                 </div>
 
@@ -277,6 +346,53 @@ const SurveyPopup = ({
                     {editedSurvey.qualityCheck.message}
                   </p>
                 </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="well" className="space-y-4 mt-4">
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="wellName">Well Name</Label>
+                  <Input
+                    id="wellName"
+                    value={editedSurvey.wellName || ""}
+                    onChange={(e) =>
+                      handleInputChange("wellName", e.target.value)
+                    }
+                    className="bg-gray-800 border-gray-700 text-gray-200"
+                    placeholder="Enter well name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="rigName">Rig Name</Label>
+                  <Input
+                    id="rigName"
+                    value={editedSurvey.rigName || ""}
+                    onChange={(e) =>
+                      handleInputChange("rigName", e.target.value)
+                    }
+                    className="bg-gray-800 border-gray-700 text-gray-200"
+                    placeholder="Enter rig name"
+                  />
+                </div>
+              </div>
+
+              <div className="p-4 bg-gray-800/30 rounded-md border border-gray-800">
+                <h3 className="text-sm font-medium text-gray-300 mb-3">
+                  Well Information
+                </h3>
+                <p className="text-xs text-gray-500 mb-2">
+                  Enter the well and rig information to be included in reports
+                  and emails. This information will be saved with the survey
+                  data.
+                </p>
+                <p className="text-xs text-gray-500">
+                  The sensor offset is used to calculate the measured depth (Bit
+                  Depth - Offset = MD).
+                </p>
               </div>
             </div>
           </TabsContent>

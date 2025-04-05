@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Navbar from "@/components/layout/Navbar";
 import StatusBar from "@/components/dashboard/StatusBar";
 import RosebudCompass from "@/components/dashboard/RosebudCompass";
@@ -9,6 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useSurveys } from "@/context/SurveyContext";
+import { useWits } from "@/context/WitsContext";
+import { SurveyData } from "@/components/dashboard/SurveyPopup";
 import {
   Layers,
   Download,
@@ -16,18 +19,30 @@ import {
   Compass,
   ArrowUp,
   Activity,
+  AlertTriangle,
 } from "lucide-react";
 
 const DirectionalPage = () => {
-  // Sample drilling data
-  const drillingData = {
-    toolFace: 45.2,
-    inclination: 32.5,
-    azimuth: 275.8,
-    magneticField: 48.2,
-    gravity: 0.98,
-    depth: 8452.6,
-  };
+  // Get survey data from context
+  const { surveys } = useSurveys();
+  // Get WITS data
+  const { isConnected, isReceiving, witsData } = useWits();
+
+  // Log surveys from context to verify they're being loaded correctly
+  useEffect(() => {
+    console.log("Surveys from context in DirectionalPage:", surveys);
+  }, [surveys]);
+
+  // State for trajectory visualization and target line
+  const [trajectoryData, setTrajectoryData] = useState([]);
+  const [targetTVD, setTargetTVD] = useState(8000);
+  const [targetVS, setTargetVS] = useState(1500);
+  const [targetInclination, setTargetInclination] = useState(35);
+  const [targetAzimuth, setTargetAzimuth] = useState(275);
+  const [showTargetInputs, setShowTargetInputs] = useState(false);
+  const [targetLineUpdated, setTargetLineUpdated] = useState(false);
+  const [aboveBelow, setAboveBelow] = useState(0);
+  const [leftRight, setLeftRight] = useState(0);
 
   // Generate dummy survey data for visualization
   const generateDummySurveys = (
@@ -86,7 +101,8 @@ const DirectionalPage = () => {
     return dummySurveys;
   };
 
-  const surveys = generateDummySurveys();
+  // Generate trajectory data for visualization
+  const dummySurveys = generateDummySurveys();
   const offsetWells = [
     {
       name: "Alpha-122",
@@ -100,11 +116,138 @@ const DirectionalPage = () => {
     },
   ];
 
+  // Calculate dogleg needed based on target line and current position
+  const calculateDoglegNeeded = () => {
+    if (!isConnected || !isReceiving) return 0;
+    if (surveys.length === 0) return 3.2; // Default value
+
+    // Get the most recent survey
+    const latestSurvey = surveys[0];
+
+    // Calculate current position
+    const currentTVD =
+      latestSurvey.bitDepth *
+      Math.cos((latestSurvey.inclination * Math.PI) / 180);
+    const horizontalDistance =
+      latestSurvey.bitDepth *
+      Math.sin((latestSurvey.inclination * Math.PI) / 180);
+    const currentVS = horizontalDistance;
+
+    // Calculate distance to target
+    const verticalDistance = targetTVD - currentTVD;
+    const horizontalDistanceToTarget = targetVS - currentVS;
+    const distanceToTarget = Math.sqrt(
+      verticalDistance * verticalDistance +
+        horizontalDistanceToTarget * horizontalDistanceToTarget,
+    );
+
+    // Calculate angle change needed
+    const angleChangeNeeded = Math.abs(
+      targetInclination - latestSurvey.inclination,
+    );
+
+    // Calculate dogleg needed (simplified)
+    const doglegNeeded = (angleChangeNeeded / distanceToTarget) * 100;
+
+    return Math.min(Math.max(doglegNeeded, 0.5), 5.0); // Limit between 0.5 and 5.0 degrees/100ft
+  };
+
+  // Calculate above/below and left/right based on target line
+  useEffect(() => {
+    if (targetLineUpdated && surveys.length > 0) {
+      // Get the most recent survey
+      const latestSurvey = surveys[0];
+
+      // Calculate current position
+      const currentTVD =
+        latestSurvey.bitDepth *
+        Math.cos((latestSurvey.inclination * Math.PI) / 180);
+      const horizontalDistance =
+        latestSurvey.bitDepth *
+        Math.sin((latestSurvey.inclination * Math.PI) / 180);
+
+      // Calculate above/below (vertical difference)
+      const aboveBelow = targetTVD - currentTVD;
+      setAboveBelow(aboveBelow);
+
+      // Calculate left/right (horizontal difference)
+      // This is a simplified calculation - in a real app, you'd need to account for azimuth
+      const currentNS =
+        horizontalDistance * Math.cos((latestSurvey.azimuth * Math.PI) / 180);
+      const currentEW =
+        horizontalDistance * Math.sin((latestSurvey.azimuth * Math.PI) / 180);
+      const targetNS = targetVS * Math.cos((targetAzimuth * Math.PI) / 180);
+      const targetEW = targetVS * Math.sin((targetAzimuth * Math.PI) / 180);
+
+      // Calculate perpendicular distance to target line
+      const leftRight = Math.sqrt(
+        Math.pow(targetNS - currentNS, 2) + Math.pow(targetEW - currentEW, 2),
+      );
+      setLeftRight(leftRight);
+    }
+  }, [
+    targetLineUpdated,
+    surveys,
+    targetTVD,
+    targetVS,
+    targetInclination,
+    targetAzimuth,
+  ]);
+
+  // Convert SurveyData to trajectory format for visualization
+  useEffect(() => {
+    if (surveys.length > 0) {
+      // Map survey data to trajectory format
+      const trajectoryPoints = surveys.map((survey) => {
+        // Calculate TVD (simplified)
+        const tvd =
+          survey.bitDepth * Math.cos((survey.inclination * Math.PI) / 180);
+
+        // Calculate NS/EW (simplified)
+        const horizontalDistance =
+          survey.bitDepth * Math.sin((survey.inclination * Math.PI) / 180);
+        const ns =
+          horizontalDistance * Math.cos((survey.azimuth * Math.PI) / 180);
+        const ew =
+          horizontalDistance * Math.sin((survey.azimuth * Math.PI) / 180);
+
+        return {
+          md: survey.bitDepth,
+          inc: survey.inclination,
+          az: survey.azimuth,
+          tvd,
+          ns,
+          ew,
+        };
+      });
+
+      setTrajectoryData(trajectoryPoints);
+    } else {
+      // Use dummy data if no surveys exist
+      setTrajectoryData(dummySurveys);
+    }
+  }, [surveys]);
+
+  // Get parameter values based on connection status
+  const getParameterValue = (value: number) => {
+    return isConnected && isReceiving ? value : 0;
+  };
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200">
       <Navbar />
       <StatusBar />
       <div className="container mx-auto px-4 py-6">
+        {/* WITS Connection Status */}
+        {!isConnected && (
+          <div className="bg-red-900/30 border-b border-red-800 px-4 py-2 text-center mb-6">
+            <p className="text-red-400 text-sm font-medium flex items-center justify-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              WITS Connection Not Established - Data shown is simulated
+            </p>
+          </div>
+        )}
+
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">Directional Drilling</h1>
           <div className="flex gap-2">
@@ -118,12 +261,152 @@ const DirectionalPage = () => {
             <Button
               variant="outline"
               className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+              onClick={() => setShowTargetInputs(!showTargetInputs)}
             >
               <Settings className="h-4 w-4 mr-2" />
-              Settings
+              Target Line
             </Button>
           </div>
         </div>
+
+        {showTargetInputs && (
+          <div className="mb-6 p-4 bg-gray-900 border border-gray-800 rounded-md">
+            <h2 className="text-lg font-medium text-gray-200 mb-4">
+              Target Line Settings
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Target TVD (ft)</label>
+                <div className="flex">
+                  <input
+                    type="number"
+                    value={targetTVD}
+                    onChange={(e) => setTargetTVD(parseFloat(e.target.value))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">Target VS (ft)</label>
+                <div className="flex">
+                  <input
+                    type="number"
+                    value={targetVS}
+                    onChange={(e) => setTargetVS(parseFloat(e.target.value))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">
+                  Target Inclination (°)
+                </label>
+                <div className="flex">
+                  <input
+                    type="number"
+                    value={targetInclination}
+                    onChange={(e) =>
+                      setTargetInclination(parseFloat(e.target.value))
+                    }
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-400">
+                  Target Azimuth (°)
+                </label>
+                <div className="flex">
+                  <input
+                    type="number"
+                    value={targetAzimuth}
+                    onChange={(e) =>
+                      setTargetAzimuth(parseFloat(e.target.value))
+                    }
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end mt-4">
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  onClick={() => {
+                    setTargetLineUpdated(true);
+                    setShowTargetInputs(false);
+                  }}
+                >
+                  Update Target Line
+                </Button>
+              </div>
+            </div>
+            <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800 rounded-md">
+              <div className="flex items-start gap-2">
+                <svg
+                  className="h-5 w-5 text-blue-400 mt-0.5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <path d="M12 16v-4"></path>
+                  <path d="M12 8h.01"></path>
+                </svg>
+                <div>
+                  <p className="text-sm text-gray-300">
+                    Target line settings will be used to calculate curve data
+                    and above/below/left/right values based on current surveys.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {targetLineUpdated && (
+          <div className="mb-6 p-4 bg-gray-900 border border-gray-800 rounded-md">
+            <h2 className="text-lg font-medium text-gray-200 mb-4">
+              Target Line Status
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
+                <div className="text-sm text-gray-400 mb-1">Above/Below</div>
+                <div
+                  className={`text-xl font-bold ${aboveBelow > 0 ? "text-red-400" : "text-green-400"}`}
+                >
+                  {aboveBelow > 0 ? "Below" : "Above"}{" "}
+                  {Math.abs(aboveBelow).toFixed(1)} ft
+                </div>
+              </div>
+              <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
+                <div className="text-sm text-gray-400 mb-1">Left/Right</div>
+                <div className="text-xl font-bold text-yellow-400">
+                  {leftRight.toFixed(1)} ft
+                </div>
+              </div>
+              <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
+                <div className="text-sm text-gray-400 mb-1">
+                  Distance to Target
+                </div>
+                <div className="text-xl font-bold text-blue-400">
+                  {Math.sqrt(
+                    aboveBelow * aboveBelow + leftRight * leftRight,
+                  ).toFixed(1)}{" "}
+                  ft
+                </div>
+              </div>
+              <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
+                <div className="text-sm text-gray-400 mb-1">Dogleg Needed</div>
+                <div className="text-xl font-bold text-purple-400">
+                  {calculateDoglegNeeded().toFixed(2)}°/100ft
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column */}
@@ -131,26 +414,26 @@ const DirectionalPage = () => {
             {/* Rosebud Compass */}
             <div className="h-[400] h-[350] h-96">
               <RosebudCompass
-                toolFace={drillingData.toolFace}
-                inclination={drillingData.inclination}
-                azimuth={drillingData.azimuth}
-                magneticField={drillingData.magneticField}
-                gravity={drillingData.gravity}
-                depth={drillingData.depth}
-                isActive={true}
+                toolFace={getParameterValue(witsData.toolFace)}
+                inclination={getParameterValue(witsData.inclination)}
+                azimuth={getParameterValue(witsData.azimuth)}
+                magneticField={getParameterValue(witsData.magneticField)}
+                gravity={getParameterValue(witsData.gravity)}
+                depth={getParameterValue(witsData.bitDepth)}
+                isActive={isConnected && isReceiving}
               />
             </div>
 
             {/* Curve Data Widget */}
             <div className="h-[250px]">
               <CurveDataWidget
-                motorYield={2.8}
-                doglegNeeded={3.2}
-                slideSeen={1.5}
-                slideAhead={1.7}
-                projectedInc={47.3}
-                projectedAz={182.5}
-                isRealtime={true}
+                motorYield={getParameterValue(witsData.motorYield)}
+                doglegNeeded={calculateDoglegNeeded()}
+                slideSeen={getParameterValue(witsData.slideSeen)}
+                slideAhead={getParameterValue(witsData.slideAhead)}
+                projectedInc={targetInclination}
+                projectedAz={targetAzimuth}
+                isRealtime={isConnected && isReceiving}
               />
             </div>
 
@@ -169,13 +452,13 @@ const DirectionalPage = () => {
                   <div className="p-2 bg-gray-800/50 rounded-md flex flex-col">
                     <span className="text-xs text-gray-500">Build Rate</span>
                     <span className="text-sm font-medium text-blue-400">
-                      2.8°/100ft
+                      {getParameterValue(witsData.motorYield).toFixed(1)}°/100ft
                     </span>
                   </div>
                   <div className="p-2 bg-gray-800/50 rounded-md flex flex-col">
                     <span className="text-xs text-gray-500">Turn Rate</span>
                     <span className="text-sm font-medium text-purple-400">
-                      1.5°/100ft
+                      {getParameterValue(1.5).toFixed(1)}°/100ft
                     </span>
                   </div>
                   <div className="p-2 bg-gray-800/50 rounded-md flex flex-col">
@@ -183,7 +466,7 @@ const DirectionalPage = () => {
                       Dogleg Severity
                     </span>
                     <span className="text-sm font-medium text-yellow-400">
-                      3.2°/100ft
+                      {getParameterValue(witsData.dls).toFixed(1)}°/100ft
                     </span>
                   </div>
                   <div className="p-2 bg-gray-800/50 rounded-md flex flex-col">
@@ -191,7 +474,7 @@ const DirectionalPage = () => {
                       Toolface Offset
                     </span>
                     <span className="text-sm font-medium text-green-400">
-                      +1.2°
+                      +{getParameterValue(1.2).toFixed(1)}°
                     </span>
                   </div>
                 </div>
@@ -283,8 +566,8 @@ const DirectionalPage = () => {
                         Current Inc/Az
                       </span>
                       <span className="text-sm font-medium text-gray-300">
-                        {drillingData.inclination.toFixed(1)}° /{" "}
-                        {drillingData.azimuth.toFixed(1)}°
+                        {getParameterValue(witsData.inclination).toFixed(1)}° /{" "}
+                        {getParameterValue(witsData.azimuth).toFixed(1)}°
                       </span>
                     </div>
                   </div>
@@ -295,7 +578,8 @@ const DirectionalPage = () => {
                         Target Inc/Az
                       </span>
                       <span className="text-sm font-medium text-gray-300">
-                        35.0° / 278.5°
+                        {targetInclination.toFixed(1)}° /{" "}
+                        {targetAzimuth.toFixed(1)}°
                       </span>
                     </div>
                   </div>
@@ -306,11 +590,14 @@ const DirectionalPage = () => {
                         Recommended Nudge
                       </span>
                       <span className="text-sm font-medium text-purple-400">
-                        +2.5° / +2.7°
+                        +{getParameterValue(2.5).toFixed(1)}° / +
+                        {getParameterValue(2.7).toFixed(1)}°
                       </span>
                     </div>
                     <div className="text-xs text-gray-500">
-                      Estimated 30 ft slide @ 45° toolface
+                      Estimated 30 ft slide @{" "}
+                      {getParameterValue(witsData.toolFace).toFixed(0)}°
+                      toolface
                     </div>
                   </div>
 
@@ -320,11 +607,13 @@ const DirectionalPage = () => {
                         AI Recommendation
                       </span>
                       <span className="text-sm font-medium text-cyan-400">
-                        Slide Now
+                        {isConnected && isReceiving ? "Slide Now" : "No Data"}
                       </span>
                     </div>
                     <div className="text-xs text-gray-500">
-                      Optimal window for course correction
+                      {isConnected && isReceiving
+                        ? "Optimal window for course correction"
+                        : "Connect to WITS for recommendations"}
                     </div>
                   </div>
                 </div>
@@ -337,7 +626,9 @@ const DirectionalPage = () => {
             {/* 3D Wellbore Visualization */}
             <div className="h-[800px]">
               <WellTrajectory3DInteractive
-                surveys={surveys}
+                surveys={
+                  trajectoryData.length > 0 ? trajectoryData : dummySurveys
+                }
                 offsetWells={offsetWells}
               />
             </div>
@@ -420,28 +711,81 @@ const DirectionalPage = () => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-800">
-                          {surveys.slice(0, 10).map((survey, index) => (
-                            <tr key={index} className="hover:bg-gray-800/30">
-                              <td className="px-4 py-2 text-sm">
-                                {survey.md.toFixed(1)}
-                              </td>
-                              <td className="px-4 py-2 text-sm">
-                                {survey.inc.toFixed(2)}
-                              </td>
-                              <td className="px-4 py-2 text-sm">
-                                {survey.az.toFixed(2)}
-                              </td>
-                              <td className="px-4 py-2 text-sm">
-                                {survey.tvd.toFixed(1)}
-                              </td>
-                              <td className="px-4 py-2 text-sm">
-                                {survey.ns.toFixed(1)}
-                              </td>
-                              <td className="px-4 py-2 text-sm">
-                                {survey.ew.toFixed(1)}
-                              </td>
-                            </tr>
-                          ))}
+                          {surveys.length > 0
+                            ? // Display actual survey data from SurveyContext
+                              surveys.slice(0, 10).map((survey, index) => {
+                                // Calculate TVD (simplified)
+                                const tvd =
+                                  survey.bitDepth *
+                                  Math.cos(
+                                    (survey.inclination * Math.PI) / 180,
+                                  );
+
+                                // Calculate NS/EW (simplified)
+                                const horizontalDistance =
+                                  survey.bitDepth *
+                                  Math.sin(
+                                    (survey.inclination * Math.PI) / 180,
+                                  );
+                                const ns =
+                                  horizontalDistance *
+                                  Math.cos((survey.azimuth * Math.PI) / 180);
+                                const ew =
+                                  horizontalDistance *
+                                  Math.sin((survey.azimuth * Math.PI) / 180);
+
+                                return (
+                                  <tr
+                                    key={survey.id}
+                                    className="hover:bg-gray-800/30"
+                                  >
+                                    <td className="px-4 py-2 text-sm">
+                                      {survey.bitDepth.toFixed(1)}
+                                    </td>
+                                    <td className="px-4 py-2 text-sm">
+                                      {survey.inclination.toFixed(2)}
+                                    </td>
+                                    <td className="px-4 py-2 text-sm">
+                                      {survey.azimuth.toFixed(2)}
+                                    </td>
+                                    <td className="px-4 py-2 text-sm">
+                                      {tvd.toFixed(1)}
+                                    </td>
+                                    <td className="px-4 py-2 text-sm">
+                                      {ns.toFixed(1)}
+                                    </td>
+                                    <td className="px-4 py-2 text-sm">
+                                      {ew.toFixed(1)}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            : // Display dummy data if no surveys exist
+                              dummySurveys.slice(0, 10).map((survey, index) => (
+                                <tr
+                                  key={index}
+                                  className="hover:bg-gray-800/30"
+                                >
+                                  <td className="px-4 py-2 text-sm">
+                                    {survey.md.toFixed(1)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm">
+                                    {survey.inc.toFixed(2)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm">
+                                    {survey.az.toFixed(2)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm">
+                                    {survey.tvd.toFixed(1)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm">
+                                    {survey.ns.toFixed(1)}
+                                  </td>
+                                  <td className="px-4 py-2 text-sm">
+                                    {survey.ew.toFixed(1)}
+                                  </td>
+                                </tr>
+                              ))}
                         </tbody>
                       </table>
                     </div>
@@ -482,10 +826,12 @@ const DirectionalPage = () => {
                             Current Gamma
                           </div>
                           <div className="text-2xl font-bold text-pink-400">
-                            87.5 API
+                            {getParameterValue(witsData.gamma).toFixed(1)} API
                           </div>
                           <div className="text-xs text-gray-500">
-                            Shale formation detected
+                            {isConnected && isReceiving
+                              ? "Shale formation detected"
+                              : "No data available"}
                           </div>
                         </div>
 
@@ -494,10 +840,12 @@ const DirectionalPage = () => {
                             Formation Type
                           </div>
                           <div className="text-xl font-bold text-cyan-400">
-                            Shale
+                            {isConnected && isReceiving ? "Shale" : "Unknown"}
                           </div>
                           <div className="text-xs text-gray-500">
-                            High clay content
+                            {isConnected && isReceiving
+                              ? "High clay content"
+                              : "Connect to WITS for data"}
                           </div>
                         </div>
 
@@ -506,10 +854,14 @@ const DirectionalPage = () => {
                             Predicted Ahead
                           </div>
                           <div className="text-xl font-bold text-green-400">
-                            Sandstone
+                            {isConnected && isReceiving
+                              ? "Sandstone"
+                              : "Unknown"}
                           </div>
                           <div className="text-xs text-gray-500">
-                            Expected in ~50 ft
+                            {isConnected && isReceiving
+                              ? "Expected in ~50 ft"
+                              : "Connect to WITS for data"}
                           </div>
                         </div>
                       </div>
@@ -532,7 +884,9 @@ const DirectionalPage = () => {
                           variant="outline"
                           className="bg-yellow-900/30 text-yellow-400 border-yellow-800"
                         >
-                          Moderate Vibration
+                          {isConnected && isReceiving
+                            ? "Moderate Vibration"
+                            : "No Data"}
                         </Badge>
                       </div>
 
@@ -542,10 +896,15 @@ const DirectionalPage = () => {
                             Lateral
                           </div>
                           <div className="text-2xl font-bold text-yellow-400">
-                            42%
+                            {getParameterValue(
+                              witsData.vibration.lateral,
+                            ).toFixed(0)}
+                            %
                           </div>
                           <div className="text-xs text-gray-500">
-                            Above threshold (30%)
+                            {isConnected && isReceiving
+                              ? "Above threshold (30%)"
+                              : "No data available"}
                           </div>
                         </div>
 
@@ -554,10 +913,15 @@ const DirectionalPage = () => {
                             Axial
                           </div>
                           <div className="text-xl font-bold text-green-400">
-                            18%
+                            {getParameterValue(
+                              witsData.vibration.axial,
+                            ).toFixed(0)}
+                            %
                           </div>
                           <div className="text-xs text-gray-500">
-                            Within normal range
+                            {isConnected && isReceiving
+                              ? "Within normal range"
+                              : "No data available"}
                           </div>
                         </div>
 
@@ -566,10 +930,15 @@ const DirectionalPage = () => {
                             Torsional
                           </div>
                           <div className="text-xl font-bold text-green-400">
-                            12%
+                            {getParameterValue(
+                              witsData.vibration.torsional,
+                            ).toFixed(0)}
+                            %
                           </div>
                           <div className="text-xs text-gray-500">
-                            Within normal range
+                            {isConnected && isReceiving
+                              ? "Within normal range"
+                              : "No data available"}
                           </div>
                         </div>
                       </div>
@@ -582,9 +951,9 @@ const DirectionalPage = () => {
                               Recommendation
                             </div>
                             <div className="text-sm text-gray-300">
-                              Reduce WOB by 10% and monitor lateral vibration
-                              response. Consider adding a shock sub if vibration
-                              persists.
+                              {isConnected && isReceiving
+                                ? "Reduce WOB by 10% and monitor lateral vibration response. Consider adding a shock sub if vibration persists."
+                                : "Connect to WITS for vibration recommendations"}
                             </div>
                           </div>
                         </div>

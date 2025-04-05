@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useSurveys } from "@/context/SurveyContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +38,9 @@ interface SurveyTableProps {
   onEditSurvey: (survey: SurveyData) => void;
   onDeleteSurvey: (id: string) => void;
   onExportSurveys: () => void;
+  onSelectSurveys?: (ids: string[]) => void;
+  selectedSurveys?: string[];
+  onEmailSurveys?: () => void;
 }
 
 const SurveyTable = ({
@@ -44,7 +48,12 @@ const SurveyTable = ({
   onEditSurvey,
   onDeleteSurvey,
   onExportSurveys,
+  onSelectSurveys = () => {},
+  selectedSurveys = [],
+  onEmailSurveys = () => {},
 }: SurveyTableProps) => {
+  // We can access the global surveys here if needed
+  const { surveys: globalSurveys } = useSurveys();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("all");
 
@@ -104,15 +113,27 @@ const SurveyTable = ({
             MWD Surveys
           </CardTitle>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-              onClick={onExportSurveys}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                onClick={onExportSurveys}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+              {selectedSurveys.length > 0 && (
+                <Button
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  onClick={onEmailSurveys}
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Email ({selectedSurveys.length})
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -157,8 +178,29 @@ const SurveyTable = ({
           <Table>
             <TableHeader className="bg-gray-800/50">
               <TableRow>
+                <TableHead className="text-gray-400 w-10">
+                  <input
+                    type="checkbox"
+                    className="rounded bg-gray-700 border-gray-600 text-blue-600"
+                    checked={
+                      selectedSurveys.length > 0 &&
+                      selectedSurveys.length === surveys.length
+                    }
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        onSelectSurveys(surveys.map((s) => s.id));
+                      } else {
+                        onSelectSurveys([]);
+                      }
+                    }}
+                  />
+                </TableHead>
                 <TableHead className="text-gray-400">Time</TableHead>
-                <TableHead className="text-gray-400">Depth (ft)</TableHead>
+                <TableHead className="text-gray-400">Bit Depth (ft)</TableHead>
+                <TableHead className="text-gray-400">MD (ft)</TableHead>
+                <TableHead className="text-gray-400">
+                  Sensor Offset (ft)
+                </TableHead>
                 <TableHead className="text-gray-400">Inc (°)</TableHead>
                 <TableHead className="text-gray-400">Azi (°)</TableHead>
                 <TableHead className="text-gray-400">TF (°)</TableHead>
@@ -179,13 +221,38 @@ const SurveyTable = ({
                 filteredSurveys.map((survey) => (
                   <TableRow
                     key={survey.id}
-                    className="border-gray-800 hover:bg-gray-800/50"
+                    className={`border-gray-800 hover:bg-gray-800/50 ${selectedSurveys.includes(survey.id) ? "bg-gray-800/30" : ""}`}
                   >
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        className="rounded bg-gray-700 border-gray-600 text-blue-600"
+                        checked={selectedSurveys.includes(survey.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            onSelectSurveys([...selectedSurveys, survey.id]);
+                          } else {
+                            onSelectSurveys(
+                              selectedSurveys.filter((id) => id !== survey.id),
+                            );
+                          }
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="text-gray-300">
                       {formatTimestamp(survey.timestamp)}
                     </TableCell>
                     <TableCell className="text-gray-300 font-medium">
                       {survey.bitDepth.toFixed(2)}
+                    </TableCell>
+                    <TableCell className="text-gray-300">
+                      {(
+                        survey.measuredDepth ||
+                        survey.bitDepth - (survey.sensorOffset || 0)
+                      ).toFixed(2)}
+                    </TableCell>
+                    <TableCell className="text-gray-300">
+                      {(survey.sensorOffset || 0).toFixed(2)}
                     </TableCell>
                     <TableCell className="text-gray-300">
                       {survey.inclination.toFixed(2)}
@@ -209,20 +276,54 @@ const SurveyTable = ({
                       {survey.toolTemp.toFixed(2)}
                     </TableCell>
                     <TableCell className="text-gray-300">
-                      {(
-                        Math.sin((survey.azimuth * Math.PI) / 180) *
-                        survey.inclination *
-                        0.5
-                      ).toFixed(2)}
-                      °
+                      {(() => {
+                        // Calculate TVD
+                        const tvd =
+                          survey.bitDepth *
+                          Math.cos((survey.inclination * Math.PI) / 180);
+                        // Calculate horizontal distance
+                        const horizontalDistance =
+                          survey.bitDepth *
+                          Math.sin((survey.inclination * Math.PI) / 180);
+                        // Calculate NS/EW components
+                        const ns =
+                          horizontalDistance *
+                          Math.cos((survey.azimuth * Math.PI) / 180);
+                        const ew =
+                          horizontalDistance *
+                          Math.sin((survey.azimuth * Math.PI) / 180);
+
+                        // Calculate above/below based on target line (simplified)
+                        // Positive means above target, negative means below
+                        const aboveBelow = (ns * 0.8 - tvd * 0.2).toFixed(2);
+                        const prefix = parseFloat(aboveBelow) >= 0 ? "+" : "";
+                        return `${prefix}${aboveBelow}°`;
+                      })()}
                     </TableCell>
                     <TableCell className="text-gray-300">
-                      {(
-                        Math.cos((survey.azimuth * Math.PI) / 180) *
-                        survey.inclination *
-                        0.5
-                      ).toFixed(2)}
-                      °
+                      {(() => {
+                        // Calculate TVD
+                        const tvd =
+                          survey.bitDepth *
+                          Math.cos((survey.inclination * Math.PI) / 180);
+                        // Calculate horizontal distance
+                        const horizontalDistance =
+                          survey.bitDepth *
+                          Math.sin((survey.inclination * Math.PI) / 180);
+                        // Calculate NS/EW components
+                        const ns =
+                          horizontalDistance *
+                          Math.cos((survey.azimuth * Math.PI) / 180);
+                        const ew =
+                          horizontalDistance *
+                          Math.sin((survey.azimuth * Math.PI) / 180);
+
+                        // Calculate left/right based on target line (simplified)
+                        // Positive means right of target, negative means left
+                        const leftRight = (ew * 0.8 - tvd * 0.1).toFixed(2);
+                        const prefix = parseFloat(leftRight) >= 0 ? "+" : "";
+                        return `${prefix}${leftRight}°`;
+                      })()}
                     </TableCell>
                     <TableCell>
                       <Badge

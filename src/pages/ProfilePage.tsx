@@ -1,5 +1,5 @@
 // ProfilePage.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Navbar from "@/components/layout/Navbar";
 import StatusBar from "@/components/dashboard/StatusBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { useUser } from "@/context/UserContext";
 import {
   User,
   Mail,
@@ -39,8 +40,8 @@ interface TimeEntry {
 }
 
 const ProfilePage = () => {
+  const { userProfile, updateUserProfile, updateProfileImage } = useUser();
   const [activeTab, setActiveTab] = useState("profile");
-  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [hourlyRate, setHourlyRate] = useState(85);
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([
@@ -74,25 +75,41 @@ const ProfilePage = () => {
     description: "",
   });
 
+  // Local state to track changes before saving to context
   const [profileData, setProfileData] = useState({
-    firstName: "Tyler",
-    lastName: "Newell",
-    email: "Tyler.Newell@newwelltech.com",
-    phone: "(555) 123-4567",
-    position: "Senior MWD Engineer",
-    company: "New Well Technologies",
-    location: "Houston, TX",
-    bio: "Experienced MWD engineer with over 10 years in directional drilling operations. Specialized in high-temperature, high-pressure environments and complex well trajectories.",
-    emailSignature:
-      "Tyler Newell\nSenior MWD Engineer\nNew Well Technologies\nPhone: (555) 123-4567\nEmail: Tyler.Newell@newwelltech.com",
+    firstName: userProfile.firstName,
+    lastName: userProfile.lastName,
+    email: userProfile.email,
+    phone: userProfile.phone,
+    position: userProfile.position,
+    company: userProfile.company,
+    location: userProfile.location,
+    bio: userProfile.bio,
+    emailSignature: userProfile.emailSignature,
   });
+
+  // Update local state when userProfile changes
+  useEffect(() => {
+    setProfileData({
+      firstName: userProfile.firstName,
+      lastName: userProfile.lastName,
+      email: userProfile.email,
+      phone: userProfile.phone,
+      position: userProfile.position,
+      company: userProfile.company,
+      location: userProfile.location,
+      bio: userProfile.bio,
+      emailSignature: userProfile.emailSignature,
+    });
+  }, [userProfile]);
 
   const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        setProfileImage(event.target?.result as string);
+        const imageUrl = event.target?.result as string;
+        updateProfileImage(imageUrl);
       };
       reader.readAsDataURL(file);
     }
@@ -107,26 +124,21 @@ const ProfilePage = () => {
 
   const handleSaveProfile = () => {
     setIsEditing(false);
+
     // Update email signature with current profile data
+    const updatedEmailSignature = `${profileData.firstName} ${profileData.lastName}\n${profileData.position}\n${profileData.company}\nPhone: ${profileData.phone}\nEmail: ${profileData.email}`;
+
+    // Update local state
     setProfileData({
       ...profileData,
-      emailSignature: `${profileData.firstName} ${profileData.lastName}\n${profileData.position}\n${profileData.company}\nPhone: ${profileData.phone}\nEmail: ${profileData.email}`,
+      emailSignature: updatedEmailSignature,
     });
 
-    // Update global state (in a real app, this would use context or Redux)
-    // This is a mock implementation since we don't have access to the global state
-    try {
-      // Simulate updating global state
-      const event = new CustomEvent("profileUpdated", {
-        detail: {
-          name: `${profileData.firstName} ${profileData.lastName}`,
-          image: profileImage,
-        },
-      });
-      window.dispatchEvent(event);
-    } catch (error) {
-      console.error("Failed to update global profile state", error);
-    }
+    // Update global context
+    updateUserProfile({
+      ...profileData,
+      emailSignature: updatedEmailSignature,
+    });
   };
 
   const handleNewEntryChange = (
@@ -267,7 +279,7 @@ ${profileData.emailSignature}
                     <Avatar className="h-24 w-24 border-4 border-gray-800">
                       <AvatarImage
                         src={
-                          profileImage ||
+                          userProfile.profileImage ||
                           "https://api.dicebear.com/7.x/avataaars/svg?seed=john"
                         }
                       />

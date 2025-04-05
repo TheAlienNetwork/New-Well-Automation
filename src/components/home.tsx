@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useToast } from "@/components/ui/use-toast";
 import Navbar from "./layout/Navbar";
 import Header from "./dashboard/Header";
 import RosebudCompass from "./dashboard/RosebudCompass";
@@ -14,6 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useWits } from "@/context/WitsContext";
+import { useUser } from "@/context/UserContext";
+import { useSurveys } from "@/context/SurveyContext";
 import {
   Dialog,
   DialogContent,
@@ -29,16 +32,24 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Play, Settings, Rewind, FastForward, Save, User } from "lucide-react";
+import {
+  Play,
+  Settings,
+  Rewind,
+  FastForward,
+  Save,
+  User,
+  AlertTriangle,
+} from "lucide-react";
 
 const Home = () => {
+  const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(true);
   const [noiseFilterLevel, setNoiseFilterLevel] = useState(30);
   const [aiFilterEnabled, setAiFilterEnabled] = useState(true);
   const [showSurveyPopup, setShowSurveyPopup] = useState(false);
   const [currentSurvey, setCurrentSurvey] = useState<SurveyData | null>(null);
-  const [surveys, setSurveys] = useState<SurveyData[]>([]);
   const [showReplayStand, setShowReplayStand] = useState(false);
   const [pulseHeight, setPulseHeight] = useState(50);
   const [pulseWidth, setPulseWidth] = useState(50);
@@ -46,32 +57,22 @@ const Home = () => {
   const [currentPulseIndex, setCurrentPulseIndex] = useState(0);
   const replayIntervalRef = useRef<number | null>(null);
   const [showCustomizeDialog, setShowCustomizeDialog] = useState(false);
-  const [profileImage, setProfileImage] = useState<string | null>(null);
-  const [userName, setUserName] = useState("John Doe");
 
   // Get real-time WITS data
   const { isConnected, isReceiving, witsData } = useWits();
+
+  // Get user profile data
+  const { userProfile } = useUser();
+
+  // Get survey data
+  const { surveys, addSurvey } = useSurveys();
 
   // Handle menu toggle
   const handleMenuToggle = () => {
     setMenuOpen(!menuOpen);
   };
 
-  // Listen for profile updates
-  useEffect(() => {
-    const handleProfileUpdate = (event: any) => {
-      if (event.detail) {
-        if (event.detail.name) setUserName(event.detail.name);
-        if (event.detail.image) setProfileImage(event.detail.image);
-      }
-    };
-
-    window.addEventListener("profileUpdated", handleProfileUpdate);
-
-    return () => {
-      window.removeEventListener("profileUpdated", handleProfileUpdate);
-    };
-  }, []);
+  // No longer need to listen for profile updates as we're using the UserContext
 
   // Handle recording toggle
   const handleRecordingToggle = () => {
@@ -90,7 +91,7 @@ const Home = () => {
 
   // Generate surveys based on WITS data
   useEffect(() => {
-    if (isRecording && isReceiving) {
+    if (isRecording && isReceiving && isConnected) {
       const surveyInterval = setInterval(() => {
         // 10% chance to generate a survey when recording and receiving WITS data
         if (Math.random() < 0.1) {
@@ -100,10 +101,21 @@ const Home = () => {
 
       return () => clearInterval(surveyInterval);
     }
-  }, [isRecording, isReceiving, witsData]);
+  }, [isRecording, isReceiving, isConnected, witsData]);
 
   // Generate a new survey using WITS data
   const generateNewSurvey = () => {
+    // Only generate surveys if we have a valid WITS connection
+    if (!isConnected || !isReceiving) {
+      console.warn("Cannot generate survey: No active WITS connection");
+      toast({
+        title: "Survey Generation Failed",
+        description: "Cannot generate survey: No active WITS connection",
+        variant: "destructive",
+      });
+      return;
+    }
+
     // Create a new survey with current WITS data plus some random variation
     const newSurvey: SurveyData = {
       id: Date.now().toString(),
@@ -146,21 +158,10 @@ const Home = () => {
 
   // Handle saving a survey
   const handleSaveSurvey = (survey: SurveyData) => {
-    // Add to local surveys array
-    setSurveys([...surveys, survey]);
+    // Add to global survey context
+    addSurvey(survey);
     setShowSurveyPopup(false);
     setCurrentSurvey(null);
-
-    // Dispatch an event to notify other components that a survey was added
-    // In a real app, this would use context or Redux
-    try {
-      const event = new CustomEvent("surveyAdded", {
-        detail: { survey },
-      });
-      window.dispatchEvent(event);
-    } catch (error) {
-      console.error("Failed to dispatch survey event", error);
-    }
   };
 
   // Handle replay stand controls
@@ -215,54 +216,82 @@ const Home = () => {
     }, 3000);
   };
 
+  // Get parameter values based on connection status
+  const getParameterValue = (value: number) => {
+    return isConnected && isReceiving ? value : 0;
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
       {/* Navbar */}
       <Navbar />
       {/* Status Bar */}
       <StatusBar />
+
+      {/* WITS Connection Status */}
+      {!isConnected && (
+        <div className="bg-red-900/30 border-b border-red-800 px-4 py-2 text-center">
+          <p className="text-red-400 text-sm font-medium flex items-center justify-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            WITS Connection Not Established - Data shown is simulated
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-2 h-7 bg-red-900/50 border-red-800 hover:bg-red-800 text-red-300"
+              onClick={() => {
+                toast({
+                  title: "Connecting to WITS",
+                  description: "Attempting to establish WITS connection...",
+                });
+              }}
+            >
+              Connect
+            </Button>
+          </p>
+        </div>
+      )}
       {/* Drilling Parameters */}
       <div className="bg-gray-900 border-b border-gray-800 px-4 py-2">
         <div className="grid grid-cols-7 gap-2">
           <ParameterCard
             title="ROP"
-            value={witsData.rop}
+            value={getParameterValue(witsData.rop)}
             unit="ft/hr"
             color="green"
           />
           <ParameterCard
             title="WOB"
-            value={witsData.wob}
+            value={getParameterValue(witsData.wob)}
             unit="klbs"
             color="yellow"
           />
           <ParameterCard
             title="RPM"
-            value={witsData.rpm}
+            value={getParameterValue(witsData.rpm)}
             unit="rpm"
             color="blue"
           />
           <ParameterCard
             title="Torque"
-            value={witsData.torque}
+            value={getParameterValue(witsData.torque)}
             unit="kft-lbs"
             color="cyan"
           />
           <ParameterCard
             title="SPP"
-            value={witsData.spp}
+            value={getParameterValue(witsData.spp)}
             unit="psi"
             color="red"
           />
           <ParameterCard
             title="Flow"
-            value={witsData.flowRate}
+            value={getParameterValue(witsData.flowRate)}
             unit="gpm"
             color="purple"
           />
           <ParameterCard
             title="Hook Load"
-            value={witsData.hookLoad}
+            value={getParameterValue(witsData.hookLoad)}
             unit="klbs"
             color="orange"
           />
@@ -274,8 +303,8 @@ const Home = () => {
         menuOpen={menuOpen}
         systemStatus="online"
         notificationCount={3}
-        profileImage={profileImage}
-        userName={userName}
+        profileImage={userProfile.profileImage}
+        userName={`${userProfile.firstName} ${userProfile.lastName}`}
       />
       {/* Main content */}
       <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
@@ -296,12 +325,12 @@ const Home = () => {
             {/* Rosebud Compass */}
             <div className="grow h-[400px]">
               <RosebudCompass
-                toolFace={witsData.toolFace}
-                inclination={witsData.inclination}
-                azimuth={witsData.azimuth}
-                magneticField={witsData.magneticField}
-                gravity={witsData.gravity}
-                depth={witsData.bitDepth}
+                toolFace={getParameterValue(witsData.toolFace)}
+                inclination={getParameterValue(witsData.inclination)}
+                azimuth={getParameterValue(witsData.azimuth)}
+                magneticField={getParameterValue(witsData.magneticField)}
+                gravity={getParameterValue(witsData.gravity)}
+                depth={getParameterValue(witsData.bitDepth)}
                 isActive={isRecording && isReceiving}
               />
             </div>
@@ -314,8 +343,12 @@ const Home = () => {
                 filterLevel={70}
                 onToggleRecording={handleRecordingToggle}
                 onAdjustNoise={handleNoiseFilterChange}
-                signalStrength={witsData.signalQuality}
-                batteryLevel={witsData.batteryLevel}
+                signalStrength={
+                  isConnected && isReceiving ? witsData.signalQuality : 0
+                }
+                batteryLevel={
+                  isConnected && isReceiving ? witsData.batteryLevel : 0
+                }
                 wifiStrength={isConnected ? 90 : 0}
               />
             </div>

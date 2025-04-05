@@ -141,13 +141,23 @@ const defaultWitsData: WitsData = {
 
 const WitsContext = createContext<WitsContextType | undefined>(undefined);
 
-export const WitsProvider: React.FC<{ children: ReactNode }> = ({
-  children,
-}) => {
+// Using named function declaration instead of arrow function for better Fast Refresh support
+function WitsProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false);
   const [isReceiving, setIsReceiving] = useState(false);
   const [connectionConfig, setConnectionConfig] =
-    useState<WitsConnectionConfig>(defaultWitsConfig);
+    useState<WitsConnectionConfig>(() => {
+      // Try to load config from localStorage
+      const savedConfig = localStorage.getItem("witsConnectionConfig");
+      if (savedConfig) {
+        try {
+          return JSON.parse(savedConfig);
+        } catch (e) {
+          console.error("Failed to parse saved WITS connection config", e);
+        }
+      }
+      return defaultWitsConfig;
+    });
   const [witsData, setWitsData] = useState<WitsData>(defaultWitsData);
   const [connectionLogs, setConnectionLogs] = useState<string[]>([]);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
@@ -157,7 +167,18 @@ export const WitsProvider: React.FC<{ children: ReactNode }> = ({
 
   // Connect to WITS server
   const connect = () => {
-    if (isConnected) return;
+    if (isConnected) {
+      console.log("Already connected to WITS server");
+      return;
+    }
+
+    // Validate connection configuration
+    if (!connectionConfig.ipAddress || !connectionConfig.port) {
+      addLog(
+        "Error: Invalid connection configuration - missing IP address or port",
+      );
+      return;
+    }
 
     addLog(
       `Attempting to connect to ${connectionConfig.ipAddress}:${connectionConfig.port}`,
@@ -166,18 +187,31 @@ export const WitsProvider: React.FC<{ children: ReactNode }> = ({
     // In a real implementation, this would establish a socket connection
     // For this demo, we'll simulate a connection after a short delay
     setTimeout(() => {
-      setIsConnected(true);
-      addLog(
-        `Connection established to ${connectionConfig.ipAddress}:${connectionConfig.port}`,
-      );
-      addLog(`WITS Level ${connectionConfig.witsLevel} protocol initialized`);
+      // Simulate occasional connection failures
+      const connectionSuccess = Math.random() > 0.2; // 80% success rate
 
-      // Start receiving data after connection
-      setTimeout(() => {
-        setIsReceiving(true);
-        addLog("Started receiving data");
-        startDataSimulation();
-      }, 1000);
+      if (connectionSuccess) {
+        setIsConnected(true);
+        addLog(
+          `Connection established to ${connectionConfig.ipAddress}:${connectionConfig.port}`,
+        );
+        addLog(`WITS Level ${connectionConfig.witsLevel} protocol initialized`);
+
+        // Start receiving data after connection
+        setTimeout(() => {
+          setIsReceiving(true);
+          addLog("Started receiving data");
+          startDataSimulation();
+        }, 1000);
+      } else {
+        // Connection failed
+        addLog(
+          `Failed to connect to ${connectionConfig.ipAddress}:${connectionConfig.port}`,
+        );
+        addLog(
+          "Connection attempt failed. Please check configuration and try again.",
+        );
+      }
     }, 2000);
   };
 
@@ -200,8 +234,41 @@ export const WitsProvider: React.FC<{ children: ReactNode }> = ({
 
   // Update connection configuration
   const updateConfig = (config: Partial<WitsConnectionConfig>) => {
-    setConnectionConfig((prev) => ({ ...prev, ...config }));
+    // Validate the new configuration
+    if (
+      config.ipAddress &&
+      !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(config.ipAddress)
+    ) {
+      addLog("Warning: Invalid IP address format");
+      return;
+    }
+
+    if (config.port && (config.port < 1 || config.port > 65535)) {
+      addLog("Warning: Port number must be between 1 and 65535");
+      return;
+    }
+
+    setConnectionConfig((prev) => {
+      const newConfig = { ...prev, ...config };
+
+      // Save to localStorage for persistence
+      try {
+        localStorage.setItem("witsConnectionConfig", JSON.stringify(newConfig));
+      } catch (e) {
+        console.error("Failed to save WITS connection config", e);
+      }
+
+      return newConfig;
+    });
+
     addLog("Connection configuration updated");
+
+    // If we're already connected, warn that changes won't take effect until reconnection
+    if (isConnected) {
+      addLog(
+        "Warning: Configuration changes will take effect after reconnection",
+      );
+    }
   };
 
   // Test connection to WITS server
@@ -241,7 +308,10 @@ export const WitsProvider: React.FC<{ children: ReactNode }> = ({
     }
 
     const interval = window.setInterval(() => {
-      if (!isConnected || !isReceiving) return;
+      if (!isConnected || !isReceiving) {
+        // Don't update data if not connected
+        return;
+      }
 
       // Simulate data packet reception
       const packetSize = Math.floor(Math.random() * 200) + 100;
@@ -265,6 +335,17 @@ export const WitsProvider: React.FC<{ children: ReactNode }> = ({
 
   // Update WITS data with realistic variations
   const updateWitsData = () => {
+    // Only update data if we're connected and receiving
+    if (!isConnected || !isReceiving) {
+      // Log the reason for not updating
+      if (!isConnected) {
+        console.warn("WITS data not updated: No connection established");
+      } else if (!isReceiving) {
+        console.warn("WITS data not updated: Not receiving data");
+      }
+      return;
+    }
+
     setWitsData((prev) => {
       // Create small variations in the data
       const variation = (base: number, percent: number) => {
@@ -382,12 +463,22 @@ export const WitsProvider: React.FC<{ children: ReactNode }> = ({
             } else {
               // Reconnection failed, try again
               retryCount++;
-              attemptReconnect();
+              if (retryCount <= maxRetries) {
+                attemptReconnect();
+              } else {
+                addLog("Failed to reconnect after maximum retry attempts");
+                addLog(
+                  "Please check your connection settings and try again manually",
+                );
+                // In a real implementation, we might want to notify the user via a UI alert
+              }
             }
           }, connectionConfig.retryInterval * 1000);
         };
 
         attemptReconnect();
+      } else {
+        addLog("Auto-reconnect disabled. Please reconnect manually.");
       }
     } else {
       // Data corruption
@@ -426,12 +517,16 @@ export const WitsProvider: React.FC<{ children: ReactNode }> = ({
       {children}
     </WitsContext.Provider>
   );
-};
+}
 
-export const useWits = () => {
+// Using named function declaration instead of arrow function for better Fast Refresh support
+function useWits() {
   const context = useContext(WitsContext);
   if (context === undefined) {
     throw new Error("useWits must be used within a WitsProvider");
   }
   return context;
-};
+}
+
+// Export named functions separately for better Fast Refresh support
+export { WitsProvider, useWits };

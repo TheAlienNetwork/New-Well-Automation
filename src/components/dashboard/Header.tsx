@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Link } from "react-router-dom";
+import { useUser } from "@/context/UserContext";
 
 interface HeaderProps {
   systemStatus?: "online" | "offline" | "warning";
@@ -34,18 +36,30 @@ interface HeaderProps {
   notificationCount?: number;
   onMenuToggle?: () => void;
   menuOpen?: boolean;
+  profileImage?: string | null;
+  wellName?: string;
+  rigName?: string;
 }
 
 const Header = ({
   systemStatus = "online",
   companyName = "OilTech Solutions",
   projectName = "Well Alpha-123",
-  userName = "John Operator",
+  userName,
   notificationCount = 3,
   onMenuToggle = () => {},
   menuOpen = false,
+  profileImage,
+  wellName,
+  rigName,
 }: HeaderProps) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const { userProfile } = useUser();
+
+  // Use userProfile data if props are not provided
+  const displayName =
+    userName || `${userProfile.firstName} ${userProfile.lastName}`;
+  const displayImage = profileImage || userProfile.profileImage;
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -106,7 +120,9 @@ const Header = ({
           </div>
           <div className="hidden md:block">
             <h1 className="text-white font-medium">New Well Technologies</h1>
-            <p className="text-gray-400 text-xs">{projectName}</p>
+            <p className="text-gray-400 text-xs">
+              {wellName || projectName} {rigName ? `- ${rigName}` : ""}
+            </p>
           </div>
         </div>
       </div>
@@ -245,19 +261,31 @@ const Header = ({
               variant="ghost"
               className="text-gray-400 hover:text-white hover:bg-gray-800 flex items-center gap-2 ml-2"
             >
-              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center">
-                <User className="h-4 w-4 text-white" />
+              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center overflow-hidden">
+                {displayImage ? (
+                  <img
+                    src={displayImage}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <User className="h-4 w-4 text-white" />
+                )}
               </div>
-              <span className="hidden md:inline-block text-sm">{userName}</span>
+              <span className="hidden md:inline-block text-sm">
+                {displayName}
+              </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
             className="bg-gray-900 border-gray-800 text-gray-300"
           >
-            <DropdownMenuItem className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer">
-              Profile
-            </DropdownMenuItem>
+            <Link to="/profile">
+              <DropdownMenuItem className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer">
+                Profile
+              </DropdownMenuItem>
+            </Link>
             <DropdownMenuItem className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer">
               Preferences
             </DropdownMenuItem>
