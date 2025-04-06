@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
 import { useUser } from "@/context/UserContext";
+import { useWits } from "@/context/WitsContext";
 
 interface HeaderProps {
   systemStatus?: "online" | "offline" | "warning";
@@ -57,6 +58,7 @@ const Header = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const { userProfile } = useUser();
   const { surveys } = useSurveys();
+  const { witsData, isConnected } = useWits();
 
   // State for well information
   const [wellName, setWellName] = useState(propWellName || "Well Alpha-123");
@@ -84,15 +86,15 @@ const Header = ({
       setLatestSurvey(latest);
 
       // Update well name and rig name if available in the survey
-      if (latest.wellName) {
+      if (latest.wellName && !propWellName) {
         setWellName(latest.wellName);
       }
 
-      if (latest.rigName) {
+      if (latest.rigName && !propRigName) {
         setRigName(latest.rigName);
       }
     }
-  }, [surveys]);
+  }, [surveys, propWellName, propRigName]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -109,28 +111,20 @@ const Header = ({
   };
 
   const getStatusIcon = () => {
-    switch (systemStatus) {
-      case "online":
-        return <Wifi className="h-4 w-4 text-green-500" />;
-      case "offline":
-        return <WifiOff className="h-4 w-4 text-red-500" />;
-      case "warning":
-        return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
-      default:
-        return <Wifi className="h-4 w-4 text-green-500" />;
+    // Use actual connection status from WitsContext
+    if (isConnected) {
+      return <Wifi className="h-4 w-4 text-green-500" />;
+    } else {
+      return <WifiOff className="h-4 w-4 text-red-500" />;
     }
   };
 
   const getStatusText = () => {
-    switch (systemStatus) {
-      case "online":
-        return "System Online";
-      case "offline":
-        return "System Offline";
-      case "warning":
-        return "System Warning";
-      default:
-        return "System Online";
+    // Use actual connection status from WitsContext
+    if (isConnected) {
+      return "System Online";
+    } else {
+      return "System Offline";
     }
   };
 
@@ -160,6 +154,16 @@ const Header = ({
                   Latest Survey:{" "}
                   {new Date(latestSurvey.timestamp).toLocaleTimeString()} -{" "}
                   {latestSurvey.bitDepth.toFixed(1)}ft
+                  {latestSurvey.inclination && (
+                    <span className="ml-1">
+                      | Inc: {latestSurvey.inclination.toFixed(2)}°
+                    </span>
+                  )}
+                  {latestSurvey.azimuth && (
+                    <span className="ml-1">
+                      | Az: {latestSurvey.azimuth.toFixed(2)}°
+                    </span>
+                  )}
                 </span>
               )}
             </p>
@@ -173,6 +177,21 @@ const Header = ({
           {getStatusIcon()}
           <span className="text-sm text-gray-300">{getStatusText()}</span>
         </div>
+        {latestSurvey && (
+          <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+            <span className="text-sm text-gray-300">
+              MD: {latestSurvey.bitDepth.toFixed(1)}ft
+            </span>
+          </div>
+        )}
+        {latestSurvey && (
+          <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+            <span className="text-sm text-gray-300">
+              Inc: {latestSurvey.inclination.toFixed(2)}° | Az:{" "}
+              {latestSurvey.azimuth.toFixed(2)}°
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Right section with actions */}

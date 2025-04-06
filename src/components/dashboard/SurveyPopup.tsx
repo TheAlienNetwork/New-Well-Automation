@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useSurveys } from "@/context/SurveyContext";
 import {
   Dialog,
@@ -41,6 +41,11 @@ interface SurveyPopupProps {
   onClose: () => void;
   onSave: (survey: SurveyData) => void;
   surveyData: SurveyData;
+  wellInfo?: {
+    wellName: string;
+    rigName: string;
+    sensorOffset: number;
+  };
 }
 
 const SurveyPopup = ({
@@ -48,8 +53,9 @@ const SurveyPopup = ({
   onClose,
   onSave,
   surveyData,
+  wellInfo,
 }: SurveyPopupProps) => {
-  const { addSurvey, updateSurvey } = useSurveys();
+  const { addSurvey, updateSurvey, surveys } = useSurveys();
   const [editedSurvey, setEditedSurvey] = useState<SurveyData>(surveyData);
   const [activeTab, setActiveTab] = useState("data");
 
@@ -75,6 +81,71 @@ const SurveyPopup = ({
       return updatedSurvey;
     });
   };
+
+  // Initialize survey with latest well information if available
+  useEffect(() => {
+    // Only update if we're creating a new survey (not editing an existing one)
+    if (surveyData.id === "new") {
+      // First check if wellInfo prop is provided
+      if (wellInfo) {
+        setEditedSurvey((prev) => ({
+          ...prev,
+          wellName: wellInfo.wellName || prev.wellName,
+          rigName: wellInfo.rigName || prev.rigName,
+          sensorOffset:
+            wellInfo.sensorOffset !== undefined
+              ? wellInfo.sensorOffset
+              : prev.sensorOffset || 0,
+          // Recalculate measured depth with the new sensor offset
+          measuredDepth:
+            prev.bitDepth -
+            (wellInfo.sensorOffset !== undefined
+              ? wellInfo.sensorOffset
+              : prev.sensorOffset || 0),
+        }));
+        return;
+      }
+
+      // If no wellInfo prop, get the latest survey to check for well information
+      const latestSurveys = [...surveys].sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+
+      // Try to get well information from the latest survey
+      let surveyWellInfo = {
+        wellName: undefined,
+        rigName: undefined,
+        sensorOffset: undefined,
+      };
+
+      if (latestSurveys.length > 0) {
+        const latestSurvey = latestSurveys[0];
+        surveyWellInfo = {
+          wellName: latestSurvey.wellName,
+          rigName: latestSurvey.rigName,
+          sensorOffset: latestSurvey.sensorOffset,
+        };
+      }
+
+      // Update the survey with the well information
+      setEditedSurvey((prev) => ({
+        ...prev,
+        wellName: surveyWellInfo.wellName || prev.wellName,
+        rigName: surveyWellInfo.rigName || prev.rigName,
+        sensorOffset:
+          surveyWellInfo.sensorOffset !== undefined
+            ? surveyWellInfo.sensorOffset
+            : prev.sensorOffset || 0,
+        // Recalculate measured depth with the new sensor offset
+        measuredDepth:
+          prev.bitDepth -
+          (surveyWellInfo.sensorOffset !== undefined
+            ? surveyWellInfo.sensorOffset
+            : prev.sensorOffset || 0),
+      }));
+    }
+  }, [surveyData.id, surveys, wellInfo]);
 
   const handleSave = () => {
     // Update the survey in the global context

@@ -18,16 +18,29 @@ import {
 } from "recharts";
 import { SurveyData } from "./SurveyPopup";
 import { Brain, Download, BarChart3, TrendingUp } from "lucide-react";
+import { useSurveys } from "@/context/SurveyContext";
 
 interface SurveyAnalyticsProps {
-  surveys: SurveyData[];
+  surveys?: SurveyData[];
   onExport?: () => void;
 }
 
 const SurveyAnalytics = ({
-  surveys = [],
+  surveys: propSurveys,
   onExport = () => {},
 }: SurveyAnalyticsProps) => {
+  // Get surveys from context if not provided as props
+  const { surveys: contextSurveys, exportSurveys } = useSurveys();
+  const surveys = propSurveys || contextSurveys || [];
+
+  // Use exportSurveys from context if onExport is not provided
+  const handleExport = () => {
+    if (onExport) {
+      onExport();
+    } else {
+      exportSurveys();
+    }
+  };
   // Prepare data for charts
   const chartData = surveys
     .slice()
@@ -74,9 +87,12 @@ const SurveyAnalytics = ({
     let totalDogleg = 0;
     let totalLength = 0;
 
-    for (let i = 1; i < surveys.length; i++) {
-      const prev = surveys[i - 1];
-      const curr = surveys[i];
+    // Sort surveys by depth to ensure proper calculation
+    const sortedSurveys = [...surveys].sort((a, b) => a.bitDepth - b.bitDepth);
+
+    for (let i = 1; i < sortedSurveys.length; i++) {
+      const prev = sortedSurveys[i - 1];
+      const curr = sortedSurveys[i];
 
       // Calculate course length
       const courseLength = Math.abs(curr.bitDepth - prev.bitDepth);
@@ -127,7 +143,7 @@ const SurveyAnalytics = ({
             variant="outline"
             size="sm"
             className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-            onClick={onExport}
+            onClick={handleExport}
           >
             <Download className="h-4 w-4 mr-2" />
             Export Analysis
@@ -202,6 +218,11 @@ const SurveyAnalytics = ({
                           borderColor: "#374151",
                           color: "#e5e7eb",
                         }}
+                        formatter={(value, name) => [
+                          `${Number(value).toFixed(2)}°`,
+                          name,
+                        ]}
+                        labelFormatter={(label) => `Depth: ${label} ft`}
                       />
                       <Legend />
                       <Line
@@ -216,6 +237,7 @@ const SurveyAnalytics = ({
                           fill: "#111827",
                         }}
                         activeDot={{ r: 6, fill: "#00ffaa" }}
+                        name="Inclination"
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -256,6 +278,11 @@ const SurveyAnalytics = ({
                           borderColor: "#374151",
                           color: "#e5e7eb",
                         }}
+                        formatter={(value, name) => [
+                          `${Number(value).toFixed(2)}°`,
+                          name,
+                        ]}
+                        labelFormatter={(label) => `Depth: ${label} ft`}
                       />
                       <Legend />
                       <Line
@@ -270,6 +297,97 @@ const SurveyAnalytics = ({
                           fill: "#111827",
                         }}
                         activeDot={{ r: 6, fill: "#00aaff" }}
+                        name="Azimuth"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="h-[300px] w-full">
+                  <h3 className="text-sm font-medium text-gray-300 mb-2">
+                    Combined Directional Data
+                  </h3>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={chartData}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="depth"
+                        label={{
+                          value: "Depth (ft)",
+                          position: "insideBottomRight",
+                          offset: -5,
+                          fill: "#9ca3af",
+                        }}
+                        stroke="#6b7280"
+                      />
+                      <YAxis
+                        yAxisId="left"
+                        label={{
+                          value: "Inclination (°)",
+                          angle: -90,
+                          position: "insideLeft",
+                          fill: "#9ca3af",
+                        }}
+                        stroke="#6b7280"
+                        domain={[0, 90]}
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        label={{
+                          value: "Azimuth (°)",
+                          angle: 90,
+                          position: "insideRight",
+                          fill: "#9ca3af",
+                        }}
+                        stroke="#6b7280"
+                        domain={[0, 360]}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#1f2937",
+                          borderColor: "#374151",
+                          color: "#e5e7eb",
+                        }}
+                        formatter={(value, name) => [
+                          `${Number(value).toFixed(2)}°`,
+                          name,
+                        ]}
+                        labelFormatter={(label) => `Depth: ${label} ft`}
+                      />
+                      <Legend />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        dataKey="inclination"
+                        stroke="#00ffaa"
+                        strokeWidth={2}
+                        dot={{
+                          stroke: "#00ffaa",
+                          strokeWidth: 2,
+                          r: 4,
+                          fill: "#111827",
+                        }}
+                        activeDot={{ r: 6, fill: "#00ffaa" }}
+                        name="Inclination"
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="azimuth"
+                        stroke="#00aaff"
+                        strokeWidth={2}
+                        dot={{
+                          stroke: "#00aaff",
+                          strokeWidth: 2,
+                          r: 4,
+                          fill: "#111827",
+                        }}
+                        activeDot={{ r: 6, fill: "#00aaff" }}
+                        name="Azimuth"
                       />
                     </LineChart>
                   </ResponsiveContainer>

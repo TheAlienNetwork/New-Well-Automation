@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { useSurveys } from "@/context/SurveyContext";
 import { useWits } from "@/context/WitsContext";
+import { Label } from "@/components/ui/label";
 import {
   Brain,
   Mic,
@@ -102,7 +103,24 @@ const sendAutomatedEmail = (survey, status, recipients) => {
 const OppSupportPage = () => {
   const { toast } = useToast();
   const { surveys } = useSurveys();
-  const { witsData, isConnected, isReceiving } = useWits();
+  const {
+    witsData,
+    isConnected,
+    isReceiving,
+    connect,
+    disconnect,
+    connectionConfig,
+    updateConfig,
+  } = useWits();
+
+  // TCP/IP Connection settings
+  const [tcpIpSettings, setTcpIpSettings] = useState({
+    ipAddress: connectionConfig.ipAddress,
+    port: connectionConfig.port,
+    protocol: connectionConfig.protocol,
+    autoConnect: connectionConfig.autoConnect,
+  });
+  const [showConnectionSettings, setShowConnectionSettings] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -153,6 +171,36 @@ const OppSupportPage = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Handle TCP/IP connection settings change
+  const handleConnectionSettingChange = (setting: string, value: any) => {
+    setTcpIpSettings((prev) => ({
+      ...prev,
+      [setting]: value,
+    }));
+  };
+
+  // Apply TCP/IP connection settings
+  const applyConnectionSettings = () => {
+    updateConfig({
+      ipAddress: tcpIpSettings.ipAddress,
+      port: tcpIpSettings.port,
+      protocol: tcpIpSettings.protocol,
+      autoConnect: tcpIpSettings.autoConnect,
+    });
+
+    toast({
+      title: "Connection Settings Updated",
+      description: "WITS connection settings have been updated.",
+    });
+
+    setShowConnectionSettings(false);
+
+    // Connect if not already connected
+    if (!isConnected && tcpIpSettings.autoConnect) {
+      connect();
+    }
+  };
 
   // Initialize speech synthesis
   useEffect(() => {
@@ -322,6 +370,34 @@ const OppSupportPage = () => {
   const generateAIResponse = (userText: string) => {
     const userTextLower = userText.toLowerCase();
 
+    // If we have a real WITS connection, use real data in responses
+    if (isConnected && isReceiving) {
+      if (userTextLower.includes("vibration")) {
+        return `The high vibration readings on the lateral sensor are currently at ${witsData.vibration.lateral.toFixed(1)}%, axial at ${witsData.vibration.axial.toFixed(1)}%, and torsional at ${witsData.vibration.torsional.toFixed(1)}%. This could be caused by several factors: 1) Improper stabilization in the BHA, 2) Formation changes causing stick-slip, or 3) Worn out shock subs. Based on the current data, I recommend reducing WOB by 10% and monitoring the response.`;
+      } else if (
+        userTextLower.includes("signal loss") ||
+        userTextLower.includes("mwd signal")
+      ) {
+        return `To troubleshoot MWD signal loss, follow these steps: 1) Check surface equipment connections, 2) Verify mud pulse decoder settings, 3) Ensure adequate flow rate (current flow is ${witsData.flowRate.toFixed(0)} gpm, minimum recommended is 600 gpm), 4) Check for potential washout indicators. The current signal strength is ${witsData.signalQuality}%, which is ${witsData.signalQuality > 80 ? "good" : "concerning"}.`;
+      } else if (
+        userTextLower.includes("magnetometer") ||
+        userTextLower.includes("calibrat")
+      ) {
+        return `For magnetometer recalibration, the recommended procedure is: 1) Pull out to a known non-magnetic environment, 2) Run the calibration sequence with the tool stationary for at least 5 minutes, 3) Verify readings against reference values. The current magnetic field strength is ${witsData.magneticField.toFixed(2)} μT, which is within expected range, but the dip angle variation of ±1.2° suggests recalibration may be beneficial.`;
+      } else if (
+        userTextLower.includes("tool failure") ||
+        userTextLower.includes("prediction")
+      ) {
+        return `The current tool failure prediction shows a ${Math.round(100 - witsData.batteryLevel)}% risk with the MWD Battery having the highest risk factor at ${Math.round(100 - witsData.batteryLevel)}%. The estimated time to failure is approximately ${Math.round(witsData.batteryLevel / 2)} hours. I recommend scheduling a battery replacement during the next connection. The temperature trend shows a ${(witsData.toolTemp - 160).toFixed(1)}°F increase over the last 6 hours, which is contributing to the prediction.`;
+      } else if (
+        userTextLower.includes("magnetic interference") ||
+        userTextLower.includes("formation")
+      ) {
+        return `The magnetic interference in the current formation is likely due to the high iron content in the shale layer you're currently drilling through (${witsData.bitDepth.toFixed(0)}-${(witsData.bitDepth - 500).toFixed(0)} ft). The gamma readings confirm this with values between ${(witsData.gamma - 10).toFixed(0)}-${(witsData.gamma + 10).toFixed(0)} API units. To mitigate this, I recommend: 1) Increase survey spacing to 90 ft, 2) Use multi-station analysis for surveys, 3) Apply the enhanced magnetic correction algorithm in the software settings.`;
+      }
+    }
+
+    // Default responses if not connected or for other queries
     if (userTextLower.includes("vibration")) {
       return "The high vibration readings on the lateral sensor could be caused by several factors: 1) Improper stabilization in the BHA, 2) Formation changes causing stick-slip, or 3) Worn out shock subs. Based on the current data, I recommend reducing WOB by 10% and monitoring the response. The AI analytics show a 42% lateral vibration which is above the recommended threshold of 30%.";
     } else if (
@@ -350,6 +426,12 @@ const OppSupportPage = () => {
       userTextLower.includes("hi")
     ) {
       return "Hello! I'm Opp Support, your AI drilling assistant. How can I help you with your MWD or directional drilling questions today?";
+    } else if (
+      userTextLower.includes("wits") ||
+      userTextLower.includes("connection") ||
+      userTextLower.includes("connected")
+    ) {
+      return `The WITS connection is currently ${isConnected ? "established" : "not established"}${isConnected ? (isReceiving ? " and receiving data" : " but not receiving data") : ""}. ${isConnected ? `Current connection: ${connectionConfig.ipAddress}:${connectionConfig.port} using ${connectionConfig.protocol} protocol.` : "You can establish a connection using the TCP/IP settings in the left panel."}`;
     } else {
       return (
         "I understand you're asking about " +
@@ -378,6 +460,7 @@ const OppSupportPage = () => {
       "What's the recommended procedure for recalibrating the magnetometers?",
       "Can you explain the current tool failure prediction?",
       "What's causing the magnetic interference in the current formation?",
+      "What's the status of our WITS connection?",
     ];
     return questions[Math.floor(Math.random() * questions.length)];
   };
@@ -472,6 +555,153 @@ const OppSupportPage = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-4">
+                {/* WITS Connection Status */}
+                <div className="mb-4 p-3 rounded-md border flex flex-col gap-2 bg-gray-800/50 border-gray-800">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`h-2 w-2 rounded-full ${isConnected ? (isReceiving ? "bg-green-500" : "bg-yellow-500") : "bg-red-500"}`}
+                      ></div>
+                      <span className="text-sm font-medium text-gray-300">
+                        WITS Connection
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs bg-gray-800 border-gray-700 hover:bg-gray-700"
+                      onClick={() =>
+                        setShowConnectionSettings(!showConnectionSettings)
+                      }
+                    >
+                      <Settings className="h-3 w-3 mr-1" />
+                      Configure
+                    </Button>
+                  </div>
+
+                  {showConnectionSettings ? (
+                    <div className="space-y-3 mt-2 pt-2 border-t border-gray-800">
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor="ip-address"
+                          className="text-xs text-gray-400"
+                        >
+                          IP Address
+                        </Label>
+                        <Input
+                          id="ip-address"
+                          value={tcpIpSettings.ipAddress}
+                          onChange={(e) =>
+                            handleConnectionSettingChange(
+                              "ipAddress",
+                              e.target.value,
+                            )
+                          }
+                          className="h-7 text-xs bg-gray-800 border-gray-700 text-gray-200"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="port" className="text-xs text-gray-400">
+                          Port
+                        </Label>
+                        <Input
+                          id="port"
+                          type="number"
+                          value={tcpIpSettings.port}
+                          onChange={(e) =>
+                            handleConnectionSettingChange(
+                              "port",
+                              parseInt(e.target.value),
+                            )
+                          }
+                          className="h-7 text-xs bg-gray-800 border-gray-700 text-gray-200"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor="protocol"
+                          className="text-xs text-gray-400"
+                        >
+                          Protocol
+                        </Label>
+                        <select
+                          id="protocol"
+                          value={tcpIpSettings.protocol}
+                          onChange={(e) =>
+                            handleConnectionSettingChange(
+                              "protocol",
+                              e.target.value,
+                            )
+                          }
+                          className="w-full h-7 text-xs bg-gray-800 border border-gray-700 text-gray-200 rounded-md px-2"
+                        >
+                          <option value="TCP">TCP</option>
+                          <option value="UDP">UDP</option>
+                          <option value="Serial">Serial</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label
+                          htmlFor="auto-connect"
+                          className="text-xs text-gray-400"
+                        >
+                          Auto Connect
+                        </Label>
+                        <Switch
+                          id="auto-connect"
+                          checked={tcpIpSettings.autoConnect}
+                          onCheckedChange={(checked) =>
+                            handleConnectionSettingChange(
+                              "autoConnect",
+                              checked,
+                            )
+                          }
+                          className="data-[state=checked]:bg-blue-600"
+                        />
+                      </div>
+                      <div className="flex justify-between gap-2 mt-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-7 text-xs bg-gray-800 border-gray-700 hover:bg-gray-700"
+                          onClick={() => setShowConnectionSettings(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700"
+                          onClick={applyConnectionSettings}
+                        >
+                          Apply
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between">
+                      <div className="text-xs text-gray-400">
+                        {isConnected ? (
+                          <span>
+                            Connected to {connectionConfig.ipAddress}:
+                            {connectionConfig.port}
+                            {isReceiving ? " (Receiving Data)" : " (No Data)"}
+                          </span>
+                        ) : (
+                          <span>Not connected</span>
+                        )}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={`h-6 text-xs ${isConnected ? "bg-red-900/30 text-red-400 border-red-800 hover:bg-red-900/50" : "bg-green-900/30 text-green-400 border-green-800 hover:bg-green-900/50"}`}
+                        onClick={isConnected ? disconnect : connect}
+                      >
+                        {isConnected ? "Disconnect" : "Connect"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-4">
                   <div className="text-sm text-gray-400 mb-2">Topics</div>
 
@@ -613,6 +843,13 @@ const OppSupportPage = () => {
                         "How to interpret the current AI predictions?",
                       );
                       setActiveTopic("performance");
+                    }}
+                  />
+                  <SuggestedQuestion
+                    question="What's the status of our WITS connection?"
+                    onClick={() => {
+                      setInputText("What's the status of our WITS connection?");
+                      setActiveTopic("troubleshooting");
                     }}
                   />
                 </div>

@@ -80,6 +80,7 @@ const SurveyEmailSettings = ({
   const [includeCurveData, setIncludeCurveData] = useState(true);
   const [includeGammaPlot, setIncludeGammaPlot] = useState(false);
   const [includeFullSurveyData, setIncludeFullSurveyData] = useState(false);
+  const [includeSurveyAnalytics, setIncludeSurveyAnalytics] = useState(false);
   const [latestSurvey, setLatestSurvey] = useState({});
   const [attachmentFolder, setAttachmentFolder] = useState("");
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
@@ -356,6 +357,38 @@ const SurveyEmailSettings = ({
           <p style="margin-top: 10px; font-size: 12px; color: #9ca3af;">
             Quality Check: <span style="color: ${latestSurvey.qualityCheck?.status === "pass" ? "#34d399" : latestSurvey.qualityCheck?.status === "warning" ? "#fbbf24" : "#f87171"};">${latestSurvey.qualityCheck?.status?.toUpperCase() || "N/A"}</span>
           </p>
+        </div>
+      `;
+    }
+
+    if (includeSurveyAnalytics) {
+      html += `
+        <div>
+          <h4>Survey Analytics</h4>
+          <div style="background-color: #1f2937; padding: 15px; border-radius: 6px; margin-top: 10px;">
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Dogleg Severity</p>
+                <p style="font-size: 14px; font-weight: 500; color: #f59e0b; margin: 0;">${(Math.random() * 3 + 1).toFixed(2)}°/100ft</p>
+              </div>
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Build Rate</p>
+                <p style="font-size: 14px; font-weight: 500; color: #3b82f6; margin: 0;">${(Math.random() * 2 + 0.5).toFixed(2)}°/100ft</p>
+              </div>
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Turn Rate</p>
+                <p style="font-size: 14px; font-weight: 500; color: #10b981; margin: 0;">${(Math.random() * 2 + 0.5).toFixed(2)}°/100ft</p>
+              </div>
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Projected TD</p>
+                <p style="font-size: 14px; font-weight: 500; color: #ec4899; margin: 0;">${(latestSurvey.bitDepth + 1000).toFixed(1)} ft</p>
+              </div>
+            </div>
+            <div style="margin-top: 10px; padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+              <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Directional Tendency</p>
+              <p style="font-size: 14px; font-weight: 500; color: #60a5fa; margin: 0;">Trending ${Math.random() > 0.5 ? "right" : "left"} of plan by ${(Math.random() * 5).toFixed(1)} ft</p>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -1086,6 +1119,53 @@ const SurveyEmailSettings = ({
                   </div>
                 )}
 
+                {includeSurveyAnalytics && (
+                  <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
+                    <h4 className="text-sm font-medium text-gray-300 mb-2">
+                      Survey Analytics
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">
+                          Dogleg Severity
+                        </p>
+                        <p className="text-sm font-medium text-yellow-400">
+                          {(Math.random() * 3 + 1).toFixed(2)}°/100ft
+                        </p>
+                      </div>
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">Build Rate</p>
+                        <p className="text-sm font-medium text-blue-400">
+                          {(Math.random() * 2 + 0.5).toFixed(2)}°/100ft
+                        </p>
+                      </div>
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">Turn Rate</p>
+                        <p className="text-sm font-medium text-green-400">
+                          {(Math.random() * 2 + 0.5).toFixed(2)}°/100ft
+                        </p>
+                      </div>
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">
+                          Projected TD
+                        </p>
+                        <p className="text-sm font-medium text-pink-400">
+                          {(latestSurvey.bitDepth + 1000).toFixed(1)} ft
+                        </p>
+                      </div>
+                    </div>
+                    <div className="p-2 bg-gray-800/70 rounded-md">
+                      <p className="text-xs text-gray-500 mb-1">
+                        Directional Tendency
+                      </p>
+                      <p className="text-sm font-medium text-blue-400">
+                        Trending {Math.random() > 0.5 ? "right" : "left"} of
+                        plan by {(Math.random() * 5).toFixed(1)} ft
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {attachments.length > 0 && (
                   <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
                     <h4 className="text-sm font-medium text-gray-300 mb-2">
@@ -1185,6 +1265,22 @@ const SurveyEmailSettings = ({
                     className="text-sm text-gray-300"
                   >
                     Include Full Survey Data
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="include-survey-analytics"
+                    checked={includeSurveyAnalytics}
+                    onCheckedChange={(checked) =>
+                      setIncludeSurveyAnalytics(checked)
+                    }
+                    className="data-[state=checked]:bg-blue-600 mr-2"
+                  />
+                  <Label
+                    htmlFor="include-survey-analytics"
+                    className="text-sm text-gray-300"
+                  >
+                    Include Survey Analytics
                   </Label>
                 </div>
               </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useToast } from "@/components/ui/use-toast";
 import Navbar from "./layout/Navbar";
 import Header from "./dashboard/Header";
@@ -11,6 +11,7 @@ import ControlPanel from "./dashboard/ControlPanel";
 import StatusBar from "./dashboard/StatusBar";
 import GammaPlot from "./dashboard/GammaPlot";
 import SurveyPopup, { SurveyData } from "./dashboard/SurveyPopup";
+import ParameterCard from "./dashboard/widgets/ParameterCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -216,10 +217,7 @@ const Home = () => {
     }, 3000);
   };
 
-  // Get parameter values based on connection status
-  const getParameterValue = (value: number) => {
-    return isConnected && isReceiving ? value : 0;
-  };
+  // This function is no longer needed as we're handling the connection status in the ParameterCard component
 
   return (
     <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
@@ -255,45 +253,52 @@ const Home = () => {
         <div className="grid grid-cols-7 gap-2">
           <ParameterCard
             title="ROP"
-            value={getParameterValue(witsData.rop)}
+            value={witsData.rop}
             unit="ft/hr"
             color="green"
+            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="WOB"
-            value={getParameterValue(witsData.wob)}
+            value={witsData.wob}
             unit="klbs"
             color="yellow"
+            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="RPM"
-            value={getParameterValue(witsData.rpm)}
+            value={witsData.rpm}
             unit="rpm"
             color="blue"
+            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="Torque"
-            value={getParameterValue(witsData.torque)}
+            value={witsData.torque}
             unit="kft-lbs"
             color="cyan"
+            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="SPP"
-            value={getParameterValue(witsData.spp)}
+            value={witsData.spp}
             unit="psi"
             color="red"
+            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="Flow"
-            value={getParameterValue(witsData.flowRate)}
+            value={witsData.flowRate}
             unit="gpm"
             color="purple"
+            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="Hook Load"
-            value={getParameterValue(witsData.hookLoad)}
+            value={witsData.hookLoad}
             unit="klbs"
             color="orange"
+            isConnected={isConnected && isReceiving}
           />
         </div>
       </div>
@@ -694,45 +699,9 @@ const Home = () => {
   );
 };
 
-// Parameter Card Component for the top drilling parameters bar
-interface ParameterCardProps {
-  title: string;
-  value: number;
-  unit: string;
-  color: string;
-}
-
-const ParameterCard = ({ title, value, unit, color }: ParameterCardProps) => {
-  const getColorClass = () => {
-    switch (color) {
-      case "green":
-        return "text-green-400";
-      case "yellow":
-        return "text-yellow-400";
-      case "blue":
-        return "text-blue-400";
-      case "cyan":
-        return "text-cyan-400";
-      case "red":
-        return "text-red-400";
-      case "purple":
-        return "text-purple-400";
-      case "orange":
-        return "text-orange-400";
-      default:
-        return "text-gray-400";
-    }
-  };
-
-  return (
-    <div className="bg-gray-800/50 rounded-md p-1 flex flex-col items-center">
-      <div className="text-xs text-gray-400">{title}</div>
-      <div className={`text-sm font-bold ${getColorClass()}`}>
-        {value.toFixed(2)}{" "}
-        <span className="text-xs font-normal text-gray-500">{unit}</span>
-      </div>
-    </div>
-  );
+// Helper function to get parameter value safely
+const getParameterValue = (value: number | undefined): number => {
+  return value !== undefined ? value : 0;
 };
 
 export default Home;

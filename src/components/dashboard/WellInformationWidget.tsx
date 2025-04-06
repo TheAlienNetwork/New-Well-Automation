@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Building2, Ruler, Save, Settings } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
 import { useUser } from "@/context/UserContext";
+import { useSurveys } from "@/context/SurveyContext";
 
 interface WellInformationWidgetProps {
   wellName?: string;
@@ -27,6 +28,7 @@ const WellInformationWidget = ({
 }: WellInformationWidgetProps) => {
   const { userProfile } = useUser();
   const { witsData } = useWits();
+  const { surveys } = useSurveys();
 
   const [wellName, setWellName] = useState(propWellName);
   const [rigName, setRigName] = useState(propRigName);
@@ -41,21 +43,66 @@ const WellInformationWidget = ({
     setSensorOffset(propSensorOffset);
   }, [propWellName, propRigName, propSensorOffset]);
 
+  // Update well information from latest survey if available
+  useEffect(() => {
+    if (surveys.length > 0 && !propWellName && !propRigName) {
+      // Sort surveys by timestamp (newest first)
+      const sortedSurveys = [...surveys].sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+
+      // Get the latest survey
+      const latestSurvey = sortedSurveys[0];
+
+      // Update well name and rig name if available in the survey
+      if (latestSurvey.wellName) {
+        setWellName(latestSurvey.wellName);
+      }
+
+      if (latestSurvey.rigName) {
+        setRigName(latestSurvey.rigName);
+      }
+
+      // Update sensor offset if available
+      if (latestSurvey.sensorOffset !== undefined) {
+        setSensorOffset(latestSurvey.sensorOffset);
+      }
+    }
+  }, [surveys, propWellName, propRigName, propSensorOffset]);
+
   const handleSave = () => {
     setIsSaving(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      if (onUpdate) {
-        onUpdate({
+    // Update well information
+    const wellInfo = {
+      wellName,
+      rigName,
+      sensorOffset,
+    };
+
+    // Call the onUpdate prop if provided
+    if (onUpdate) {
+      onUpdate(wellInfo);
+    }
+
+    // Update all surveys with the new well information
+    if (surveys.length > 0) {
+      // We can't use the hook inside a callback, so we need to use the imported function directly
+      surveys.forEach((survey) => {
+        const updatedSurvey = {
+          ...survey,
           wellName,
           rigName,
           sensorOffset,
-        });
-      }
-      setIsEditing(false);
-      setIsSaving(false);
-    }, 500);
+        };
+        // Update the survey in the context
+        updateSurvey(updatedSurvey);
+      });
+    }
+
+    setIsEditing(false);
+    setIsSaving(false);
   };
 
   return (
