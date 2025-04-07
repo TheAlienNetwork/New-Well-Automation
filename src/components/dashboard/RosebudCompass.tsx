@@ -39,16 +39,18 @@ const RosebudCompass = ({
 
   // Use WITS data if available, otherwise use props
   const toolFace =
-    propToolFace !== undefined ? propToolFace : witsData.toolFace;
+    propToolFace !== undefined ? propToolFace : witsData.toolFace || 0;
   const inclination =
-    propInclination !== undefined ? propInclination : witsData.inclination;
-  const azimuth = propAzimuth !== undefined ? propAzimuth : witsData.azimuth;
+    propInclination !== undefined ? propInclination : witsData.inclination || 0;
+  const azimuth =
+    propAzimuth !== undefined ? propAzimuth : witsData.azimuth || 0;
   const magneticField =
     propMagneticField !== undefined
       ? propMagneticField
-      : witsData.magneticField;
-  const gravity = propGravity !== undefined ? propGravity : witsData.gravity;
-  const depth = propDepth !== undefined ? propDepth : witsData.bitDepth;
+      : witsData.magneticField || 0;
+  const gravity =
+    propGravity !== undefined ? propGravity : witsData.gravity || 0;
+  const depth = propDepth !== undefined ? propDepth : witsData.bitDepth || 0;
   const isActive = propIsActive !== undefined ? propIsActive : isReceiving;
   const [rotation, setRotation] = useState(0);
 
@@ -56,10 +58,8 @@ const RosebudCompass = ({
   useEffect(() => {
     if (isActive) {
       const interval = setInterval(() => {
-        // Small random movement to simulate real-time data fluctuation
         setRotation((prev) => prev + (Math.random() * 0.4 - 0.2));
       }, 500);
-
       return () => clearInterval(interval);
     }
   }, [isActive]);
@@ -75,9 +75,10 @@ const RosebudCompass = ({
   const getAzimuthPosition = (angle: number) => {
     const radians = (angle - 90) * (Math.PI / 180);
     const radius = 100;
-    const x = radius * Math.cos(radians) + 120;
-    const y = radius * Math.sin(radians) + 120;
-    return { x, y };
+    return {
+      x: radius * Math.cos(radians) + 120,
+      y: radius * Math.sin(radians) + 120,
+    };
   };
 
   const inclinationColor = getInclinationColor();
@@ -96,7 +97,7 @@ const RosebudCompass = ({
   ];
 
   return (
-    <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden resizable">
+    <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
       <CardContent className="p-4 flex flex-col h-full">
         <div className="flex justify-between items-center mb-2">
           <div className="flex items-center gap-2">
@@ -144,19 +145,11 @@ const RosebudCompass = ({
             {/* Outer circle */}
             <div className="absolute inset-0 rounded-full border-2 border-gray-700 flex items-center justify-center">
               {/* Cardinal direction markers */}
-              {[0, 90, 180, 270].map((angle) => {
+              {cardinalDirections.map(({ label, angle }) => {
                 const radians = (angle - 90) * (Math.PI / 180);
                 const radius = 110;
                 const x = radius * Math.cos(radians) + 120;
                 const y = radius * Math.sin(radians) + 120;
-                const label =
-                  angle === 0
-                    ? "N"
-                    : angle === 90
-                      ? "E"
-                      : angle === 180
-                        ? "S"
-                        : "W";
 
                 return (
                   <div
@@ -166,41 +159,18 @@ const RosebudCompass = ({
                       left: `${x}px`,
                       top: `${y}px`,
                       transform: "translate(-50%, -50%)",
-                      color: label === "N" ? "#ff4444" : "#aaaaff",
+                      color:
+                        label === "N"
+                          ? "#ff4444"
+                          : ["S", "E", "W"].includes(label)
+                            ? "#aaaaff"
+                            : "#777777",
                     }}
                   >
                     {label}
                   </div>
                 );
               })}
-              {cardinalDirections
-                .filter(({ angle }) => ![0, 90, 180, 270].includes(angle))
-                .map(({ label, angle }) => {
-                  const radians = (angle - 90) * (Math.PI / 180);
-                  const radius = 110;
-                  const x = radius * Math.cos(radians) + 120;
-                  const y = radius * Math.sin(radians) + 120;
-
-                  return (
-                    <div
-                      key={label}
-                      className="absolute text-xs font-bold"
-                      style={{
-                        left: `${x}px`,
-                        top: `${y}px`,
-                        transform: "translate(-50%, -50%)",
-                        color:
-                          label === "N"
-                            ? "#ff4444"
-                            : label === "S" || label === "E" || label === "W"
-                              ? "#aaaaff"
-                              : "#777777",
-                      }}
-                    >
-                      {label}
-                    </div>
-                  );
-                })}
 
               {/* Degree markers */}
               {Array.from({ length: 36 }).map((_, i) => {
@@ -286,12 +256,6 @@ const RosebudCompass = ({
                 transform: "translate(-50%, -50%)",
               }}
             >
-              <div
-                className="relative w-full h-full"
-                style={{
-                  transform: `rotate(${toolFace}deg)`,
-                }}
-              ></div>
               <div className="absolute text-yellow-400 font-bold text-sm">
                 {toolFace.toFixed(1)}°
               </div>
@@ -375,11 +339,11 @@ const RosebudCompass = ({
         <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
           <div className="flex justify-between items-center p-1 rounded bg-gray-800/30">
             <span className="text-gray-500">Mag:</span>
-            <span className="text-gray-300">{magneticField} μT</span>
+            <span className="text-gray-300">{magneticField.toFixed(1)} μT</span>
           </div>
           <div className="flex justify-between items-center p-1 rounded bg-gray-800/30">
             <span className="text-gray-500">Grav:</span>
-            <span className="text-gray-300">{gravity} G</span>
+            <span className="text-gray-300">{gravity.toFixed(1)} G</span>
           </div>
           <div className="flex justify-between items-center p-1 rounded bg-gray-800/30">
             <span className="text-gray-500">Depth:</span>

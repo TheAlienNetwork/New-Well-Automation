@@ -142,9 +142,16 @@ const useWitsConnection = () => {
     );
 
     try {
-      // In a real app, you would use a proper TCP/UDP connection here
-      // For this example, we'll simulate a WebSocket connection
-      const wsUrl = `ws://${connectionConfig.ipAddress}:${connectionConfig.port}`;
+      // Determine WebSocket protocol based on current environment
+      const isLocalhost =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      const wsProtocol =
+        window.location.protocol === "https:" && !isLocalhost
+          ? "wss://"
+          : "ws://";
+      const wsUrl = `${wsProtocol}${connectionConfig.ipAddress}:${connectionConfig.port}`;
+
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -179,6 +186,8 @@ const useWitsConnection = () => {
       ws.onerror = (error) => {
         addLog(`Connection error: ${error}`);
         setConnectionStats((prev) => ({ ...prev, errors: prev.errors + 1 }));
+        setIsConnected(false);
+        setIsReceiving(false);
       };
 
       ws.onclose = () => {
