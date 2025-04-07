@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { useWits } from "@/context/WitsContext";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Wifi,
@@ -33,6 +32,275 @@ import {
   Edit,
 } from "lucide-react";
 
+// Types for WITS data and configuration
+type WitsChannel = {
+  id: number;
+  name: string;
+  witsId: number;
+  channel: number;
+  unit: string;
+  active: boolean;
+  lastValue: number;
+  lastUpdate?: Date;
+};
+
+type WitsConfig = {
+  protocol: "TCP" | "UDP" | "Serial";
+  ipAddress: string;
+  port: number;
+  witsLevel: "0" | "1" | "2";
+  autoConnect: boolean;
+  autoReconnect: boolean;
+  enableLogging: boolean;
+  logData: boolean;
+  timeout: number;
+  retryInterval: number;
+  serialPort?: string;
+  baudRate?: number;
+};
+
+type WitsRecord = {
+  [key: number]: number | string;
+  timestamp: Date;
+};
+
+// Custom hook for WITS connection
+const useWitsConnection = () => {
+  const [isConnected, setIsConnected] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
+  const [connectionLogs, setConnectionLogs] = useState<string[]>([]);
+  const [witsData, setWitsData] = useState<WitsRecord[]>([]);
+  const [rawWitsMessages, setRawWitsMessages] = useState<string[]>([]);
+  const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
+  const [connectionStats, setConnectionStats] = useState({
+    uptime: "00:00:00",
+    packetsReceived: 0,
+    dataRate: "0 KB/s",
+    errors: 0,
+  });
+
+  const [connectionConfig, setConnectionConfig] = useState<WitsConfig>({
+    protocol: "TCP",
+    ipAddress: "192.168.1.100",
+    port: 8080,
+    witsLevel: "0",
+    autoConnect: false,
+    autoReconnect: true,
+    enableLogging: true,
+    logData: true,
+    timeout: 30,
+    retryInterval: 5,
+  });
+
+  // WebSocket or TCP connection reference
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [reconnectTimer, setReconnectTimer] = useState<NodeJS.Timeout | null>(
+    null,
+  );
+  const [startTime, setStartTime] = useState<Date | null>(null);
+
+  // Add a log message
+  const addLog = (message: string) => {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] ${message}`;
+    setConnectionLogs((prev) => [logMessage, ...prev].slice(0, 1000)); // Keep last 1000 logs
+  };
+
+  // Parse WITS record (simplified for example)
+  const parseWitsRecord = (data: string): WitsRecord | null => {
+    try {
+      // Simple WITS parsing - adjust based on your actual WITS format
+      const record: WitsRecord = { timestamp: new Date() };
+
+      // Example for WITS Level 0 - adjust as needed
+      if (connectionConfig.witsLevel === "0") {
+        const items = data.split("\t");
+        for (const item of items) {
+          const [id, value] = item.split("=");
+          if (id && value) {
+            record[parseInt(id)] = parseFloat(value) || value;
+          }
+        }
+        return record;
+      }
+
+      // Add parsing for other WITS levels or WITSML as needed
+
+      return null;
+    } catch (error) {
+      addLog(`Error parsing WITS data: ${error}`);
+      return null;
+    }
+  };
+
+  // Connect to WITS server
+  const connect = () => {
+    if (isConnected) return;
+
+    addLog(
+      `Attempting to connect to ${connectionConfig.protocol}://${connectionConfig.ipAddress}:${connectionConfig.port}`,
+    );
+
+    try {
+      // In a real app, you would use a proper TCP/UDP connection here
+      // For this example, we'll simulate a WebSocket connection
+      const wsUrl = `ws://${connectionConfig.ipAddress}:${connectionConfig.port}`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        setIsConnected(true);
+        setStartTime(new Date());
+        addLog("Connection established");
+        updateUptime();
+      };
+
+      ws.onmessage = (event) => {
+        setIsReceiving(true);
+        setLastUpdateTime(new Date());
+
+        // Log raw message
+        setRawWitsMessages((prev) => [event.data, ...prev].slice(0, 1000));
+        addLog(`Received data: ${event.data.substring(0, 100)}...`);
+
+        // Parse WITS data
+        const record = parseWitsRecord(event.data);
+        if (record) {
+          setWitsData((prev) => [record, ...prev].slice(0, 1000));
+        }
+
+        // Update stats
+        setConnectionStats((prev) => ({
+          ...prev,
+          packetsReceived: prev.packetsReceived + 1,
+          dataRate: `${((prev.packetsReceived * 100) / 1024).toFixed(1)} KB/s`,
+        }));
+      };
+
+      ws.onerror = (error) => {
+        addLog(`Connection error: ${error}`);
+        setConnectionStats((prev) => ({ ...prev, errors: prev.errors + 1 }));
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        setIsReceiving(false);
+        addLog("Connection closed");
+        if (connectionConfig.autoReconnect) {
+          addLog(
+            `Attempting to reconnect in ${connectionConfig.retryInterval} seconds...`,
+          );
+          const timer = setTimeout(
+            () => connect(),
+            connectionConfig.retryInterval * 1000,
+          );
+          setReconnectTimer(timer);
+        }
+      };
+
+      setSocket(ws);
+    } catch (error) {
+      addLog(`Connection failed: ${error}`);
+      setIsConnected(false);
+      setIsReceiving(false);
+    }
+  };
+
+  // Disconnect from WITS server
+  const disconnect = () => {
+    if (!isConnected || !socket) return;
+
+    addLog("Disconnecting...");
+
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      setReconnectTimer(null);
+    }
+
+    socket.close();
+    setIsConnected(false);
+    setIsReceiving(false);
+  };
+
+  // Test connection
+  const testConnection = async (): Promise<boolean> => {
+    addLog("Testing connection...");
+    return new Promise((resolve) => {
+      // Simulate connection test
+      setTimeout(() => {
+        const success = Math.random() > 0.3; // 70% success rate for demo
+        if (success) {
+          addLog("Connection test successful");
+          resolve(true);
+        } else {
+          addLog("Connection test failed");
+          resolve(false);
+        }
+      }, 1500);
+    });
+  };
+
+  // Update configuration
+  const updateConfig = (newConfig: WitsConfig) => {
+    setConnectionConfig(newConfig);
+    addLog("Configuration updated");
+  };
+
+  // Update uptime counter
+  const updateUptime = () => {
+    if (!startTime) return;
+
+    const now = new Date();
+    const diff = now.getTime() - startTime.getTime();
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    setConnectionStats((prev) => ({
+      ...prev,
+      uptime: `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`,
+    }));
+  };
+
+  // Auto-connect on mount if configured
+  useEffect(() => {
+    if (connectionConfig.autoConnect) {
+      connect();
+    }
+
+    // Update uptime every second when connected
+    const interval = setInterval(() => {
+      if (isConnected) {
+        updateUptime();
+      }
+    }, 1000);
+
+    return () => {
+      if (socket) {
+        socket.close();
+      }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      clearInterval(interval);
+    };
+  }, []);
+
+  return {
+    isConnected,
+    isReceiving,
+    connectionConfig,
+    witsData,
+    rawWitsMessages,
+    connectionLogs,
+    connectionStats,
+    lastUpdateTime,
+    connect,
+    disconnect,
+    updateConfig,
+    testConnection,
+  };
+};
+
 const WitsConfigPage = () => {
   const { toast } = useToast();
   const {
@@ -40,18 +308,20 @@ const WitsConfigPage = () => {
     isReceiving,
     connectionConfig,
     witsData,
+    rawWitsMessages,
     connectionLogs,
+    connectionStats,
+    lastUpdateTime,
     connect,
     disconnect,
     updateConfig,
     testConnection,
-    lastUpdateTime,
-  } = useWits();
+  } = useWitsConnection();
 
   const [activeTab, setActiveTab] = useState("connection");
   const [configForm, setConfigForm] = useState(connectionConfig);
   const [isTesting, setIsTesting] = useState(false);
-  const [witsChannels, setWitsChannels] = useState([
+  const [witsChannels, setWitsChannels] = useState<WitsChannel[]>([
     {
       id: 1,
       name: "Bit Depth",
@@ -143,6 +413,27 @@ const WitsConfigPage = () => {
       lastValue: 92.7,
     },
   ]);
+
+  // Update channel values when new WITS data arrives
+  useEffect(() => {
+    if (witsData.length > 0) {
+      const latestRecord = witsData[0];
+
+      setWitsChannels((prevChannels) =>
+        prevChannels.map((channel) => {
+          const value = latestRecord[channel.witsId];
+          if (value !== undefined && typeof value === "number") {
+            return {
+              ...channel,
+              lastValue: value,
+              lastUpdate: latestRecord.timestamp,
+            };
+          }
+          return channel;
+        }),
+      );
+    }
+  }, [witsData]);
 
   const toggleConnection = () => {
     if (isConnected) {
@@ -256,6 +547,7 @@ const WitsConfigPage = () => {
               <TabsTrigger value="channels">WITS Channels</TabsTrigger>
               <TabsTrigger value="mapping">Parameter Mapping</TabsTrigger>
               <TabsTrigger value="logs">Connection Logs</TabsTrigger>
+              <TabsTrigger value="raw">Raw WITS Messages</TabsTrigger>
             </TabsList>
 
             <TabsContent value="connection" className="space-y-4">
@@ -272,6 +564,7 @@ const WitsConfigPage = () => {
                       variant="outline"
                       size="sm"
                       className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                      onClick={handleSaveConfig}
                     >
                       <Save className="h-4 w-4 mr-2" />
                       Save Configuration
@@ -661,30 +954,32 @@ const WitsConfigPage = () => {
                     <div className="text-sm text-gray-400 mb-2">
                       Connection Statistics
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-[#00d8fc]">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div>
                         <div className="text-xs text-gray-500">Uptime</div>
-                        <div className="text-sm font-medium text-[#021717]">
-                          03:45:22
+                        <div className="text-sm font-medium text-green-400">
+                          {connectionStats.uptime}
                         </div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500">
                           Packets Received
                         </div>
-                        <div className="text-sm font-medium text-[#494326]">
-                          12,458
+                        <div className="text-sm font-medium text-blue-400">
+                          {connectionStats.packetsReceived}
                         </div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500">Data Rate</div>
-                        <div className="text-sm font-medium text-[#02fdf9]">
-                          1.2 KB/s
+                        <div className="text-sm font-medium text-cyan-400">
+                          {connectionStats.dataRate}
                         </div>
                       </div>
                       <div>
                         <div className="text-xs text-gray-500">Errors</div>
-                        <div className="text-sm font-medium">0</div>
+                        <div className="text-sm font-medium text-red-400">
+                          {connectionStats.errors}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -756,6 +1051,9 @@ const WitsConfigPage = () => {
                             Last Value
                           </th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                            Last Update
+                          </th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                             Actions
                           </th>
                         </tr>
@@ -791,6 +1089,12 @@ const WitsConfigPage = () => {
                                 {channel.active
                                   ? channel.lastValue.toFixed(1)
                                   : "--"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 text-sm">
+                              <span className="text-xs text-gray-500">
+                                {channel.lastUpdate?.toLocaleTimeString() ||
+                                  "--"}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-sm">
@@ -957,6 +1261,7 @@ const WitsConfigPage = () => {
                         variant="outline"
                         size="sm"
                         className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                        onClick={() => window.location.reload()}
                       >
                         <RefreshCw className="h-4 w-4 mr-2" />
                         Refresh
@@ -965,6 +1270,15 @@ const WitsConfigPage = () => {
                         variant="outline"
                         size="sm"
                         className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                        onClick={() => {
+                          const logs = connectionLogs.join("\n");
+                          const blob = new Blob([logs], { type: "text/plain" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = "wits-connection-logs.txt";
+                          a.click();
+                        }}
                       >
                         <Download className="h-4 w-4 mr-2" />
                         Export Logs
@@ -1007,6 +1321,68 @@ const WitsConfigPage = () => {
                         <div className="text-gray-500 italic">
                           No connection logs available. Connect to WITS to see
                           logs.
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="raw" className="space-y-4">
+              <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
+                <CardHeader className="p-4 pb-2 border-b border-gray-800">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Database className="h-5 w-5 text-orange-400" />
+                      <CardTitle className="text-lg font-medium text-gray-200">
+                        Raw WITS Messages
+                      </CardTitle>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                        onClick={() => window.location.reload()}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Refresh
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                        onClick={() => {
+                          const logs = rawWitsMessages.join("\n");
+                          const blob = new Blob([logs], { type: "text/plain" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = "wits-raw-messages.txt";
+                          a.click();
+                        }}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Export Messages
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ScrollArea className="h-[400px]">
+                    <div className="p-4 font-mono text-xs space-y-1">
+                      {rawWitsMessages.map((message, index) => (
+                        <div key={index} className="text-gray-400">
+                          {message.substring(0, 500)}
+                          {message.length > 500 ? "..." : ""}
+                        </div>
+                      ))}
+
+                      {rawWitsMessages.length === 0 && (
+                        <div className="text-gray-500 italic">
+                          No raw WITS messages received yet. Connect to WITS to
+                          see data.
                         </div>
                       )}
                     </div>

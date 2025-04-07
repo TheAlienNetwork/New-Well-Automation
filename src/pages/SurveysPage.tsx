@@ -403,13 +403,18 @@ const SurveysPage = () => {
               <Button
                 className="bg-blue-600 hover:bg-blue-700 text-white"
                 onClick={() => {
-                  // Create new survey with current WITS data
+                  // Get the latest well information before creating a new survey
+                  // This ensures we always use the most up-to-date well info
+                  const currentWellInfo = { ...wellInfo };
+
+                  // Create new survey with current WITS data and latest well info
                   const newSurvey: SurveyData = {
                     id: Date.now().toString(),
                     timestamp: new Date().toISOString(),
                     bitDepth: witsData.bitDepth,
-                    measuredDepth: witsData.bitDepth - wellInfo.sensorOffset,
-                    sensorOffset: wellInfo.sensorOffset,
+                    measuredDepth:
+                      witsData.bitDepth - currentWellInfo.sensorOffset,
+                    sensorOffset: currentWellInfo.sensorOffset,
                     inclination: witsData.inclination,
                     azimuth: witsData.azimuth,
                     toolFace: witsData.toolFace,
@@ -417,8 +422,8 @@ const SurveysPage = () => {
                     aTotal: witsData.gravity,
                     dip: witsData.dip,
                     toolTemp: witsData.toolTemp,
-                    wellName: wellInfo.wellName,
-                    rigName: wellInfo.rigName,
+                    wellName: currentWellInfo.wellName,
+                    rigName: currentWellInfo.rigName,
                     qualityCheck: {
                       status: "pass",
                       message: "All parameters within acceptable ranges",
@@ -532,6 +537,7 @@ const SurveysPage = () => {
             handleSaveSurvey(updatedSurvey);
           }}
           surveyData={editingSurvey}
+          wellInfo={wellInfo}
         />
       )}
 

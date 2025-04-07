@@ -88,7 +88,7 @@ const WellInformationWidget = ({
 
     // Update all surveys with the new well information
     if (surveys.length > 0) {
-      // We can't use the hook inside a callback, so we need to use the imported function directly
+      const { updateSurvey } = useSurveys();
       surveys.forEach((survey) => {
         const updatedSurvey = {
           ...survey,

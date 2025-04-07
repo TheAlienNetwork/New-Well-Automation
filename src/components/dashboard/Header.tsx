@@ -67,10 +67,13 @@ const Header = ({
   );
   const [latestSurvey, setLatestSurvey] = useState<any>(null);
 
-  // Use userProfile data if props are not provided
+  // Always use the latest userProfile data, but allow props to override if provided
   const displayName =
-    userName || `${userProfile.firstName} ${userProfile.lastName}`;
-  const displayImage = profileImage || userProfile.profileImage;
+    userName !== undefined
+      ? userName
+      : `${userProfile.firstName} ${userProfile.lastName}`;
+  const displayImage =
+    profileImage !== undefined ? profileImage : userProfile.profileImage;
 
   // Update well information and latest survey when surveys change
   useEffect(() => {

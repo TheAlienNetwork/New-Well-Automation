@@ -84,29 +84,26 @@ const SurveyPopup = ({
 
   // Initialize survey with latest well information if available
   useEffect(() => {
-    // Only update if we're creating a new survey (not editing an existing one)
-    if (surveyData.id === "new") {
-      // First check if wellInfo prop is provided
-      if (wellInfo) {
-        setEditedSurvey((prev) => ({
-          ...prev,
-          wellName: wellInfo.wellName || prev.wellName,
-          rigName: wellInfo.rigName || prev.rigName,
-          sensorOffset:
-            wellInfo.sensorOffset !== undefined
-              ? wellInfo.sensorOffset
-              : prev.sensorOffset || 0,
-          // Recalculate measured depth with the new sensor offset
-          measuredDepth:
-            prev.bitDepth -
-            (wellInfo.sensorOffset !== undefined
-              ? wellInfo.sensorOffset
-              : prev.sensorOffset || 0),
-        }));
-        return;
-      }
+    // Always update with wellInfo if provided, regardless of whether it's a new or existing survey
+    if (wellInfo) {
+      setEditedSurvey((prev) => ({
+        ...prev,
+        wellName: wellInfo.wellName || "",
+        rigName: wellInfo.rigName || "",
+        sensorOffset:
+          wellInfo.sensorOffset !== undefined
+            ? wellInfo.sensorOffset
+            : undefined,
+        // Recalculate measured depth with the new sensor offset
+        measuredDepth:
+          prev.bitDepth -
+          (wellInfo.sensorOffset !== undefined ? wellInfo.sensorOffset : 0),
+      }));
+      return;
+    }
 
-      // If no wellInfo prop, get the latest survey to check for well information
+    // If no wellInfo prop and it's a new survey, get the latest survey to check for well information
+    if (surveyData.id === "new") {
       const latestSurveys = [...surveys].sort(
         (a, b) =>
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
@@ -131,18 +128,15 @@ const SurveyPopup = ({
       // Update the survey with the well information
       setEditedSurvey((prev) => ({
         ...prev,
-        wellName: surveyWellInfo.wellName || prev.wellName,
-        rigName: surveyWellInfo.rigName || prev.rigName,
-        sensorOffset:
-          surveyWellInfo.sensorOffset !== undefined
-            ? surveyWellInfo.sensorOffset
-            : prev.sensorOffset || 0,
+        wellName: surveyWellInfo.wellName || "",
+        rigName: surveyWellInfo.rigName || "",
+        sensorOffset: surveyWellInfo.sensorOffset,
         // Recalculate measured depth with the new sensor offset
         measuredDepth:
           prev.bitDepth -
           (surveyWellInfo.sensorOffset !== undefined
             ? surveyWellInfo.sensorOffset
-            : prev.sensorOffset || 0),
+            : 0),
       }));
     }
   }, [surveyData.id, surveys, wellInfo]);
@@ -263,14 +257,21 @@ const SurveyPopup = ({
                       id="sensorOffset"
                       type="number"
                       step="0.1"
-                      value={(editedSurvey.sensorOffset || 0).toFixed(2)}
+                      value={
+                        editedSurvey.sensorOffset !== undefined
+                          ? editedSurvey.sensorOffset.toFixed(2)
+                          : ""
+                      }
                       onChange={(e) => {
                         handleInputChange(
                           "sensorOffset",
-                          parseFloat(e.target.value),
+                          e.target.value
+                            ? parseFloat(e.target.value)
+                            : undefined,
                         );
                       }}
                       className="bg-gray-800 border-gray-700 text-gray-200"
+                      placeholder="Enter sensor offset"
                     />
                   </div>
                 </div>
@@ -282,7 +283,10 @@ const SurveyPopup = ({
                     step="0.1"
                     value={(
                       editedSurvey.measuredDepth ||
-                      editedSurvey.bitDepth - (editedSurvey.sensorOffset || 0)
+                      editedSurvey.bitDepth -
+                        (editedSurvey.sensorOffset !== undefined
+                          ? editedSurvey.sensorOffset
+                          : 0)
                     ).toFixed(2)}
                     readOnly
                     className="bg-gray-800/50 border-gray-700 text-gray-400"

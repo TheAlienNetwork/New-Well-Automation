@@ -41,19 +41,8 @@ interface WellTrajectory3DInteractiveProps {
 }
 
 const WellTrajectory3DInteractive = ({
-  surveys = generateDummySurveys(),
-  offsetWells = [
-    {
-      name: "Alpha-122",
-      color: "#ff0088",
-      surveys: generateDummySurveys(200, 50, 30),
-    },
-    {
-      name: "Alpha-124",
-      color: "#00ff88",
-      surveys: generateDummySurveys(-150, -80, 20),
-    },
-  ],
+  surveys = [],
+  offsetWells = [],
   onExport = () => {},
 }: WellTrajectory3DInteractiveProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -65,9 +54,13 @@ const WellTrajectory3DInteractive = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
-  // Generate dummy survey data for visualization
-  function generateDummySurveys(nsOffset = 0, ewOffset = 0, randomFactor = 10) {
-    const dummySurveys = [];
+  // Generate fallback survey data if needed for testing
+  function generateFallbackSurveys(
+    nsOffset = 0,
+    ewOffset = 0,
+    randomFactor = 10,
+  ) {
+    const fallbackSurveys = [];
     let tvd = 0;
     let ns = nsOffset;
     let ew = ewOffset;
@@ -105,7 +98,7 @@ const WellTrajectory3DInteractive = ({
           (Math.random() - 0.5) * randomFactor;
       }
 
-      dummySurveys.push({
+      fallbackSurveys.push({
         md,
         inc,
         az,
@@ -115,7 +108,7 @@ const WellTrajectory3DInteractive = ({
       });
     }
 
-    return dummySurveys;
+    return fallbackSurveys;
   }
 
   // Handle mouse events for 3D interaction
@@ -229,17 +222,21 @@ const WellTrajectory3DInteractive = ({
     // Draw axes
     drawAxes(ctx, canvas.width, canvas.height, rotation);
 
+    // Use fallback data if no surveys are provided
+    const surveyData = surveys.length > 0 ? surveys : generateFallbackSurveys();
+
     // Calculate current bit depth for visualization
     // Use the currentSurveyIndex to determine how much of the well to show
-    const currentBitDepth = surveys[currentSurveyIndex]?.md || 0;
+    const currentBitDepth = surveyData[currentSurveyIndex]?.md || 0;
 
     // Create a filtered survey array that only includes points up to the current bit depth
-    const visibleSurveys = surveys.filter(
+    const visibleSurveys = surveyData.filter(
       (survey) => survey.md <= currentBitDepth,
     );
 
-    // Draw offset wells
-    offsetWells.forEach((well) => {
+    // Draw offset wells (use real data or empty array)
+    const wellsToRender = offsetWells.length > 0 ? offsetWells : [];
+    wellsToRender.forEach((well) => {
       drawWellPath(
         ctx,
         canvas.width,
@@ -265,8 +262,8 @@ const WellTrajectory3DInteractive = ({
     );
 
     // Draw current survey point
-    if (surveys.length > 0 && currentSurveyIndex < surveys.length) {
-      const currentSurvey = surveys[currentSurveyIndex];
+    if (surveyData.length > 0 && currentSurveyIndex < surveyData.length) {
+      const currentSurvey = surveyData[currentSurveyIndex];
       const point = project3DPoint(
         currentSurvey.ew / 100,
         -currentSurvey.tvd / 100,

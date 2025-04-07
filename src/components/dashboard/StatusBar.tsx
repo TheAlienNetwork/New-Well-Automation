@@ -5,45 +5,10 @@ import { useWits } from "@/context/WitsContext";
 
 interface StatusBarProps {
   wellName?: string;
-  isConnected?: boolean;
-  latestSurvey?: {
-    md: number;
-    inc: number;
-    az: number;
-  };
-  bitDepth?: number;
-  gamma?: number;
-  blockHeight?: number;
 }
 
-const StatusBar = ({
-  wellName = "Well Alpha-123",
-  isConnected: propIsConnected,
-  latestSurvey: propLatestSurvey,
-  bitDepth: propBitDepth,
-  gamma: propGamma,
-  blockHeight: propBlockHeight,
-}: StatusBarProps) => {
-  const {
-    isConnected: witsConnected,
-    isReceiving,
-    witsData,
-    lastUpdateTime,
-  } = useWits();
-
-  // Use WITS data if available, otherwise use props
-  const isConnected =
-    propIsConnected !== undefined ? propIsConnected : witsConnected;
-  const latestSurvey = propLatestSurvey || {
-    md: witsData.bitDepth,
-    inc: witsData.inclination,
-    az: witsData.azimuth,
-  };
-  const bitDepth =
-    propBitDepth !== undefined ? propBitDepth : witsData.bitDepth;
-  const gamma = propGamma !== undefined ? propGamma : witsData.gamma;
-  const blockHeight =
-    propBlockHeight !== undefined ? propBlockHeight : witsData.blockHeight;
+const StatusBar = ({ wellName = "Well Alpha-123" }: StatusBarProps) => {
+  const { isConnected, isReceiving, witsData, lastUpdateTime } = useWits();
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [pulseIndicator, setPulseIndicator] = useState(false);
@@ -106,7 +71,7 @@ const StatusBar = ({
           <Layers className="h-3 w-3 text-cyan-400" />
           <span className="text-gray-500">MD:</span>
           <span className="text-cyan-400 font-medium">
-            {latestSurvey.md.toFixed(2)}ft
+            {witsData.bitDepth?.toFixed(2) || "0.00"}ft
           </span>
         </div>
 
@@ -114,7 +79,7 @@ const StatusBar = ({
           <ArrowUp className="h-3 w-3 text-green-400" />
           <span className="text-gray-500">Inc:</span>
           <span className="text-green-400 font-medium">
-            {latestSurvey.inc.toFixed(2)}°
+            {witsData.inclination?.toFixed(2) || "0.00"}°
           </span>
         </div>
 
@@ -122,7 +87,7 @@ const StatusBar = ({
           <Activity className="h-3 w-3 text-blue-400" />
           <span className="text-gray-500">Az:</span>
           <span className="text-blue-400 font-medium">
-            {latestSurvey.az.toFixed(2)}°
+            {witsData.azimuth?.toFixed(2) || "0.00"}°
           </span>
         </div>
 
@@ -130,21 +95,21 @@ const StatusBar = ({
           <Drill className="h-3 w-3 text-yellow-400" />
           <span className="text-gray-500">Bit:</span>
           <span className="text-yellow-400 font-medium">
-            {bitDepth.toFixed(2)}ft
+            {witsData.bitDepth?.toFixed(2) || "0.00"}ft
           </span>
         </div>
 
         <div className="flex items-center gap-1">
           <span className="text-gray-500">Gamma:</span>
           <span className="text-purple-400 font-medium">
-            {gamma.toFixed(2)}API
+            {witsData.gamma?.toFixed(2) || "0.00"}API
           </span>
         </div>
 
         <div className="flex items-center gap-1">
           <span className="text-gray-500">Block:</span>
           <span className="text-orange-400 font-medium">
-            {blockHeight.toFixed(2)}ft
+            {witsData.blockHeight?.toFixed(2) || "0.00"}ft
           </span>
         </div>
 
