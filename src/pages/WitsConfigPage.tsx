@@ -13,6 +13,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/use-toast";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Wifi,
   Server,
   Settings,
@@ -233,19 +241,45 @@ const useWitsConnection = () => {
   // Test connection
   const testConnection = async (): Promise<boolean> => {
     addLog("Testing connection...");
-    return new Promise((resolve) => {
-      // Simulate connection test
-      setTimeout(() => {
-        const success = Math.random() > 0.3; // 70% success rate for demo
-        if (success) {
+    try {
+      // Determine WebSocket protocol based on current environment
+      const isLocalhost =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      const wsProtocol =
+        window.location.protocol === "https:" && !isLocalhost
+          ? "wss://"
+          : "ws://";
+      const wsUrl = `${wsProtocol}${connectionConfig.ipAddress}:${connectionConfig.port}`;
+
+      const testSocket = new WebSocket(wsUrl);
+
+      return new Promise((resolve) => {
+        // Set a timeout for the connection attempt
+        const timeout = setTimeout(() => {
+          testSocket.close();
+          addLog("Connection test failed: timeout");
+          resolve(false);
+        }, 5000);
+
+        testSocket.onopen = () => {
+          clearTimeout(timeout);
+          testSocket.close();
           addLog("Connection test successful");
           resolve(true);
-        } else {
+        };
+
+        testSocket.onerror = () => {
+          clearTimeout(timeout);
+          testSocket.close();
           addLog("Connection test failed");
           resolve(false);
-        }
-      }, 1500);
-    });
+        };
+      });
+    } catch (error) {
+      addLog(`Connection test failed: ${error}`);
+      return false;
+    }
   };
 
   // Update configuration
@@ -310,6 +344,47 @@ const useWitsConnection = () => {
   };
 };
 
+// Define types for WITS mappings
+type WitsMappingItem = {
+  name: string;
+  channel: number;
+  witsId: number;
+  unit: string;
+};
+
+type CalculatedMappingItem = {
+  name: string;
+  source: string;
+};
+
+type WitsMappings = {
+  drilling: WitsMappingItem[];
+  directional: WitsMappingItem[];
+  calculated: CalculatedMappingItem[];
+};
+
+// Default WITS mappings
+const defaultWitsMappings: WitsMappings = {
+  drilling: [
+    { name: "Bit Depth", channel: 8, witsId: 1, unit: "ft" },
+    { name: "Hook Load", channel: 12, witsId: 2, unit: "klbs" },
+    { name: "WOB", channel: 16, witsId: 3, unit: "klbs" },
+    { name: "ROP", channel: 20, witsId: 4, unit: "ft/hr" },
+  ],
+  directional: [
+    { name: "Inclination", channel: 32, witsId: 5, unit: "deg" },
+    { name: "Azimuth", channel: 36, witsId: 6, unit: "deg" },
+    { name: "Tool Face", channel: 40, witsId: 7, unit: "deg" },
+    { name: "Gamma", channel: 44, witsId: 8, unit: "API" },
+  ],
+  calculated: [
+    { name: "TVD", source: "Calculated" },
+    { name: "Northing", source: "Calculated" },
+    { name: "Easting", source: "Calculated" },
+    { name: "DLS", source: "Calculated" },
+  ],
+};
+
 const WitsConfigPage = () => {
   const { toast } = useToast();
   const {
@@ -330,6 +405,23 @@ const WitsConfigPage = () => {
   const [activeTab, setActiveTab] = useState("connection");
   const [configForm, setConfigForm] = useState(connectionConfig);
   const [isTesting, setIsTesting] = useState(false);
+
+  // State for WITS mappings
+  const [witsMappings, setWitsMappings] =
+    useState<WitsMappings>(defaultWitsMappings);
+
+  // State for edit dialog
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [currentMappingType, setCurrentMappingType] = useState<
+    "drilling" | "directional" | null
+  >(null);
+  const [currentMappingIndex, setCurrentMappingIndex] = useState<number | null>(
+    null,
+  );
+  const [editChannelValue, setEditChannelValue] = useState(0);
+  const [currentMapping, setCurrentMapping] = useState<WitsMappingItem | null>(
+    null,
+  );
   const [witsChannels, setWitsChannels] = useState<WitsChannel[]>([
     {
       id: 1,
@@ -464,6 +556,53 @@ const WitsConfigPage = () => {
     toast({
       title: "Configuration Saved",
       description: "WITS connection settings have been updated.",
+    });
+  };
+
+  // Handle opening the edit dialog
+  const handleEditMapping = (
+    type: "drilling" | "directional",
+    index: number,
+  ) => {
+    setCurrentMappingType(type);
+    setCurrentMappingIndex(index);
+    const mapping = witsMappings[type][index];
+    setCurrentMapping(mapping);
+    setEditChannelValue(mapping.channel);
+    setEditDialogOpen(true);
+  };
+
+  // Handle saving the channel edit
+  const handleSaveChannelEdit = () => {
+    if (currentMappingType === null || currentMappingIndex === null) return;
+
+    // Create a deep copy of the mappings
+    const newMappings = JSON.parse(
+      JSON.stringify(witsMappings),
+    ) as WitsMappings;
+
+    // Update the channel value
+    newMappings[currentMappingType][currentMappingIndex].channel =
+      editChannelValue;
+
+    // Update the state
+    setWitsMappings(newMappings);
+    setEditDialogOpen(false);
+
+    toast({
+      title: "Mapping Updated",
+      description: `${currentMapping?.name} is now mapped to Channel ${editChannelValue}`,
+    });
+  };
+
+  // Handle saving all mappings
+  const handleSaveMappings = () => {
+    // Here you would typically save the mappings to a backend or local storage
+    // For now, we'll just show a toast
+    toast({
+      title: "Mappings Saved",
+      description: "WITS parameter mappings have been updated.",
+      variant: "default",
     });
   };
 
@@ -1136,11 +1275,43 @@ const WitsConfigPage = () => {
             <TabsContent value="mapping" className="space-y-4">
               <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
                 <CardHeader className="p-4 pb-2 border-b border-gray-800">
-                  <div className="flex items-center gap-2">
-                    <Settings className="h-5 w-5 text-purple-400" />
-                    <CardTitle className="text-lg font-medium text-gray-200">
-                      Parameter Mapping Configuration
-                    </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Settings className="h-5 w-5 text-purple-400" />
+                      <CardTitle className="text-lg font-medium text-gray-200">
+                        Parameter Mapping Configuration
+                      </CardTitle>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                        onClick={() => {
+                          // Reset to default mappings
+                          setWitsMappings(defaultWitsMappings);
+                          toast({
+                            title: "Mappings Reset",
+                            description:
+                              "WITS mappings have been reset to defaults.",
+                          });
+                        }}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        Reset to Defaults
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                        onClick={() => {
+                          // Save mappings
+                          handleSaveMappings();
+                        }}
+                      >
+                        <Save className="h-4 w-4 mr-2" />
+                        Save Mappings
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="p-4">
@@ -1151,31 +1322,36 @@ const WitsConfigPage = () => {
                       </h3>
                       <p className="text-xs text-gray-500 mb-4">
                         Configure how WITS channels map to application
-                        parameters
+                        parameters. Click on a channel value to edit it.
                       </p>
 
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="p-3 bg-gray-800/80 rounded-md">
                           <h4 className="text-xs font-medium text-gray-400 mb-2">
                             Drilling Parameters
                           </h4>
                           <div className="space-y-2">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">Bit Depth:</span>
-                              <span className="text-blue-400">Channel 8</span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">Hook Load:</span>
-                              <span className="text-blue-400">Channel 12</span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">WOB:</span>
-                              <span className="text-blue-400">Channel 16</span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">ROP:</span>
-                              <span className="text-blue-400">Channel 20</span>
-                            </div>
+                            {witsMappings.drilling.map((item, index) => (
+                              <div
+                                key={`drilling-${index}`}
+                                className="flex justify-between text-xs items-center"
+                              >
+                                <span className="text-gray-500">
+                                  {item.name}:
+                                </span>
+                                <div
+                                  className="flex items-center cursor-pointer bg-gray-700/50 px-2 py-1 rounded hover:bg-gray-700"
+                                  onClick={() =>
+                                    handleEditMapping("drilling", index)
+                                  }
+                                >
+                                  <span className="text-blue-400">
+                                    Channel {item.channel}
+                                  </span>
+                                  <Edit className="h-3 w-3 ml-1 text-gray-400" />
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
 
@@ -1184,24 +1360,27 @@ const WitsConfigPage = () => {
                             Directional Data
                           </h4>
                           <div className="space-y-2">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">
-                                Inclination:
-                              </span>
-                              <span className="text-green-400">Channel 32</span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">Azimuth:</span>
-                              <span className="text-green-400">Channel 36</span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">Tool Face:</span>
-                              <span className="text-green-400">Channel 40</span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">Gamma:</span>
-                              <span className="text-green-400">Channel 44</span>
-                            </div>
+                            {witsMappings.directional.map((item, index) => (
+                              <div
+                                key={`directional-${index}`}
+                                className="flex justify-between text-xs items-center"
+                              >
+                                <span className="text-gray-500">
+                                  {item.name}:
+                                </span>
+                                <div
+                                  className="flex items-center cursor-pointer bg-gray-700/50 px-2 py-1 rounded hover:bg-gray-700"
+                                  onClick={() =>
+                                    handleEditMapping("directional", index)
+                                  }
+                                >
+                                  <span className="text-green-400">
+                                    Channel {item.channel}
+                                  </span>
+                                  <Edit className="h-3 w-3 ml-1 text-gray-400" />
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
 
@@ -1210,30 +1389,19 @@ const WitsConfigPage = () => {
                             Calculated Values
                           </h4>
                           <div className="space-y-2">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">TVD:</span>
-                              <span className="text-purple-400">
-                                Calculated
-                              </span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">Northing:</span>
-                              <span className="text-purple-400">
-                                Calculated
-                              </span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">Easting:</span>
-                              <span className="text-purple-400">
-                                Calculated
-                              </span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                              <span className="text-gray-500">DLS:</span>
-                              <span className="text-purple-400">
-                                Calculated
-                              </span>
-                            </div>
+                            {witsMappings.calculated.map((item, index) => (
+                              <div
+                                key={`calculated-${index}`}
+                                className="flex justify-between text-xs items-center"
+                              >
+                                <span className="text-gray-500">
+                                  {item.name}:
+                                </span>
+                                <span className="text-purple-400">
+                                  {item.source}
+                                </span>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </div>
@@ -1246,13 +1414,61 @@ const WitsConfigPage = () => {
                         <p className="text-xs text-gray-400">
                           The system is automatically mapping WITS channels to
                           application parameters based on standard industry
-                          configurations.
+                          configurations. You can override these mappings by
+                          editing them above.
                         </p>
                       </div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Edit Mapping Dialog */}
+              <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+                <DialogContent className="bg-gray-900 border border-gray-800 text-gray-200 sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle className="text-gray-200">
+                      Edit WITS Mapping
+                    </DialogTitle>
+                    <DialogDescription className="text-gray-400">
+                      Update the WITS channel for {currentMapping?.name}
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="channel" className="text-gray-400">
+                        WITS Channel
+                      </Label>
+                      <Input
+                        id="channel"
+                        type="number"
+                        value={editChannelValue}
+                        onChange={(e) =>
+                          setEditChannelValue(parseInt(e.target.value) || 0)
+                        }
+                        className="bg-gray-800 border-gray-700 text-gray-200"
+                      />
+                    </div>
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setEditDialogOpen(false)}
+                      className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleSaveChannelEdit}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Save Changes
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </TabsContent>
 
             <TabsContent value="logs" className="space-y-4">

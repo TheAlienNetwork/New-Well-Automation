@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +54,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
+import { useWits } from "@/context/WitsContext";
 
 interface AIAnalyticsProps {
   predictions?: {
@@ -85,53 +86,161 @@ interface AIAnalyticsProps {
 }
 
 const AIAnalytics = ({
-  predictions = {
-    toolFailure: {
-      risk: 23,
-      timeToFailure: "~48 hours",
-      components: [
-        { name: "MWD Battery", risk: 42 },
-        { name: "Pulser Assembly", risk: 18 },
-        { name: "Directional Module", risk: 12 },
-      ],
-    },
-    stuckPipe: {
-      risk: 8,
-      indicators: [
-        { name: "Torque Variation", value: 12 },
-        { name: "Drag", value: 5 },
-        { name: "ROP Decrease", value: 7 },
-      ],
-    },
-    decodeQuality: {
-      quality: 87,
-      noiseLevel: 32,
-      recommendations: [
-        "Increase signal amplitude",
-        "Apply band-pass filter (15-30Hz)",
-        "Check surface connections",
-      ],
-    },
-    shockAndVibe: {
-      severity: 35,
-      axial: 28,
-      lateral: 42,
-      torsional: 15,
-      recommendations: [
-        "Reduce WOB by 5-10%",
-        "Adjust drilling parameters to minimize lateral vibration",
-        "Monitor BHA components for potential damage",
-      ],
-    },
-  },
   isLoading = false,
   onRefresh = () => {},
   onConfigureAI = () => {},
 }: AIAnalyticsProps) => {
+  const { witsData, isConnected, isReceiving } = useWits();
   const [activeTab, setActiveTab] = useState("tool-failure");
   const [filterStrength, setFilterStrength] = useState(50);
   const [showFullReport, setShowFullReport] = useState(false);
   const [confidenceLevel, setConfidenceLevel] = useState(92);
+  const [predictions, setPredictions] = useState({
+    toolFailure: {
+      risk: 0,
+      timeToFailure: "N/A",
+      components: [
+        { name: "MWD Battery", risk: 0 },
+        { name: "Pulser Assembly", risk: 0 },
+        { name: "Directional Module", risk: 0 },
+      ],
+    },
+    stuckPipe: {
+      risk: 0,
+      indicators: [
+        { name: "Torque Variation", value: 0 },
+        { name: "Drag", value: 0 },
+        { name: "ROP Decrease", value: 0 },
+      ],
+    },
+    decodeQuality: {
+      quality: 0,
+      noiseLevel: 0,
+      recommendations: [],
+    },
+    shockAndVibe: {
+      severity: 0,
+      axial: 0,
+      lateral: 0,
+      torsional: 0,
+      recommendations: [],
+    },
+  });
+
+  // Update predictions based on real WITS data
+  useEffect(() => {
+    if (isConnected && isReceiving && witsData) {
+      // Calculate tool failure risk based on temperature and vibration
+      const tempFactor = Math.min(
+        100,
+        Math.max(0, ((witsData.temperature - 120) / 80) * 100),
+      );
+      const vibeFactor = Math.min(
+        100,
+        Math.max(
+          0,
+          (witsData.vibration.lateral + witsData.vibration.axial) / 2,
+        ),
+      );
+      const toolFailureRisk = Math.round(tempFactor * 0.4 + vibeFactor * 0.6);
+
+      // Calculate stuck pipe risk based on torque and drag indicators
+      const torqueVariation = Math.min(
+        100,
+        Math.max(0, Math.abs(witsData.rotaryTorque - 8500) / 85),
+      );
+      const dragFactor = Math.min(
+        100,
+        Math.max(0, Math.abs(witsData.hookload - 120) / 1.2),
+      );
+      const ropDecrease = Math.min(100, Math.max(0, (50 - witsData.rop) / 0.5));
+      const stuckPipeRisk = Math.round(
+        torqueVariation * 0.4 + dragFactor * 0.3 + ropDecrease * 0.3,
+      );
+
+      // Calculate decode quality based on signal strength
+      const signalQuality = Math.min(
+        100,
+        Math.max(0, 100 - witsData.vibration.lateral / 2),
+      );
+      const noiseLevel = 100 - signalQuality;
+
+      // Calculate shock and vibe severity
+      const axial = Math.min(100, Math.max(0, witsData.vibration.axial));
+      const lateral = Math.min(100, Math.max(0, witsData.vibration.lateral));
+      const torsional = Math.min(
+        100,
+        Math.max(0, witsData.vibration.torsional),
+      );
+      const vibeSeverity = Math.round(
+        axial * 0.3 + lateral * 0.5 + torsional * 0.2,
+      );
+
+      // Update predictions
+      setPredictions({
+        toolFailure: {
+          risk: toolFailureRisk,
+          timeToFailure:
+            toolFailureRisk > 70
+              ? "~24 hours"
+              : toolFailureRisk > 40
+                ? "~48 hours"
+                : "No immediate risk",
+          components: [
+            { name: "MWD Battery", risk: Math.round(tempFactor * 0.8) },
+            { name: "Pulser Assembly", risk: Math.round(vibeFactor * 0.6) },
+            {
+              name: "Directional Module",
+              risk: Math.round(tempFactor * 0.3 + vibeFactor * 0.2),
+            },
+          ],
+        },
+        stuckPipe: {
+          risk: stuckPipeRisk,
+          indicators: [
+            { name: "Torque Variation", value: Math.round(torqueVariation) },
+            { name: "Drag", value: Math.round(dragFactor) },
+            { name: "ROP Decrease", value: Math.round(ropDecrease) },
+          ],
+        },
+        decodeQuality: {
+          quality: Math.round(signalQuality),
+          noiseLevel: Math.round(noiseLevel),
+          recommendations: [
+            signalQuality < 70
+              ? "Increase signal amplitude"
+              : "Signal amplitude is good",
+            noiseLevel > 30
+              ? "Apply band-pass filter (15-30Hz)"
+              : "Noise levels acceptable",
+            noiseLevel > 50
+              ? "Check surface connections"
+              : "Surface connections good",
+          ],
+        },
+        shockAndVibe: {
+          severity: vibeSeverity,
+          axial: Math.round(axial),
+          lateral: Math.round(lateral),
+          torsional: Math.round(torsional),
+          recommendations: [
+            lateral > 40
+              ? "Reduce WOB by 5-10%"
+              : "WOB is within acceptable range",
+            lateral > 30
+              ? "Adjust drilling parameters to minimize lateral vibration"
+              : "Lateral vibration is acceptable",
+            vibeSeverity > 50
+              ? "Monitor BHA components for potential damage"
+              : "BHA components are safe",
+          ],
+        },
+      });
+
+      // Update confidence level based on data quality
+      setConfidenceLevel(Math.round(85 + signalQuality / 10));
+    }
+  }, [witsData, isConnected, isReceiving]);
 
   // Helper function to determine risk color
   const getRiskColor = (risk: number) => {
@@ -154,44 +263,31 @@ const AIAnalytics = ({
     return "text-red-500";
   };
 
-  // Generate historical data for visualization
+  // Generate historical data for visualization based on real data
   const generateHistoricalData = (dataType: string) => {
     const data = [];
-    let baseValue = 0;
+    const now = new Date();
 
-    switch (dataType) {
-      case "vibration":
-        baseValue = 30;
-        break;
-      case "temperature":
-        baseValue = 165;
-        break;
-      case "battery":
-        baseValue = 90;
-        break;
-      default:
-        baseValue = 50;
-    }
-
+    // Create 24 data points for the last 24 hours
     for (let i = 0; i < 24; i++) {
-      const timePoint = new Date();
-      timePoint.setHours(timePoint.getHours() - 24 + i);
+      const timePoint = new Date(now.getTime() - (24 - i) * 60 * 60 * 1000);
 
-      // Create some patterns in the data
-      let value = baseValue;
-      if (dataType === "vibration") {
-        // Vibration increases during certain hours
-        if (i > 15 && i < 20) {
-          value += 20 + Math.random() * 10;
-        } else {
-          value += Math.random() * 15;
-        }
-      } else if (dataType === "temperature") {
-        // Temperature gradually increases
-        value += (i / 24) * 5 + Math.random() * 2;
-      } else if (dataType === "battery") {
-        // Battery gradually decreases
-        value -= (i / 24) * 15 + Math.random() * 3;
+      let value = 0;
+      switch (dataType) {
+        case "vibration":
+          // Base value on current vibration with some historical variation
+          value = witsData.vibration.lateral * (0.7 + Math.sin(i / 3) * 0.3);
+          break;
+        case "temperature":
+          // Base value on current temperature with gradual increase
+          value = witsData.temperature * (0.9 + (i / 24) * 0.2);
+          break;
+        case "battery":
+          // Battery gradually decreases over time
+          value = 90 - (i / 24) * 15 - Math.random() * 3;
+          break;
+        default:
+          value = 50;
       }
 
       data.push({
@@ -210,22 +306,63 @@ const AIAnalytics = ({
     return data;
   };
 
-  // Generate data for pie charts
+  // Generate data for pie charts based on real data
   const generatePieData = (dataType: string) => {
     if (dataType === "failures") {
       return [
-        { name: "Battery", value: 42, color: "#ef4444" },
-        { name: "Pulser", value: 18, color: "#f59e0b" },
-        { name: "Directional", value: 12, color: "#10b981" },
-        { name: "Sensors", value: 8, color: "#0ea5e9" },
-        { name: "Other", value: 20, color: "#8b5cf6" },
+        {
+          name: "Battery",
+          value: predictions.toolFailure.components[0].risk,
+          color: "#ef4444",
+        },
+        {
+          name: "Pulser",
+          value: predictions.toolFailure.components[1].risk,
+          color: "#f59e0b",
+        },
+        {
+          name: "Directional",
+          value: predictions.toolFailure.components[2].risk,
+          color: "#10b981",
+        },
+        {
+          name: "Sensors",
+          value: Math.max(5, predictions.toolFailure.risk / 10),
+          color: "#0ea5e9",
+        },
+        {
+          name: "Other",
+          value: Math.max(5, predictions.toolFailure.risk / 5),
+          color: "#8b5cf6",
+        },
       ];
     } else if (dataType === "vibration") {
       return [
-        { name: "Lateral", value: 42, color: "#ef4444" },
-        { name: "Axial", value: 28, color: "#f59e0b" },
-        { name: "Torsional", value: 15, color: "#10b981" },
-        { name: "Other", value: 15, color: "#8b5cf6" },
+        {
+          name: "Lateral",
+          value: predictions.shockAndVibe.lateral,
+          color: "#ef4444",
+        },
+        {
+          name: "Axial",
+          value: predictions.shockAndVibe.axial,
+          color: "#f59e0b",
+        },
+        {
+          name: "Torsional",
+          value: predictions.shockAndVibe.torsional,
+          color: "#10b981",
+        },
+        {
+          name: "Other",
+          value: Math.max(
+            5,
+            (predictions.shockAndVibe.lateral +
+              predictions.shockAndVibe.axial) /
+              10,
+          ),
+          color: "#8b5cf6",
+        },
       ];
     }
     return [];
@@ -258,7 +395,7 @@ const AIAnalytics = ({
                     size="icon"
                     className="h-8 w-8 text-gray-400 hover:text-gray-300 hover:bg-gray-800"
                     onClick={onRefresh}
-                    disabled={isLoading}
+                    disabled={isLoading || !isConnected}
                   >
                     <RefreshCw
                       className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
@@ -310,7 +447,44 @@ const AIAnalytics = ({
         </div>
       </CardHeader>
       <CardContent className="p-0 flex-grow flex flex-col h-[800px]">
-        {!showFullReport ? (
+        {!isConnected && (
+          <div className="flex-grow flex items-center justify-center bg-gray-950">
+            <div className="text-center p-6 bg-gray-900/50 rounded-lg border border-gray-800 max-w-md">
+              <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+              <h3 className="text-xl font-medium text-gray-200 mb-2">
+                No WITS Connection
+              </h3>
+              <p className="text-gray-400 mb-4">
+                Connect to a WITS data source to enable AI analytics and
+                real-time monitoring.
+              </p>
+              <Button
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={() => (window.location.href = "/witsconfig")}
+              >
+                <Settings className="h-4 w-4 mr-2" />
+                Configure WITS Connection
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {isConnected && !isReceiving && (
+          <div className="flex-grow flex items-center justify-center bg-gray-950">
+            <div className="text-center p-6 bg-gray-900/50 rounded-lg border border-gray-800 max-w-md">
+              <RefreshCw className="h-12 w-12 text-blue-500 mx-auto mb-4 animate-spin" />
+              <h3 className="text-xl font-medium text-gray-200 mb-2">
+                Waiting for Data
+              </h3>
+              <p className="text-gray-400 mb-4">
+                Connected to WITS server but no data is being received yet.
+                Please wait...
+              </p>
+            </div>
+          </div>
+        )}
+
+        {isConnected && isReceiving && !showFullReport ? (
           <Tabs
             defaultValue="tool-failure"
             value={activeTab}
@@ -436,13 +610,17 @@ const AIAnalytics = ({
                   <li className="flex items-start gap-2">
                     <Zap className="h-4 w-4 text-cyan-400 mt-0.5" />
                     <span className="text-sm text-gray-300">
-                      Schedule battery replacement within next 24 hours
+                      {predictions.toolFailure.risk > 40
+                        ? "Schedule battery replacement within next 24 hours"
+                        : "Monitor battery voltage for any significant drops"}
                     </span>
                   </li>
                   <li className="flex items-start gap-2">
                     <Zap className="h-4 w-4 text-cyan-400 mt-0.5" />
                     <span className="text-sm text-gray-300">
-                      Inspect pulser assembly during next connection
+                      {predictions.toolFailure.components[1].risk > 30
+                        ? "Inspect pulser assembly during next connection"
+                        : "Pulser assembly operating within normal parameters"}
                     </span>
                   </li>
                 </ul>
@@ -567,15 +745,23 @@ const AIAnalytics = ({
                 </h4>
                 <ul className="space-y-2">
                   <li className="flex items-start gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-500 mt-0.5" />
+                    {predictions.stuckPipe.risk < 20 ? (
+                      <CheckCircle className="h-4 w-4 text-green-500 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5" />
+                    )}
                     <span className="text-sm text-gray-300">
-                      Maintain current drilling parameters
+                      {predictions.stuckPipe.risk < 20
+                        ? "Maintain current drilling parameters"
+                        : "Consider adjusting drilling parameters to reduce risk"}
                     </span>
                   </li>
                   <li className="flex items-start gap-2">
                     <Zap className="h-4 w-4 text-cyan-400 mt-0.5" />
                     <span className="text-sm text-gray-300">
-                      Monitor torque variations during next 30 minutes
+                      {predictions.stuckPipe.indicators[0].value > 30
+                        ? "Monitor torque variations during next 30 minutes"
+                        : "Torque variations within normal range"}
                     </span>
                   </li>
                 </ul>
@@ -589,12 +775,48 @@ const AIAnalytics = ({
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
                       data={[
-                        { time: "00:00", value: 10 },
-                        { time: "01:00", value: 12 },
-                        { time: "02:00", value: 8 },
-                        { time: "03:00", value: 15 },
-                        { time: "04:00", value: 12 },
-                        { time: "05:00", value: 10 },
+                        {
+                          time: "00:00",
+                          value: Math.max(
+                            5,
+                            predictions.stuckPipe.indicators[0].value * 0.8,
+                          ),
+                        },
+                        {
+                          time: "01:00",
+                          value: Math.max(
+                            5,
+                            predictions.stuckPipe.indicators[0].value * 0.9,
+                          ),
+                        },
+                        {
+                          time: "02:00",
+                          value: Math.max(
+                            5,
+                            predictions.stuckPipe.indicators[0].value * 0.7,
+                          ),
+                        },
+                        {
+                          time: "03:00",
+                          value: Math.max(
+                            5,
+                            predictions.stuckPipe.indicators[0].value * 1.1,
+                          ),
+                        },
+                        {
+                          time: "04:00",
+                          value: Math.max(
+                            5,
+                            predictions.stuckPipe.indicators[0].value * 0.9,
+                          ),
+                        },
+                        {
+                          time: "05:00",
+                          value: Math.max(
+                            5,
+                            predictions.stuckPipe.indicators[0].value * 0.8,
+                          ),
+                        },
                       ]}
                       margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
                     >
@@ -742,11 +964,41 @@ const AIAnalytics = ({
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
                       data={[
-                        { time: "00:00", quality: 82 },
-                        { time: "01:00", quality: 85 },
-                        { time: "02:00", quality: 80 },
-                        { time: "03:00", quality: 75 },
-                        { time: "04:00", quality: 87 },
+                        {
+                          time: "00:00",
+                          quality: Math.max(
+                            50,
+                            predictions.decodeQuality.quality * 0.9,
+                          ),
+                        },
+                        {
+                          time: "01:00",
+                          quality: Math.max(
+                            50,
+                            predictions.decodeQuality.quality * 0.95,
+                          ),
+                        },
+                        {
+                          time: "02:00",
+                          quality: Math.max(
+                            50,
+                            predictions.decodeQuality.quality * 0.85,
+                          ),
+                        },
+                        {
+                          time: "03:00",
+                          quality: Math.max(
+                            50,
+                            predictions.decodeQuality.quality * 0.8,
+                          ),
+                        },
+                        {
+                          time: "04:00",
+                          quality: Math.max(
+                            50,
+                            predictions.decodeQuality.quality,
+                          ),
+                        },
                       ]}
                       margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
                     >
@@ -934,7 +1186,7 @@ const AIAnalytics = ({
               </div>
             </TabsContent>
           </Tabs>
-        ) : (
+        ) : isConnected && isReceiving && showFullReport ? (
           <ScrollArea className="flex-grow p-4 bg-gradient-to-b from-gray-950 to-gray-900">
             <div className="space-y-6">
               <div className="flex justify-between items-center">
@@ -1115,15 +1367,17 @@ const AIAnalytics = ({
                       <li className="flex items-start gap-2">
                         <AlertTriangle className="h-4 w-4 text-yellow-400 mt-0.5" />
                         <span className="text-sm text-gray-300">
-                          Schedule battery replacement within next 24 hours to
-                          prevent tool failure
+                          {predictions.toolFailure.risk > 40
+                            ? "Schedule battery replacement within next 24 hours to prevent tool failure"
+                            : "Monitor battery voltage for any significant drops"}
                         </span>
                       </li>
                       <li className="flex items-start gap-2">
                         <AlertTriangle className="h-4 w-4 text-yellow-400 mt-0.5" />
                         <span className="text-sm text-gray-300">
-                          Reduce WOB by 5-10% to mitigate lateral vibration
-                          (currently at {predictions.shockAndVibe.lateral}%)
+                          {predictions.shockAndVibe.lateral > 40
+                            ? `Reduce WOB by 5-10% to mitigate lateral vibration (currently at ${predictions.shockAndVibe.lateral}%)`
+                            : "Lateral vibration is within acceptable limits"}
                         </span>
                       </li>
                     </ul>
@@ -1134,10 +1388,15 @@ const AIAnalytics = ({
                       Formation Analysis
                     </h4>
                     <p className="text-sm text-gray-400">
-                      Current formation appears to be shale based on gamma
-                      readings (80-120 API). Expect increased vibration and
-                      potential for stuck pipe. Consider adjusting drilling
-                      parameters to optimize ROP while minimizing vibration.
+                      Current formation appears to be{" "}
+                      {witsData.gamma > 80 ? "shale" : "sandstone"} based on
+                      gamma readings ({Math.round(witsData.gamma)}-
+                      {Math.round(witsData.gamma + 20)} API).
+                      {witsData.gamma > 80
+                        ? "Expect increased vibration and potential for stuck pipe."
+                        : "Formation is relatively stable."}
+                      Consider adjusting drilling parameters to optimize ROP
+                      while minimizing vibration.
                     </p>
                   </div>
 
@@ -1153,19 +1412,22 @@ const AIAnalytics = ({
                       <div className="bg-gray-900/50 p-2 rounded-md text-center">
                         <div className="text-xs text-gray-400">WOB</div>
                         <div className="text-sm font-medium text-cyan-400">
-                          16-18 klbs
+                          {Math.round(witsData.wob * 0.9)}-
+                          {Math.round(witsData.wob * 1.1)} klbs
                         </div>
                       </div>
                       <div className="bg-gray-900/50 p-2 rounded-md text-center">
                         <div className="text-xs text-gray-400">RPM</div>
                         <div className="text-sm font-medium text-cyan-400">
-                          110-130
+                          {Math.round(witsData.rotaryRpm * 0.9)}-
+                          {Math.round(witsData.rotaryRpm * 1.1)}
                         </div>
                       </div>
                       <div className="bg-gray-900/50 p-2 rounded-md text-center">
                         <div className="text-xs text-gray-400">Flow</div>
                         <div className="text-sm font-medium text-cyan-400">
-                          650-700 gpm
+                          {Math.round(witsData.flowRate * 0.95)}-
+                          {Math.round(witsData.flowRate * 1.05)} gpm
                         </div>
                       </div>
                     </div>
@@ -1185,7 +1447,7 @@ const AIAnalytics = ({
               </div>
             </div>
           </ScrollArea>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   );

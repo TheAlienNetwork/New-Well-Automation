@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +39,8 @@ import {
   AreaChart,
   Area,
 } from "recharts";
+import { useWits } from "@/context/WitsContext";
+import { useSurveys } from "@/context/SurveyContext";
 
 interface TorqueDragAnalysisProps {
   isLoading?: boolean;
@@ -52,56 +54,228 @@ const TorqueDragAnalysis = ({
   onConfigureAI = () => {},
 }: TorqueDragAnalysisProps) => {
   const [activeTab, setActiveTab] = useState("torque");
+  const { witsData } = useWits();
+  const { surveys } = useSurveys();
+  const [torqueData, setTorqueData] = useState<any[]>([]);
+  const [predictions, setPredictions] = useState({
+    stickSlip: {
+      risk: 0,
+      timeToOccurrence: "N/A",
+      recommendations: ["Waiting for data..."],
+    },
+    highTorque: {
+      risk: 0,
+      criticalDepth: 0,
+      recommendations: ["Waiting for data..."],
+    },
+    dragIssues: {
+      risk: 0,
+      affectedZones: [{ name: "Waiting for data...", severity: "Low" }],
+      recommendations: ["Waiting for data..."],
+    },
+  });
 
-  // Generate dummy data for visualization
-  const generateTorqueData = () => {
-    const data = [];
-    for (let depth = 0; depth <= 8500; depth += 100) {
-      // Create different zones with different characteristics
-      let baseTorque = 0;
-      let baseWOB = 0;
-      let baseDrag = 0;
+  // Process real-time data for visualization
+  useEffect(() => {
+    // Process survey data to create torque and drag visualization
+    if (surveys.length > 0) {
+      const data = surveys.map((survey) => {
+        const depth = survey.measuredDepth || 0;
+        const zone = getZoneByDepth(depth);
 
-      if (depth < 2000) {
-        // Surface casing zone
-        baseTorque = 2 + Math.random() * 1;
-        baseWOB = 5 + Math.random() * 2;
-        baseDrag = 3 + Math.random() * 1;
-      } else if (depth < 5000) {
-        // Intermediate zone
-        baseTorque = 5 + Math.random() * 2;
-        baseWOB = 10 + Math.random() * 3;
-        baseDrag = 8 + Math.random() * 2;
-      } else {
-        // Production zone
-        baseTorque = 12 + Math.random() * 4;
-        baseWOB = 18 + Math.random() * 5;
-        baseDrag = 15 + Math.random() * 4;
-      }
+        // Calculate torque based on real parameters
+        // In a real implementation, this would use actual torque measurements or calculations
+        const torque = calculateTorqueFromSurvey(survey, witsData);
+        const wob = witsData.wob || 0;
+        const drag = calculateDragFromSurvey(survey, witsData);
 
-      // Add some random variations
-      const torque = baseTorque + Math.sin(depth / 500) * 2;
-      const wob = baseWOB + Math.cos(depth / 400) * 3;
-      const drag = baseDrag + Math.sin(depth / 600) * 2.5;
-
-      data.push({
-        depth,
-        torque,
-        wob,
-        drag,
-        friction:
-          depth > 5000
-            ? 0.25 + Math.random() * 0.1
-            : 0.15 + Math.random() * 0.1,
+        return {
+          depth,
+          torque,
+          wob,
+          drag,
+          friction: zone.friction,
+        };
       });
+
+      // Sort by depth to ensure proper visualization
+      data.sort((a, b) => a.depth - b.depth);
+      setTorqueData(data);
+
+      // Update predictions based on real data
+      updatePredictions(data, witsData);
     }
-    return data;
+  }, [surveys, witsData]);
+
+  // Helper function to calculate torque from survey data
+  const calculateTorqueFromSurvey = (survey: any, witsData: any) => {
+    // In a real implementation, this would use actual torque calculations
+    // For now, we'll use a simplified model based on depth and inclination
+    const depth = survey.measuredDepth || 0;
+    const inclination = survey.inclination || 0;
+    const rotaryRpm = witsData.rotaryRpm || 0;
+
+    // Basic torque model: deeper + higher inclination = more torque
+    let baseTorque = depth / 1000; // 1 unit per 1000 ft
+    baseTorque *= 1 + inclination / 45; // Increase with inclination
+    baseTorque *= 1 + rotaryRpm / 100; // Adjust for RPM
+
+    return Math.max(1, baseTorque);
   };
 
-  const torqueData = generateTorqueData();
+  // Helper function to calculate drag from survey data
+  const calculateDragFromSurvey = (survey: any, witsData: any) => {
+    // In a real implementation, this would use actual drag calculations
+    // For now, we'll use a simplified model
+    const depth = survey.measuredDepth || 0;
+    const inclination = survey.inclination || 0;
 
-  // Zone modeling data
-  const zoneData = [
+    // Basic drag model: deeper + higher inclination = more drag
+    let baseDrag = depth / 800; // 1 unit per 800 ft
+    baseDrag *= 1 + inclination / 30; // Increase with inclination
+
+    return Math.max(1, baseDrag);
+  };
+
+  // Update AI predictions based on real data
+  const updatePredictions = (data: any[], witsData: any) => {
+    // In a real implementation, this would use actual AI models
+    // For now, we'll use simplified risk calculations
+
+    // Calculate stick-slip risk based on torque variations and RPM
+    const torqueValues = data.map((d) => d.torque);
+    const torqueVariation = calculateVariation(torqueValues);
+    const rotaryRpm = witsData.rotaryRpm || 0;
+    const stickSlipRisk = Math.min(
+      100,
+      Math.max(
+        0,
+        torqueVariation * 20 +
+          (rotaryRpm < 40 ? 30 : 0) +
+          (rotaryRpm > 180 ? 20 : 0),
+      ),
+    );
+
+    // Calculate high torque risk
+    const maxTorque = Math.max(...torqueValues, 0);
+    const maxDepth = data.length > 0 ? data[data.length - 1].depth : 0;
+    const highTorqueRisk = Math.min(100, Math.max(0, (maxTorque / 20) * 100));
+
+    // Calculate drag issues risk
+    const dragValues = data.map((d) => d.drag);
+    const maxDrag = Math.max(...dragValues, 0);
+    const dragRisk = Math.min(100, Math.max(0, (maxDrag / 25) * 100));
+
+    // Update predictions state
+    setPredictions({
+      stickSlip: {
+        risk: Math.round(stickSlipRisk),
+        timeToOccurrence: stickSlipRisk > 50 ? "~2 hours" : "Not imminent",
+        recommendations: getStickSlipRecommendations(stickSlipRisk, rotaryRpm),
+      },
+      highTorque: {
+        risk: Math.round(highTorqueRisk),
+        criticalDepth: findCriticalDepth(data, "torque"),
+        recommendations: getHighTorqueRecommendations(highTorqueRisk),
+      },
+      dragIssues: {
+        risk: Math.round(dragRisk),
+        affectedZones: getAffectedZones(data),
+        recommendations: getDragRecommendations(dragRisk),
+      },
+    });
+  };
+
+  // Helper function to calculate statistical variation
+  const calculateVariation = (values: number[]) => {
+    if (values.length < 2) return 0;
+    const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+    const squaredDiffs = values.map((val) => Math.pow(val - mean, 2));
+    const variance =
+      squaredDiffs.reduce((sum, val) => sum + val, 0) / values.length;
+    return Math.sqrt(variance) / mean; // Coefficient of variation
+  };
+
+  // Helper function to find critical depth
+  const findCriticalDepth = (data: any[], property: string) => {
+    if (data.length === 0) return 0;
+    const maxValue = Math.max(...data.map((d) => d[property]));
+    const criticalPoint = data.find((d) => d[property] === maxValue);
+    return criticalPoint ? criticalPoint.depth : data[data.length - 1].depth;
+  };
+
+  // Helper function to get affected zones
+  const getAffectedZones = (data: any[]) => {
+    const zones = getZones();
+    const zoneRisks = zones.map((zone) => {
+      const zoneData = data.filter(
+        (d) => d.depth >= zone.start && d.depth <= zone.end,
+      );
+      if (zoneData.length === 0) return { name: zone.name, severity: "Low" };
+
+      const avgDrag =
+        zoneData.reduce((sum, d) => sum + d.drag, 0) / zoneData.length;
+      let severity = "Low";
+      if (avgDrag > 15) severity = "High";
+      else if (avgDrag > 8) severity = "Medium";
+
+      return { name: zone.name, severity };
+    });
+
+    return zoneRisks.filter((z) => z.severity !== "Low");
+  };
+
+  // Get recommendations based on risk levels
+  const getStickSlipRecommendations = (risk: number, rpm: number) => {
+    if (risk < 20) return ["Normal operations - no action needed"];
+    if (risk < 50)
+      return [
+        "Monitor torque fluctuations",
+        rpm < 60 ? "Increase RPM to 80-100" : "Maintain current RPM",
+        "Check for proper lubrication",
+      ];
+    return [
+      "Reduce WOB by 10-15%",
+      rpm < 100 ? "Increase RPM to 120-140" : "Maintain current RPM",
+      "Monitor torque fluctuations closely",
+      "Consider adding lubricant to drilling fluid",
+    ];
+  };
+
+  const getHighTorqueRecommendations = (risk: number) => {
+    if (risk < 20) return ["Normal operations - no action needed"];
+    if (risk < 50)
+      return [
+        "Monitor torque trend",
+        "Check for proper lubrication",
+        "Verify proper hole cleaning",
+      ];
+    return [
+      "Use lubricant in drilling fluid",
+      "Reduce friction in production zone",
+      "Monitor torque trend closely",
+      "Consider reducing WOB",
+    ];
+  };
+
+  const getDragRecommendations = (risk: number) => {
+    if (risk < 20) return ["Normal operations - no action needed"];
+    if (risk < 50)
+      return [
+        "Monitor drag parameters",
+        "Rotate pipe periodically",
+        "Check for proper hole cleaning",
+      ];
+    return [
+      "Rotate pipe more frequently",
+      "Check for ledges or doglegs",
+      "Consider reaming operation",
+      "Verify proper hole cleaning",
+    ];
+  };
+
+  // Zone data
+  const getZones = () => [
     {
       name: "Surface Casing",
       start: 0,
@@ -125,36 +299,15 @@ const TorqueDragAnalysis = ({
     },
   ];
 
-  // AI predictions
-  const predictions = {
-    stickSlip: {
-      risk: 35,
-      timeToOccurrence: "~2 hours",
-      recommendations: [
-        "Reduce WOB by 10%",
-        "Increase RPM to 120",
-        "Monitor torque fluctuations",
-      ],
-    },
-    highTorque: {
-      risk: 42,
-      criticalDepth: 7200,
-      recommendations: [
-        "Use lubricant in drilling fluid",
-        "Reduce friction in production zone",
-        "Monitor torque trend closely",
-      ],
-    },
-    dragIssues: {
-      risk: 28,
-      affectedZones: [{ name: "Production Zone", severity: "Medium" }],
-      recommendations: [
-        "Rotate pipe more frequently",
-        "Check for ledges or doglegs",
-        "Consider reaming operation",
-      ],
-    },
+  const getZoneByDepth = (depth: number) => {
+    const zones = getZones();
+    return (
+      zones.find((zone) => depth >= zone.start && depth <= zone.end) || zones[0]
+    );
   };
+
+  // Use real zone data
+  const zoneData = getZones();
 
   // Helper function to determine risk color
   const getRiskColor = (risk: number) => {

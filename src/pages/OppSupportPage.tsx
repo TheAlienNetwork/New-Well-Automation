@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import Navbar from "@/components/layout/Navbar";
+// Import the correct component path
+import Header from "@/components/dashboard/Header";
 import StatusBar from "@/components/dashboard/StatusBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -532,7 +533,7 @@ const OppSupportPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200">
-      <Navbar />
+      <Header />
       <StatusBar />
 
       <div className="container mx-auto px-4 py-6">

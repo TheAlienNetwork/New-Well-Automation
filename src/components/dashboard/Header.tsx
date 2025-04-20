@@ -72,6 +72,17 @@ const Header = ({
     userName !== undefined
       ? userName
       : `${userProfile.firstName} ${userProfile.lastName}`;
+
+  // Update display name when userProfile changes
+  useEffect(() => {
+    if (!userName) {
+      // Only update if not explicitly provided via props
+      setWellName(userProfile.wellName || propWellName || "Well Alpha-123");
+      setRigName(
+        userProfile.rigName || propRigName || "Precision Drilling #42",
+      );
+    }
+  }, [userProfile, userName, propWellName, propRigName]);
   const displayImage =
     profileImage !== undefined ? profileImage : userProfile.profileImage;
 
@@ -167,6 +178,11 @@ const Header = ({
                       | Az: {latestSurvey.azimuth.toFixed(2)}°
                     </span>
                   )}
+                  {latestSurvey.toolFace && (
+                    <span className="ml-1">
+                      | TF: {latestSurvey.toolFace.toFixed(2)}°
+                    </span>
+                  )}
                 </span>
               )}
             </p>
@@ -180,21 +196,26 @@ const Header = ({
           {getStatusIcon()}
           <span className="text-sm text-gray-300">{getStatusText()}</span>
         </div>
-        {latestSurvey && (
-          <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
-            <span className="text-sm text-gray-300">
-              MD: {latestSurvey.bitDepth.toFixed(1)}ft
-            </span>
-          </div>
-        )}
-        {latestSurvey && (
-          <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
-            <span className="text-sm text-gray-300">
-              Inc: {latestSurvey.inclination.toFixed(2)}° | Az:{" "}
-              {latestSurvey.azimuth.toFixed(2)}°
-            </span>
-          </div>
-        )}
+        <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+          <span className="text-sm text-gray-300">
+            MD: {latestSurvey ? latestSurvey.bitDepth.toFixed(1) : "0.0"}ft
+          </span>
+        </div>
+        <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+          <span className="text-sm text-gray-300">
+            Inc: {latestSurvey ? latestSurvey.inclination.toFixed(2) : "0.00"}°
+            | Az: {latestSurvey ? latestSurvey.azimuth.toFixed(2) : "0.00"}°
+          </span>
+        </div>
+        <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+          <span className="text-sm text-gray-300">
+            TF:{" "}
+            {latestSurvey && latestSurvey.toolFace !== undefined
+              ? latestSurvey.toolFace.toFixed(2)
+              : "0.00"}
+            °
+          </span>
+        </div>
       </div>
 
       {/* Right section with actions */}

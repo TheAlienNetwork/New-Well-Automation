@@ -42,7 +42,7 @@ const ParameterCard = ({
       <div
         className={`text-sm font-bold ${isConnected ? getColorClass() : "text-gray-500"}`}
       >
-        {isConnected ? value.toFixed(2) : "--"}{" "}
+        {isConnected ? value.toFixed(2) : "0.00"}{" "}
         <span className="text-xs font-normal text-gray-500">{unit}</span>
       </div>
     </div>

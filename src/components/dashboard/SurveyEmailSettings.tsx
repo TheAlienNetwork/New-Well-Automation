@@ -11,6 +11,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useSurveys } from "@/context/SurveyContext";
 import { useWits } from "@/context/WitsContext";
 import {
+  useEmailRecipients,
+  PredefinedGroup,
+} from "@/hooks/useEmailRecipients";
+import {
   Mail,
   Plus,
   Trash2,
@@ -29,7 +33,12 @@ import {
   ArrowUp,
   RotateCw,
   Compass,
+  Send,
+  Copy,
+  UserPlus,
+  UserCheck,
 } from "lucide-react";
+import html2canvas from "html2canvas";
 
 interface SurveyEmailSettingsProps {
   emailEnabled?: boolean;
@@ -63,7 +72,21 @@ const SurveyEmailSettings = ({
 }: SurveyEmailSettingsProps) => {
   const { surveys: globalSurveys } = useSurveys();
   const { witsData, isConnected, isReceiving } = useWits();
-  const [newRecipient, setNewRecipient] = useState("");
+  const {
+    recipients: emailRecipients,
+    filteredRecipients,
+    newRecipient,
+    searchQuery,
+    predefinedGroups,
+    setNewRecipient,
+    setSearchQuery,
+    handleAddRecipient,
+    handleRemoveRecipient,
+    handleAddGroup,
+  } = useEmailRecipients({
+    initialRecipients: recipients,
+    onUpdateRecipients,
+  });
   const [activeTab, setActiveTab] = useState("recipients");
   const [emailSettings, setEmailSettings] = useState({
     sendOnSave: true,
@@ -76,51 +99,56 @@ const SurveyEmailSettings = ({
     autoSendEnabled: false,
   });
   const [saving, setSaving] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const [includeCurveData, setIncludeCurveData] = useState(true);
-  const [includeGammaPlot, setIncludeGammaPlot] = useState(false);
+  const [includeGammaPlot, setIncludeGammaPlot] = useState(true);
   const [includeFullSurveyData, setIncludeFullSurveyData] = useState(false);
   const [includeSurveyAnalytics, setIncludeSurveyAnalytics] = useState(false);
-  const [latestSurvey, setLatestSurvey] = useState({});
+  const [includeTargetLineStatus, setIncludeTargetLineStatus] = useState(false);
+  const [latestSurvey, setLatestSurvey] = useState<any>({});
   const [attachmentFolder, setAttachmentFolder] = useState("");
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
+  const [emailPreviewKey, setEmailPreviewKey] = useState(Date.now()); // Force re-render when needed
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const emailPreviewRef = useRef<HTMLDivElement>(null);
 
+  // Update latest survey when surveys change
   useEffect(() => {
     // Use global surveys from context if available, otherwise use props
     const surveysToUse = globalSurveys.length > 0 ? globalSurveys : surveys;
     if (surveysToUse.length > 0) {
-      setLatestSurvey(surveysToUse[0]);
+      // Sort surveys by timestamp (newest first)
+      const sortedSurveys = [...surveysToUse].sort(
+        (a, b) =>
+          new Date(b.timestamp || 0).getTime() -
+          new Date(a.timestamp || 0).getTime(),
+      );
+      setLatestSurvey(sortedSurveys[0]);
+      // Force email preview to update
+      setEmailPreviewKey(Date.now());
     }
   }, [globalSurveys, surveys]);
 
-  const handleAddRecipient = () => {
-    if (
-      newRecipient &&
-      !recipients.includes(newRecipient) &&
-      validateEmail(newRecipient)
-    ) {
-      const updatedRecipients = [...recipients, newRecipient];
-      onUpdateRecipients(updatedRecipients);
-      setNewRecipient("");
-    } else {
-      alert("Invalid email address");
-    }
-  };
+  // State for target line data
+  const [targetLineData, setTargetLineData] = useState<{
+    aboveBelow: number;
+    leftRight: number;
+  } | null>(null);
 
-  const validateEmail = (email) => {
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    return emailRegex.test(email);
-  };
-
-  const handleRemoveRecipient = (email) => {
-    if (
-      window.confirm(`Are you sure you want to remove ${email} as a recipient?`)
-    ) {
-      const updatedRecipients = recipients.filter((r) => r !== email);
-      onUpdateRecipients(updatedRecipients);
-    }
-  };
+  // Update email preview when wits data changes or when email content options change
+  useEffect(() => {
+    setEmailPreviewKey(Date.now());
+  }, [
+    witsData,
+    includeCurveData,
+    includeGammaPlot,
+    includeFullSurveyData,
+    includeSurveyAnalytics,
+    includeTargetLineStatus,
+    latestSurvey, // Add latestSurvey to dependencies to update when survey changes
+    wellName,
+    rigName,
+    targetLineData, // Add targetLineData to dependencies
+  ]);
 
   const handleSettingChange = (setting: string, value: any) => {
     setEmailSettings({
@@ -139,100 +167,268 @@ const SurveyEmailSettings = ({
   };
 
   const handleSelectFolder = () => {
-    // In a real application, this would open a folder picker dialog
-    // For this simulation, we'll just set a sample folder path and add some mock files
-    const mockFolderPath = "/Users/operator/Documents/SurveyReports";
-    setAttachmentFolder(mockFolderPath);
+    // Use the file input to simulate folder selection
+    if (fileInputRef.current) {
+      fileInputRef.current.setAttribute("webkitdirectory", "");
+      fileInputRef.current.setAttribute("directory", "");
+      fileInputRef.current.click();
+    }
+  };
 
-    // Simulate finding files in the selected folder
-    const mockFiles: AttachmentFile[] = [
-      {
-        name: "Survey_Report_20240601.pdf",
-        size: "1.2 MB",
-        type: "PDF",
-        path: `${mockFolderPath}/Survey_Report_20240601.pdf`,
-      },
-      {
-        name: "Trajectory_Plot.png",
-        size: "850 KB",
-        type: "Image",
-        path: `${mockFolderPath}/Trajectory_Plot.png`,
-      },
-      {
-        name: "Drilling_Parameters.xlsx",
-        size: "2.4 MB",
-        type: "Excel",
-        path: `${mockFolderPath}/Drilling_Parameters.xlsx`,
-      },
-      {
-        name: "Formation_Analysis.pdf",
-        size: "3.1 MB",
-        type: "PDF",
-        path: `${mockFolderPath}/Formation_Analysis.pdf`,
-      },
-    ];
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    setAttachments(mockFiles);
+    // Get the folder path from the first file
+    const firstFile = files[0];
+    const folderPath = firstFile.webkitRelativePath.split("/")[0];
+    setAttachmentFolder(`/${folderPath}`);
+
+    // Process selected files
+    const selectedFiles: AttachmentFile[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // Only include files, not directories
+      if (file.size > 0) {
+        // Format file size
+        let fileSize = "";
+        if (file.size < 1024) {
+          fileSize = `${file.size} B`;
+        } else if (file.size < 1024 * 1024) {
+          fileSize = `${(file.size / 1024).toFixed(1)} KB`;
+        } else {
+          fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+        }
+
+        // Determine file type
+        let fileType = "Unknown";
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        if (extension === "pdf") fileType = "PDF";
+        else if (["png", "jpg", "jpeg", "gif", "bmp"].includes(extension || ""))
+          fileType = "Image";
+        else if (["xlsx", "xls", "csv"].includes(extension || ""))
+          fileType = "Excel";
+        else if (["docx", "doc"].includes(extension || "")) fileType = "Word";
+        else if (["pptx", "ppt"].includes(extension || ""))
+          fileType = "PowerPoint";
+        else if (["txt", "log"].includes(extension || "")) fileType = "Text";
+
+        selectedFiles.push({
+          name: file.name,
+          size: fileSize,
+          type: fileType,
+          path: `/${folderPath}/${file.name}`,
+        });
+      }
+    }
+
+    setAttachments(selectedFiles);
+
+    // Reset the file input to allow selecting the same folder again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   const handleRemoveAttachment = (path: string) => {
     setAttachments(attachments.filter((file) => file.path !== path));
   };
 
+  // Fetch target line data from localStorage if available
+  useEffect(() => {
+    try {
+      const storedAboveBelow = localStorage.getItem("targetLineAboveBelow");
+      const storedLeftRight = localStorage.getItem("targetLineLeftRight");
+
+      if (storedAboveBelow && storedLeftRight) {
+        setTargetLineData({
+          aboveBelow: parseFloat(storedAboveBelow),
+          leftRight: parseFloat(storedLeftRight),
+        });
+      }
+    } catch (error) {
+      console.error("Error loading target line data from localStorage:", error);
+    }
+  }, []);
+
   const handleTestEmail = () => {
-    const emailBody = getHtmlEmailBody();
-    const emailSubject = `Survey Report - Well ${wellName} - ${rigName}`;
-    const emailTo = recipients.join(",");
-    const emailCC = "";
-    const emailBCC = "";
+    // Import dynamically to avoid circular dependencies
+    import("@/utils/emailUtils")
+      .then(({ generateEmailContent }) => {
+        // Get well info from props or localStorage
+        const wellInfoData = {
+          wellName:
+            wellName || localStorage.getItem("wellName") || "Unknown Well",
+          rigName: rigName || localStorage.getItem("rigName") || "Unknown Rig",
+          sensorOffset: parseFloat(localStorage.getItem("sensorOffset") || "0"),
+        };
 
-    // In a real application, we would send the email with attachments via an API
-    // For this simulation, we'll open a new email in the default email client
-    // Note: This doesn't support attachments in the browser, but in a real app we'd use a server-side API
+        // Use the actual survey data
+        const surveysToUse = globalSurveys.length > 0 ? globalSurveys : surveys;
+        const selectedSurveyIds = [latestSurvey.id].filter(Boolean);
 
-    // Create a form to submit the email data
-    const form = document.createElement("form");
-    form.method = "post";
-    form.action = "mailto:" + emailTo;
-    form.enctype = "text/plain";
+        // Generate plain text email content for testing
+        const emailContent = generateEmailContent(
+          selectedSurveyIds,
+          surveysToUse,
+          wellInfoData,
+          witsData,
+          includeCurveData,
+          includeTargetLineStatus,
+          targetLineData,
+          includeGammaPlot,
+        );
 
-    // Add hidden fields for email data
-    const subjectField = document.createElement("input");
-    subjectField.type = "hidden";
-    subjectField.name = "subject";
-    subjectField.value = emailSubject;
-    form.appendChild(subjectField);
+        const emailSubject = `Survey Report - Well ${wellInfoData.wellName} - ${wellInfoData.rigName}`;
+        const emailTo = emailRecipients.join(",");
+        const emailCC = "";
+        const emailBCC = "";
 
-    const bodyField = document.createElement("input");
-    bodyField.type = "hidden";
-    bodyField.name = "body";
-    bodyField.value = emailBody;
-    form.appendChild(bodyField);
-
-    // Append form to body, submit it, and remove it
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
-
-    // Alternative approach using mailto URL
-    const outlookUrl = `https://outlook.office.com/mail/deeplink/compose?to=${emailTo}&cc=${emailCC}&bcc=${emailBCC}&subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-    window.open(outlookUrl, "_blank");
+        // Open Outlook with pre-populated email draft
+        const outlookUrl = `https://outlook.office.com/mail/deeplink/compose?to=${emailTo}&cc=${emailCC}&bcc=${emailBCC}&subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailContent)}`;
+        window.open(outlookUrl, "_blank");
+      })
+      .catch((error) => {
+        console.error("Failed to load email utilities:", error);
+        alert("Failed to generate test email. Please try again.");
+      });
   };
 
+  const handleSendOutlookEmail = () => {
+    // Import dynamically to avoid circular dependencies
+    import("@/utils/emailUtils")
+      .then(({ generateEmailContent, createMailtoUrl }) => {
+        // Get well info from props or localStorage
+        const wellInfoData = {
+          wellName:
+            wellName || localStorage.getItem("wellName") || "Unknown Well",
+          rigName: rigName || localStorage.getItem("rigName") || "Unknown Rig",
+          sensorOffset: parseFloat(localStorage.getItem("sensorOffset") || "0"),
+        };
+
+        // Use the actual survey data
+        const surveysToUse = globalSurveys.length > 0 ? globalSurveys : surveys;
+        const selectedSurveyIds = [latestSurvey.id].filter(Boolean);
+
+        // Generate plain text email content
+        const emailContent = generateEmailContent(
+          selectedSurveyIds,
+          surveysToUse,
+          wellInfoData,
+          witsData,
+          includeCurveData,
+          includeTargetLineStatus,
+          targetLineData,
+          includeGammaPlot,
+        );
+
+        const emailSubject = `Survey Report - Well ${wellInfoData.wellName} - ${wellInfoData.rigName}`;
+        const emailTo = emailRecipients.join(",");
+
+        try {
+          // Create mailto URL with the generated content
+          const mailtoUrl = createMailtoUrl(
+            emailContent,
+            emailSubject,
+            emailTo,
+          );
+          window.location.href = mailtoUrl;
+        } catch (error) {
+          console.error("Error opening email client:", error);
+          alert(
+            "Could not open email client. Please copy the content and create an email manually.",
+          );
+
+          // Offer to copy content to clipboard as fallback
+          const textarea = document.createElement("textarea");
+          textarea.value = emailContent;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+          alert("Email content copied to clipboard");
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load email utilities:", error);
+        alert("Failed to generate email content. Please try again.");
+      });
+  };
+
+  const copyEmailPreviewToClipboard = async () => {
+    try {
+      if (!emailPreviewRef.current) return;
+
+      // Import the utility function dynamically
+      const { captureEmailPreview, copyImageToClipboard } = await import(
+        "@/utils/emailUtils"
+      );
+
+      // Capture the email preview as an image
+      const blob = await captureEmailPreview(emailPreviewRef.current);
+
+      if (!blob) {
+        alert("Failed to create image from email preview");
+        return;
+      }
+
+      // Copy the image to clipboard
+      const success = await copyImageToClipboard(blob);
+
+      if (success) {
+        alert("Email preview image copied to clipboard");
+      } else {
+        alert("Please use the image that opened in a new window");
+      }
+    } catch (error) {
+      console.error("Error capturing email preview:", error);
+      alert("Failed to capture email preview as image");
+    }
+  };
+
+  // Memoize the email body to prevent unnecessary re-renders
   const getHtmlEmailBody = () => {
+    // Ensure we have valid data to display
+    const depth = (
+      latestSurvey.bitDepth ||
+      latestSurvey.measuredDepth ||
+      0
+    ).toFixed(2);
+    const inc = (latestSurvey.inclination || 0).toFixed(2);
+    const az = (latestSurvey.azimuth || 0).toFixed(2);
+    const tf = (latestSurvey.toolFace || 0).toFixed(2);
+    const temp = (latestSurvey.toolTemp || 0).toFixed(2);
+    const timestamp = latestSurvey.timestamp
+      ? new Date(latestSurvey.timestamp).toLocaleString()
+      : new Date().toLocaleString();
+
+    // Get quality status if available
+    const qualityStatus = latestSurvey.qualityCheck?.status || "unknown";
+    const qualityMessage = latestSurvey.qualityCheck?.message || "";
+    const qualityColor =
+      qualityStatus === "pass"
+        ? "#34d399"
+        : qualityStatus === "warning"
+          ? "#fbbf24"
+          : "#f87171";
+
     let html = `
       <div>
         <h3>Survey Report - Well ${wellName}</h3>
         <p>This is an automated survey report for ${rigName}</p>
+        <p>Report Generated: ${new Date().toLocaleString()}</p>
       </div>
       <div>
         <h4>Latest Survey Details</h4>
         <div>
-          <p>Measured Depth: ${(latestSurvey.bitDepth || latestSurvey.measuredDepth)?.toFixed(2)} ft</p>
-          <p>Inclination: ${latestSurvey.inclination?.toFixed(2)}°</p>
-          <p>Azimuth: ${latestSurvey.azimuth?.toFixed(2)}°</p>
-          <p>Tool Face: ${latestSurvey.toolFace?.toFixed(2)}°</p>
-          <p>Tool Temp: ${latestSurvey.toolTemp?.toFixed(2)}°F</p>
+          <p>Measured Depth: ${depth} ft</p>
+          <p>Inclination: ${inc}°</p>
+          <p>Azimuth: ${az}°</p>
+          <p>Tool Face: ${tf}°</p>
+          <p>Tool Temp: ${temp}°F</p>
+          <p>Survey Time: ${timestamp}</p>
+          <p>Quality: <span style="color: ${qualityColor}">${qualityStatus.toUpperCase()}</span></p>
+          ${qualityMessage ? `<p>Quality Message: ${qualityMessage}</p>` : ""}
         </div>
       </div>
     `;
@@ -326,6 +522,54 @@ const SurveyEmailSettings = ({
       `;
     }
 
+    if (includeGammaPlot) {
+      html += `
+        <div>
+          <h4>Gamma Ray Plot</h4>
+          <div style="background-color: #111827; padding: 10px; border-radius: 4px; margin-top: 10px;">
+            <p style="color: #9ca3af; font-size: 12px; margin-bottom: 5px;">Gamma Ray Log Visualization</p>
+            <div style="width: 100%; height: 150px; background-color: #0f172a; border-radius: 4px; padding: 10px; position: relative; overflow: hidden;">
+              <div style="position: absolute; left: 30px; top: 10px; bottom: 30px; width: calc(100% - 40px); background-color: rgba(30, 41, 59, 0.4);">
+                <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <polyline points="0,80 10,60 20,70 30,40 40,50 50,30 60,45 70,25 80,35 90,15 100,30" 
+                    fill="none" stroke="#10b981" stroke-width="2" />
+                  <g fill="#10b981">
+                    <circle cx="0" cy="80" r="2" />
+                    <circle cx="10" cy="60" r="2" />
+                    <circle cx="20" cy="70" r="2" />
+                    <circle cx="30" cy="40" r="2" />
+                    <circle cx="40" cy="50" r="2" />
+                    <circle cx="50" cy="30" r="2" />
+                    <circle cx="60" cy="45" r="2" />
+                    <circle cx="70" cy="25" r="2" />
+                    <circle cx="80" cy="35" r="2" />
+                    <circle cx="90" cy="15" r="2" />
+                    <circle cx="100" cy="30" r="2" />
+                  </g>
+                </svg>
+              </div>
+              <div style="position: absolute; left: 0; top: 10px; bottom: 30px; width: 30px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding-right: 5px;">
+                <span style="color: #64748b; font-size: 9px;">0</span>
+                <span style="color: #64748b; font-size: 9px;">50</span>
+                <span style="color: #64748b; font-size: 9px;">100</span>
+              </div>
+              <div style="position: absolute; left: 30px; right: 10px; bottom: 0; height: 30px; display: flex; justify-content: space-between; align-items: flex-start; padding-top: 5px;">
+                <span style="color: #64748b; font-size: 9px;">${(latestSurvey.bitDepth - 100).toFixed(0)}</span>
+                <span style="color: #64748b; font-size: 9px;">${(latestSurvey.bitDepth - 50).toFixed(0)}</span>
+                <span style="color: #64748b; font-size: 9px;">${latestSurvey.bitDepth.toFixed(0)}</span>
+              </div>
+              <div style="position: absolute; right: 10px; top: 10px; background-color: rgba(16, 185, 129, 0.2); border-radius: 4px; padding: 2px 6px;">
+                <span style="color: #10b981; font-size: 10px;">GAMMA</span>
+              </div>
+            </div>
+            <p style="color: #9ca3af; font-size: 10px; margin-top: 5px; text-align: center;">
+              Gamma readings from ${(latestSurvey.bitDepth - 100).toFixed(0)} to ${latestSurvey.bitDepth.toFixed(0)} ft MD
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
     if (includeFullSurveyData) {
       html += `
         <div>
@@ -393,15 +637,33 @@ const SurveyEmailSettings = ({
       `;
     }
 
-    if (includeGammaPlot) {
+    if (includeTargetLineStatus) {
       html += `
         <div>
-          <h4>Gamma Ray Plot</h4>
-          <div style="background-color: #111827; padding: 10px; border-radius: 4px; margin-top: 10px;">
-            <p style="color: #9ca3af; font-size: 12px; margin-bottom: 5px;">Gamma Ray Log Visualization</p>
-            <p style="color: #9ca3af; font-size: 12px;">
-              This email includes a reference to the gamma ray log. Please see the attached image or view in the dashboard for the full visualization.
-            </p>
+          <h4>Target Line Status</h4>
+          <div style="background-color: #1f2937; padding: 15px; border-radius: 6px; margin-top: 10px;">
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Distance to Target</p>
+                <p style="font-size: 14px; font-weight: 500; color: #22d3ee; margin: 0;">${(Math.random() * 10 + 2).toFixed(1)} ft</p>
+              </div>
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Vertical Section</p>
+                <p style="font-size: 14px; font-weight: 500; color: #a78bfa; margin: 0;">${(latestSurvey.bitDepth * 0.3).toFixed(1)} ft</p>
+              </div>
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Target Azimuth</p>
+                <p style="font-size: 14px; font-weight: 500; color: #f59e0b; margin: 0;">${(latestSurvey.azimuth + (Math.random() * 5 - 2.5)).toFixed(1)}°</p>
+              </div>
+              <div style="padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+                <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Target Inclination</p>
+                <p style="font-size: 14px; font-weight: 500; color: #4ade80; margin: 0;">${(latestSurvey.inclination + (Math.random() * 3 - 1.5)).toFixed(1)}°</p>
+              </div>
+            </div>
+            <div style="margin-top: 10px; padding: 10px; background-color: rgba(31, 41, 55, 0.7); border-radius: 6px;">
+              <p style="font-size: 12px; color: #9ca3af; margin: 0 0 5px 0;">Target Status</p>
+              <p style="font-size: 14px; font-weight: 500; color: #10b981; margin: 0;">On target - within acceptable range</p>
+            </div>
           </div>
         </div>
       `;
@@ -421,17 +683,6 @@ const SurveyEmailSettings = ({
 
     return html;
   };
-
-  const predefinedGroups = [
-    { id: "directional", name: "Directional Team", count: 5 },
-    { id: "company", name: "Company Representatives", count: 3 },
-    { id: "rig", name: "Rig Crew", count: 8 },
-    { id: "engineers", name: "Engineers", count: 4 },
-  ];
-
-  const filteredRecipients = recipients.filter((recipient) =>
-    recipient.toLowerCase().includes(searchQuery.toLowerCase()),
-  );
 
   return (
     <Card className="w-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
@@ -499,6 +750,11 @@ const SurveyEmailSettings = ({
                   value={newRecipient}
                   onChange={(e) => setNewRecipient(e.target.value)}
                   className="bg-gray-800 border-gray-700 text-gray-200"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleAddRecipient();
+                    }
+                  }}
                 />
               </div>
               <Button
@@ -512,7 +768,7 @@ const SurveyEmailSettings = ({
 
             <div className="border border-gray-800 rounded-md">
               <div className="p-2 bg-gray-800 text-sm font-medium text-gray-300 border-b border-gray-800 flex justify-between items-center">
-                <span>Current Recipients</span>
+                <span>Current Recipients ({filteredRecipients.length})</span>
                 <div className="relative w-48">
                   <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
                   <Input
@@ -529,14 +785,17 @@ const SurveyEmailSettings = ({
                     {filteredRecipients.map((email) => (
                       <li
                         key={email}
-                        className="flex items-center justify-between p-2 bg-gray-800/50 rounded-md"
+                        className="flex items-center justify-between p-2 bg-gray-800/50 rounded-md group"
                       >
-                        <span className="text-sm text-gray-300">{email}</span>
+                        <span className="text-sm text-gray-300 flex-1 truncate mr-2">
+                          {email}
+                        </span>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 text-gray-400 hover:text-red-400 hover:bg-gray-800"
+                          className="h-8 w-8 text-gray-400 hover:text-red-400 hover:bg-gray-800 opacity-0 group-hover:opacity-100 transition-opacity"
                           onClick={() => handleRemoveRecipient(email)}
+                          title="Remove recipient"
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -560,16 +819,14 @@ const SurveyEmailSettings = ({
                   {predefinedGroups.map((group) => (
                     <div
                       key={group.id}
-                      className="flex items-center p-2 bg-gray-800/50 rounded-md"
+                      className="flex items-center p-2 bg-gray-800/50 rounded-md hover:bg-gray-700/50 transition-colors cursor-pointer"
+                      onClick={() => handleAddGroup(group.id)}
                     >
-                      <Checkbox id={`group-${group.id}`} className="mr-2" />
+                      <div className="h-8 w-8 rounded-full bg-blue-900/30 flex items-center justify-center mr-2">
+                        <UserPlus className="h-4 w-4 text-blue-400" />
+                      </div>
                       <div>
-                        <Label
-                          htmlFor={`group-${group.id}`}
-                          className="text-sm text-gray-300 cursor-pointer"
-                        >
-                          {group.name}
-                        </Label>
+                        <p className="text-sm text-gray-300">{group.name}</p>
                         <p className="text-xs text-gray-500">
                           {group.count} recipients
                         </p>
@@ -757,7 +1014,7 @@ const SurveyEmailSettings = ({
               </div>
             </div>
 
-            <div className="pt-4 border-t border-gray-800">
+            <div className="pt-4 border-t border-gray-800 space-y-2">
               <Button
                 className="bg-blue-600 hover:bg-blue-700 text-white w-full"
                 onClick={handleSaveSettings}
@@ -865,18 +1122,23 @@ const SurveyEmailSettings = ({
                 </div>
               )}
 
-              {/* Hidden file input for real implementation */}
+              {/* Hidden file input for folder selection */}
               <input
                 type="file"
                 ref={fileInputRef}
                 style={{ display: "none" }}
                 multiple
+                onChange={handleFileInputChange}
               />
             </div>
           </TabsContent>
 
           <TabsContent value="preview" className="space-y-4">
-            <div className="border border-gray-800 rounded-md p-4 bg-gray-800/30">
+            <div
+              key={emailPreviewKey}
+              ref={emailPreviewRef}
+              className="border border-gray-800 rounded-md p-4 bg-gray-800/30 email-preview-container"
+            >
               <div className="mb-4">
                 <h3 className="text-lg font-medium text-gray-300 mb-1">
                   Survey Report - Well Alpha-123
@@ -896,21 +1158,23 @@ const SurveyEmailSettings = ({
                       <p className="text-xs text-gray-500">Measured Depth</p>
                       <p className="text-gray-300">
                         {(
-                          latestSurvey.bitDepth || latestSurvey.measuredDepth
-                        )?.toFixed(2)}{" "}
+                          latestSurvey.bitDepth ||
+                          latestSurvey.measuredDepth ||
+                          0
+                        ).toFixed(2)}{" "}
                         ft
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Inclination</p>
                       <p className="text-gray-300">
-                        {latestSurvey.inclination?.toFixed(2)}°
+                        {(latestSurvey.inclination || 0).toFixed(2)}°
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Azimuth</p>
                       <p className="text-gray-300">
-                        {latestSurvey.azimuth?.toFixed(2)}°
+                        {(latestSurvey.azimuth || 0).toFixed(2)}°
                       </p>
                     </div>
                   </div>
@@ -984,7 +1248,7 @@ const SurveyEmailSettings = ({
                           Gamma Ray Log
                         </span>
                         <span className="text-xs bg-green-900/30 text-green-400 border border-green-800 px-2 py-0.5 rounded-full">
-                          LIVE
+                          {isConnected && isReceiving ? "LIVE" : "STATIC"}
                         </span>
                       </div>
                       <div className="h-[150px] bg-gray-950 rounded-md relative overflow-hidden">
@@ -992,9 +1256,21 @@ const SurveyEmailSettings = ({
                           <div className="w-full h-full flex items-center justify-center">
                             <div className="w-3/4 h-3/4 relative">
                               <div className="absolute left-0 top-0 bottom-0 border-l border-gray-700 flex flex-col justify-between text-[8px] text-gray-500 px-1">
-                                <span>5000</span>
-                                <span>6500</span>
-                                <span>8000</span>
+                                <span>
+                                  {Math.max(
+                                    0,
+                                    (latestSurvey.bitDepth || 5000) - 200,
+                                  ).toFixed(0)}
+                                </span>
+                                <span>
+                                  {Math.max(
+                                    0,
+                                    (latestSurvey.bitDepth || 5000) - 100,
+                                  ).toFixed(0)}
+                                </span>
+                                <span>
+                                  {(latestSurvey.bitDepth || 5000).toFixed(0)}
+                                </span>
                               </div>
                               <div className="absolute right-0 left-8 top-0 border-t border-gray-700 flex justify-between text-[8px] text-gray-500 py-1">
                                 <span>0</span>
@@ -1044,6 +1320,14 @@ const SurveyEmailSettings = ({
                           </div>
                         </div>
                       </div>
+                      <p className="text-xs text-gray-500 mt-2 text-center">
+                        Gamma readings from{" "}
+                        {Math.max(
+                          0,
+                          (latestSurvey.bitDepth || 5000) - 200,
+                        ).toFixed(0)}{" "}
+                        to {(latestSurvey.bitDepth || 5000).toFixed(0)} ft MD
+                      </p>
                     </div>
                   </div>
                 )}
@@ -1166,6 +1450,98 @@ const SurveyEmailSettings = ({
                   </div>
                 )}
 
+                {includeTargetLineStatus && (
+                  <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
+                    <h4 className="text-sm font-medium text-gray-300 mb-2">
+                      Target Line Status
+                    </h4>
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      {targetLineData && (
+                        <>
+                          <div className="p-2 bg-gray-800/70 rounded-md">
+                            <p className="text-xs text-gray-500 mb-1">
+                              Above/Below
+                            </p>
+                            <p
+                              className={`text-sm font-medium ${targetLineData.aboveBelow > 0 ? "text-red-400" : "text-green-400"}`}
+                            >
+                              {targetLineData.aboveBelow > 0
+                                ? "Below"
+                                : "Above"}{" "}
+                              {Math.abs(targetLineData.aboveBelow).toFixed(1)}{" "}
+                              ft
+                            </p>
+                          </div>
+                          <div className="p-2 bg-gray-800/70 rounded-md">
+                            <p className="text-xs text-gray-500 mb-1">
+                              Left/Right
+                            </p>
+                            <p className="text-sm font-medium text-yellow-400">
+                              {targetLineData.leftRight.toFixed(1)} ft
+                            </p>
+                          </div>
+                        </>
+                      )}
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">
+                          Distance to Target
+                        </p>
+                        <p className="text-sm font-medium text-cyan-400">
+                          {targetLineData
+                            ? Math.sqrt(
+                                targetLineData.aboveBelow *
+                                  targetLineData.aboveBelow +
+                                  targetLineData.leftRight *
+                                    targetLineData.leftRight,
+                              ).toFixed(1)
+                            : (Math.random() * 10 + 2).toFixed(1)}{" "}
+                          ft
+                        </p>
+                      </div>
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">
+                          Vertical Section
+                        </p>
+                        <p className="text-sm font-medium text-purple-400">
+                          {(latestSurvey.bitDepth * 0.3).toFixed(1)} ft
+                        </p>
+                      </div>
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">
+                          Target Azimuth
+                        </p>
+                        <p className="text-sm font-medium text-amber-400">
+                          {(
+                            latestSurvey.azimuth +
+                            (Math.random() * 5 - 2.5)
+                          ).toFixed(1)}
+                          °
+                        </p>
+                      </div>
+                      <div className="p-2 bg-gray-800/70 rounded-md">
+                        <p className="text-xs text-gray-500 mb-1">
+                          Target Inclination
+                        </p>
+                        <p className="text-sm font-medium text-green-400">
+                          {(
+                            latestSurvey.inclination +
+                            (Math.random() * 3 - 1.5)
+                          ).toFixed(1)}
+                          °
+                        </p>
+                      </div>
+                    </div>
+                    <div className="p-2 bg-gray-800/70 rounded-md">
+                      <p className="text-xs text-gray-500 mb-1">
+                        Target Status
+                      </p>
+                      <p className="text-sm font-medium text-green-400">
+                        On target - within acceptable range
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {attachments.length > 0 && (
                   <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
                     <h4 className="text-sm font-medium text-gray-300 mb-2">
@@ -1217,6 +1593,9 @@ const SurveyEmailSettings = ({
                 <p className="text-xs text-gray-500">
                   This email was automatically generated by the MWD Surface
                   Software. Please do not reply to this email.
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Last updated: {new Date().toLocaleTimeString()}
                 </p>
               </div>
             </div>
@@ -1283,15 +1662,40 @@ const SurveyEmailSettings = ({
                     Include Survey Analytics
                   </Label>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="include-target-line-status"
+                    checked={includeTargetLineStatus}
+                    onCheckedChange={(checked) =>
+                      setIncludeTargetLineStatus(checked)
+                    }
+                    className="data-[state=checked]:bg-blue-600 mr-2"
+                  />
+                  <Label
+                    htmlFor="include-target-line-status"
+                    className="text-sm text-gray-300"
+                  >
+                    Include Target Line Status
+                  </Label>
+                </div>
               </div>
-              <Button
-                variant="outline"
-                className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-                onClick={handleTestEmail}
-              >
-                <Mail className="h-4 w-4 mr-2" />
-                Send Test Email
-              </Button>
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                  onClick={copyEmailPreviewToClipboard}
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  Copy to Clipboard
+                </Button>
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  onClick={handleSendOutlookEmail}
+                >
+                  <Send className="h-4 w-4 mr-2" />
+                  Send Email
+                </Button>
+              </div>
             </div>
           </TabsContent>
         </Tabs>

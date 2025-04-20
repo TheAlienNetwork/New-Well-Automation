@@ -231,7 +231,7 @@ const Home = () => {
         <div className="bg-red-900/30 border-b border-red-800 px-4 py-2 text-center">
           <p className="text-red-400 text-sm font-medium flex items-center justify-center gap-2">
             <AlertTriangle className="h-4 w-4" />
-            WITS Connection Not Established - Data shown is simulated
+            WITS Connection Not Established
             <Button
               variant="outline"
               size="sm"
@@ -329,15 +329,7 @@ const Home = () => {
           <div className="col-span-12 lg:col-span-3 flex flex-col gap-4">
             {/* Rosebud Compass */}
             <div className="grow h-[400px]">
-              <RosebudCompass
-                toolFace={getParameterValue(witsData.toolFace)}
-                inclination={getParameterValue(witsData.inclination)}
-                azimuth={getParameterValue(witsData.azimuth)}
-                magneticField={getParameterValue(witsData.magneticField)}
-                gravity={getParameterValue(witsData.gravity)}
-                depth={getParameterValue(witsData.bitDepth)}
-                isActive={isRecording && isReceiving}
-              />
+              <RosebudCompass isActive={isRecording && isReceiving} />
             </div>
 
             {/* Control Panel - Made smaller */}

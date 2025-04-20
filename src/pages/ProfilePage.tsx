@@ -42,31 +42,23 @@ interface TimeEntry {
 const ProfilePage = () => {
   const { userProfile, updateUserProfile, updateProfileImage } = useUser();
   const [activeTab, setActiveTab] = useState("profile");
+  const [taxRate, setTaxRate] = useState(0.22); // Default tax rate at 22%
   const [isEditing, setIsEditing] = useState(false);
   const [hourlyRate, setHourlyRate] = useState(85);
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([
-    {
-      id: "1",
-      date: "2023-06-15",
-      hours: 8,
-      project: "Alpha-123 Well",
-      description: "Directional drilling operations",
-    },
-    {
-      id: "2",
-      date: "2023-06-16",
-      hours: 10,
-      project: "Alpha-123 Well",
-      description: "Survey analysis and reporting",
-    },
-    {
-      id: "3",
-      date: "2023-06-17",
-      hours: 6,
-      project: "Alpha-123 Well",
-      description: "Tool maintenance and calibration",
-    },
-  ]);
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+
+  // Load time entries from localStorage on component mount
+  useEffect(() => {
+    const savedEntries = localStorage.getItem("timeEntries");
+    if (savedEntries) {
+      setTimeEntries(JSON.parse(savedEntries));
+    }
+  }, []);
+
+  // Save time entries to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem("timeEntries", JSON.stringify(timeEntries));
+  }, [timeEntries]);
 
   const [newEntry, setNewEntry] = useState<Omit<TimeEntry, "id">>({
     date: new Date().toISOString().split("T")[0],
@@ -139,6 +131,13 @@ const ProfilePage = () => {
       ...profileData,
       emailSignature: updatedEmailSignature,
     });
+
+    // Log confirmation for debugging
+    console.log(
+      "Profile updated:",
+      profileData.firstName,
+      profileData.lastName,
+    );
   };
 
   const handleNewEntryChange = (
@@ -175,15 +174,43 @@ const ProfilePage = () => {
   };
 
   const calculateRegularHours = () => {
-    // Regular hours are capped at 80 hours per pay period (assuming 2 weeks)
-    const totalHours = calculateTotalHours();
-    return Math.min(totalHours, 80);
+    // Group entries by date to calculate daily hours
+    const dailyHours: Record<string, number> = {};
+
+    timeEntries.forEach((entry) => {
+      if (!dailyHours[entry.date]) {
+        dailyHours[entry.date] = 0;
+      }
+      dailyHours[entry.date] += entry.hours;
+    });
+
+    // Calculate regular hours (8 hours per day max)
+    let regularHours = 0;
+    Object.values(dailyHours).forEach((hours) => {
+      regularHours += Math.min(hours, 8);
+    });
+
+    return regularHours;
   };
 
   const calculateOvertimeHours = () => {
-    // Overtime hours are any hours over 80 in the pay period
-    const totalHours = calculateTotalHours();
-    return Math.max(0, totalHours - 80);
+    // Group entries by date to calculate daily overtime
+    const dailyHours: Record<string, number> = {};
+
+    timeEntries.forEach((entry) => {
+      if (!dailyHours[entry.date]) {
+        dailyHours[entry.date] = 0;
+      }
+      dailyHours[entry.date] += entry.hours;
+    });
+
+    // Calculate overtime hours (hours over 8 per day)
+    let overtimeHours = 0;
+    Object.values(dailyHours).forEach((hours) => {
+      overtimeHours += Math.max(0, hours - 8);
+    });
+
+    return overtimeHours;
   };
 
   const calculateTotalPay = () => {
@@ -268,6 +295,13 @@ ${profileData.emailSignature}
             >
               <Clock className="h-4 w-4 mr-2" />
               Timesheet
+            </TabsTrigger>
+            <TabsTrigger
+              value="payroll"
+              className="data-[state=active]:bg-gray-700 data-[state=active]:text-blue-400"
+            >
+              <DollarSign className="h-4 w-4 mr-2" />
+              Payroll
             </TabsTrigger>
           </TabsList>
 
@@ -792,6 +826,145 @@ ${profileData.emailSignature}
                           >
                             Add
                           </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="payroll" className="space-y-6">
+            <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
+              <CardHeader className="p-4 border-b border-gray-800 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900">
+                <div className="flex justify-between items-center">
+                  <CardTitle className="text-lg font-medium text-gray-200 flex items-center gap-2">
+                    <DollarSign className="h-5 w-5 text-green-400" />
+                    Bi-Weekly Pay Breakdown
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className="bg-purple-900/30 text-purple-400 border-purple-800"
+                    >
+                      <Calendar className="h-3 w-3 mr-1" />
+                      Current Pay Period
+                    </Badge>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-medium text-gray-300">
+                      Pay Summary
+                    </h3>
+                    <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800">
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Regular Hours:</span>
+                          <span className="text-green-400 font-medium">
+                            {calculateRegularHours()} hrs
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Regular Pay:</span>
+                          <span className="text-green-400 font-medium">
+                            ${(calculateRegularHours() * hourlyRate).toFixed(2)}
+                          </span>
+                        </div>
+                        <Separator className="bg-gray-700 my-2" />
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Overtime Hours:</span>
+                          <span className="text-orange-400 font-medium">
+                            {calculateOvertimeHours()} hrs
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Overtime Pay:</span>
+                          <span className="text-orange-400 font-medium">
+                            $
+                            {(
+                              calculateOvertimeHours() *
+                              hourlyRate *
+                              1.5
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                        <Separator className="bg-gray-700 my-2" />
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Gross Pay:</span>
+                          <span className="text-blue-400 font-medium">
+                            ${calculateTotalPay().toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-medium text-gray-300">
+                      Deductions
+                    </h3>
+                    <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800">
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">
+                            Federal Tax Rate:
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-red-400 font-medium">
+                              {(taxRate * 100).toFixed(0)}%
+                            </span>
+                            <Input
+                              type="number"
+                              min="0"
+                              max="50"
+                              step="1"
+                              value={taxRate * 100}
+                              onChange={(e) =>
+                                setTaxRate(Number(e.target.value) / 100)
+                              }
+                              className="bg-gray-700 border-gray-600 text-gray-200 w-16 h-7 text-sm"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Federal Tax:</span>
+                          <span className="text-red-400 font-medium">
+                            -${(calculateTotalPay() * taxRate).toFixed(2)}
+                          </span>
+                        </div>
+                        <Separator className="bg-gray-700 my-2" />
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Net Pay:</span>
+                          <span className="text-purple-400 font-bold">
+                            ${(calculateTotalPay() * (1 - taxRate)).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800 mt-4">
+                      <h4 className="text-sm font-medium text-gray-300 mb-2">
+                        Projected Annual Income
+                      </h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Annual Gross:</span>
+                          <span className="text-blue-400 font-medium">
+                            ${(calculateTotalPay() * 26).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-400">Annual Net:</span>
+                          <span className="text-purple-400 font-medium">
+                            $
+                            {(calculateTotalPay() * (1 - taxRate) * 26).toFixed(
+                              2,
+                            )}
+                          </span>
                         </div>
                       </div>
                     </div>

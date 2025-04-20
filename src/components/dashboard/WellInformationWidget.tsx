@@ -26,9 +26,9 @@ const WellInformationWidget = ({
   sensorOffset: propSensorOffset = 0,
   onUpdate,
 }: WellInformationWidgetProps) => {
-  const { userProfile } = useUser();
+  const { userProfile, updateUserProfile } = useUser();
   const { witsData } = useWits();
-  const { surveys } = useSurveys();
+  const { surveys, updateSurvey } = useSurveys();
 
   const [wellName, setWellName] = useState(propWellName);
   const [rigName, setRigName] = useState(propRigName);
@@ -38,9 +38,17 @@ const WellInformationWidget = ({
 
   // Update local state when props change
   useEffect(() => {
-    setWellName(propWellName);
-    setRigName(propRigName);
-    setSensorOffset(propSensorOffset);
+    // First try to get values from localStorage
+    const savedWellName = localStorage.getItem("wellName");
+    const savedRigName = localStorage.getItem("rigName");
+    const savedSensorOffset = localStorage.getItem("sensorOffset");
+
+    // Use localStorage values if available, otherwise use props
+    setWellName(savedWellName || propWellName);
+    setRigName(savedRigName || propRigName);
+    setSensorOffset(
+      savedSensorOffset ? Number(savedSensorOffset) : propSensorOffset,
+    );
   }, [propWellName, propRigName, propSensorOffset]);
 
   // Update well information from latest survey if available
@@ -81,6 +89,21 @@ const WellInformationWidget = ({
       sensorOffset,
     };
 
+    // Save to localStorage for persistence across page navigation
+    localStorage.setItem("wellName", wellName);
+    localStorage.setItem("rigName", rigName);
+    localStorage.setItem("sensorOffset", sensorOffset.toString());
+
+    // Update user profile context with well information
+    userProfile.wellName = wellName;
+    userProfile.rigName = rigName;
+    userProfile.sensorOffset = sensorOffset;
+    updateUserProfile({
+      wellName,
+      rigName,
+      sensorOffset,
+    });
+
     // Call the onUpdate prop if provided
     if (onUpdate) {
       onUpdate(wellInfo);
@@ -88,7 +111,7 @@ const WellInformationWidget = ({
 
     // Update all surveys with the new well information
     if (surveys.length > 0) {
-      const { updateSurvey } = useSurveys();
+      // Use updateSurvey from context that we got earlier
       surveys.forEach((survey) => {
         const updatedSurvey = {
           ...survey,
@@ -101,6 +124,7 @@ const WellInformationWidget = ({
       });
     }
 
+    console.log("Well information saved:", { wellName, rigName, sensorOffset });
     setIsEditing(false);
     setIsSaving(false);
   };
@@ -245,7 +269,16 @@ const WellInformationWidget = ({
               <div>
                 <p className="text-xs text-gray-500">Current Bit Depth</p>
                 <p className="text-sm font-medium text-green-400">
-                  {witsData.bitDepth.toFixed(2)} ft
+                  {surveys.length > 0
+                    ? [...surveys]
+                        .sort(
+                          (a, b) =>
+                            new Date(b.timestamp).getTime() -
+                            new Date(a.timestamp).getTime(),
+                        )[0]
+                        .bitDepth.toFixed(2)
+                    : witsData.bitDepth.toFixed(2)}{" "}
+                  ft
                 </p>
               </div>
             </div>
@@ -257,7 +290,16 @@ const WellInformationWidget = ({
               <div>
                 <p className="text-xs text-gray-500">Measured Depth</p>
                 <p className="text-sm font-medium text-cyan-400">
-                  {(witsData.bitDepth - sensorOffset).toFixed(2)} ft
+                  {surveys.length > 0
+                    ? (
+                        [...surveys].sort(
+                          (a, b) =>
+                            new Date(b.timestamp).getTime() -
+                            new Date(a.timestamp).getTime(),
+                        )[0].bitDepth - sensorOffset
+                      ).toFixed(2)
+                    : (witsData.bitDepth - sensorOffset).toFixed(2)}{" "}
+                  ft
                 </p>
               </div>
             </div>

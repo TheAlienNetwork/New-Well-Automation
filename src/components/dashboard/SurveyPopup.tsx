@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useSurveys } from "@/context/SurveyContext";
+import { useWits } from "@/context/WitsContext";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CheckCircle, AlertCircle, XCircle, Info } from "lucide-react";
+import { CheckCircle, AlertCircle, XCircle, Info, Mail } from "lucide-react";
+import SurveyEmailSettings from "./SurveyEmailSettings";
 
 export interface SurveyData {
   id: string;
@@ -56,8 +58,16 @@ const SurveyPopup = ({
   wellInfo,
 }: SurveyPopupProps) => {
   const { addSurvey, updateSurvey, surveys } = useSurveys();
+  const { witsData } = useWits();
   const [editedSurvey, setEditedSurvey] = useState<SurveyData>(surveyData);
   const [activeTab, setActiveTab] = useState("data");
+  const [showEmailSettings, setShowEmailSettings] = useState(false);
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [emailRecipients, setEmailRecipients] = useState([
+    "john.operator@oiltech.com",
+    "directional.team@oiltech.com",
+    "rig.supervisor@oiltech.com",
+  ]);
 
   const handleInputChange = (field: keyof SurveyData, value: any) => {
     setEditedSurvey((prev) => {
@@ -86,14 +96,12 @@ const SurveyPopup = ({
   useEffect(() => {
     // Always update with wellInfo if provided, regardless of whether it's a new or existing survey
     if (wellInfo) {
+      console.log("Applying wellInfo to survey:", wellInfo);
       setEditedSurvey((prev) => ({
         ...prev,
         wellName: wellInfo.wellName || "",
         rigName: wellInfo.rigName || "",
-        sensorOffset:
-          wellInfo.sensorOffset !== undefined
-            ? wellInfo.sensorOffset
-            : undefined,
+        sensorOffset: wellInfo.sensorOffset,
         // Recalculate measured depth with the new sensor offset
         measuredDepth:
           prev.bitDepth -
@@ -142,19 +150,46 @@ const SurveyPopup = ({
   }, [surveyData.id, surveys, wellInfo]);
 
   const handleSave = () => {
+    // Validate survey data before saving
+    const validatedSurvey = {
+      ...editedSurvey,
+      // Ensure numeric fields have valid values (default to 0 if invalid)
+      bitDepth: isNaN(editedSurvey.bitDepth) ? 0 : editedSurvey.bitDepth,
+      inclination: isNaN(editedSurvey.inclination)
+        ? 0
+        : editedSurvey.inclination,
+      azimuth: isNaN(editedSurvey.azimuth) ? 0 : editedSurvey.azimuth,
+      toolFace: isNaN(editedSurvey.toolFace) ? 0 : editedSurvey.toolFace,
+      bTotal: isNaN(editedSurvey.bTotal) ? 0 : editedSurvey.bTotal,
+      aTotal: isNaN(editedSurvey.aTotal) ? 0 : editedSurvey.aTotal,
+      dip: isNaN(editedSurvey.dip) ? 0 : editedSurvey.dip,
+      toolTemp: isNaN(editedSurvey.toolTemp) ? 0 : editedSurvey.toolTemp,
+      // Ensure string fields are not undefined
+      wellName: editedSurvey.wellName || "",
+      rigName: editedSurvey.rigName || "",
+      // Ensure sensorOffset is valid
+      sensorOffset: isNaN(editedSurvey.sensorOffset)
+        ? 0
+        : editedSurvey.sensorOffset,
+      // Ensure measuredDepth is valid
+      measuredDepth: isNaN(editedSurvey.measuredDepth)
+        ? editedSurvey.bitDepth
+        : editedSurvey.measuredDepth,
+    };
+
     // Update the survey in the global context
-    if (editedSurvey.id === surveyData.id) {
-      updateSurvey(editedSurvey);
+    if (validatedSurvey.id === surveyData.id) {
+      updateSurvey(validatedSurvey);
     } else {
-      addSurvey(editedSurvey);
+      addSurvey(validatedSurvey);
     }
 
     // Call the local onSave handler for component-specific logic
-    onSave(editedSurvey);
+    onSave(validatedSurvey);
     onClose();
 
     // Log confirmation that the survey was saved to the global context
-    console.log("Survey saved to global context:", editedSurvey);
+    console.log("Survey saved to global context:", validatedSurvey);
   };
 
   const getQualityStatusColor = (status: string) => {
@@ -229,6 +264,7 @@ const SurveyPopup = ({
             <TabsTrigger value="data">Survey Data</TabsTrigger>
             <TabsTrigger value="quality">Quality Check</TabsTrigger>
             <TabsTrigger value="well">Well Info</TabsTrigger>
+            <TabsTrigger value="email">Email</TabsTrigger>
           </TabsList>
 
           <TabsContent value="data" className="space-y-4 mt-4">
@@ -241,7 +277,7 @@ const SurveyPopup = ({
                       id="bitDepth"
                       type="number"
                       step="0.1"
-                      value={editedSurvey.bitDepth.toFixed(2)}
+                      value={editedSurvey.bitDepth}
                       onChange={(e) => {
                         handleInputChange(
                           "bitDepth",
@@ -259,8 +295,10 @@ const SurveyPopup = ({
                       step="0.1"
                       value={
                         editedSurvey.sensorOffset !== undefined
-                          ? editedSurvey.sensorOffset.toFixed(2)
-                          : ""
+                          ? editedSurvey.sensorOffset
+                          : wellInfo?.sensorOffset !== undefined
+                            ? wellInfo.sensorOffset
+                            : ""
                       }
                       onChange={(e) => {
                         handleInputChange(
@@ -271,7 +309,11 @@ const SurveyPopup = ({
                         );
                       }}
                       className="bg-gray-800 border-gray-700 text-gray-200"
-                      placeholder="Enter sensor offset"
+                      placeholder={
+                        wellInfo?.sensorOffset !== undefined
+                          ? `${wellInfo.sensorOffset}`
+                          : "Enter sensor offset"
+                      }
                     />
                   </div>
                 </div>
@@ -281,13 +323,13 @@ const SurveyPopup = ({
                     id="measuredDepth"
                     type="number"
                     step="0.1"
-                    value={(
+                    value={
                       editedSurvey.measuredDepth ||
                       editedSurvey.bitDepth -
                         (editedSurvey.sensorOffset !== undefined
                           ? editedSurvey.sensorOffset
                           : 0)
-                    ).toFixed(2)}
+                    }
                     readOnly
                     className="bg-gray-800/50 border-gray-700 text-gray-400"
                   />
@@ -300,7 +342,7 @@ const SurveyPopup = ({
                       id="inclination"
                       type="number"
                       step="0.1"
-                      value={editedSurvey.inclination.toFixed(2)}
+                      value={editedSurvey.inclination}
                       onChange={(e) =>
                         handleInputChange(
                           "inclination",
@@ -317,7 +359,7 @@ const SurveyPopup = ({
                       id="azimuth"
                       type="number"
                       step="0.1"
-                      value={editedSurvey.azimuth.toFixed(2)}
+                      value={editedSurvey.azimuth}
                       onChange={(e) =>
                         handleInputChange("azimuth", parseFloat(e.target.value))
                       }
@@ -333,7 +375,7 @@ const SurveyPopup = ({
                       id="toolFace"
                       type="number"
                       step="0.1"
-                      value={editedSurvey.toolFace.toFixed(2)}
+                      value={editedSurvey.toolFace}
                       onChange={(e) =>
                         handleInputChange(
                           "toolFace",
@@ -350,7 +392,7 @@ const SurveyPopup = ({
                       id="toolTemp"
                       type="number"
                       step="0.1"
-                      value={editedSurvey.toolTemp.toFixed(2)}
+                      value={editedSurvey.toolTemp}
                       onChange={(e) =>
                         handleInputChange(
                           "toolTemp",
@@ -371,7 +413,7 @@ const SurveyPopup = ({
                       id="bTotal"
                       type="number"
                       step="0.01"
-                      value={editedSurvey.bTotal.toFixed(2)}
+                      value={editedSurvey.bTotal}
                       onChange={(e) =>
                         handleInputChange("bTotal", parseFloat(e.target.value))
                       }
@@ -385,7 +427,7 @@ const SurveyPopup = ({
                       id="aTotal"
                       type="number"
                       step="0.01"
-                      value={editedSurvey.aTotal.toFixed(2)}
+                      value={editedSurvey.aTotal}
                       onChange={(e) =>
                         handleInputChange("aTotal", parseFloat(e.target.value))
                       }
@@ -400,7 +442,7 @@ const SurveyPopup = ({
                     id="dip"
                     type="number"
                     step="0.1"
-                    value={editedSurvey.dip.toFixed(2)}
+                    value={editedSurvey.dip}
                     onChange={(e) =>
                       handleInputChange("dip", parseFloat(e.target.value))
                     }
@@ -521,6 +563,40 @@ const SurveyPopup = ({
               ))}
             </div>
           </TabsContent>
+
+          <TabsContent value="email" className="space-y-4 mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-blue-400" />
+                <h3 className="text-lg font-medium text-gray-300">
+                  Email Survey Report
+                </h3>
+              </div>
+              <Button
+                variant="outline"
+                className="bg-blue-600 hover:bg-blue-700 text-white border-blue-700"
+                onClick={() => setShowEmailSettings(true)}
+              >
+                <Mail className="h-4 w-4 mr-2" />
+                Configure Email
+              </Button>
+            </div>
+
+            <div className="p-4 bg-gray-800/30 rounded-md border border-gray-800">
+              <p className="text-sm text-gray-300 mb-3">
+                Send this survey report via email to the drilling team, company
+                representatives, or other stakeholders.
+              </p>
+              <p className="text-xs text-gray-500 mb-2">
+                Configure email settings to customize the content and recipients
+                of the survey report.
+              </p>
+              <p className="text-xs text-gray-500">
+                Email reports include survey data, quality assessment, and
+                optional curve data and visualizations.
+              </p>
+            </div>
+          </TabsContent>
         </Tabs>
 
         <DialogFooter className="mt-6">
@@ -538,6 +614,20 @@ const SurveyPopup = ({
             Save Survey
           </Button>
         </DialogFooter>
+
+        {showEmailSettings && (
+          <SurveyEmailSettings
+            isOpen={showEmailSettings}
+            onClose={() => setShowEmailSettings(false)}
+            emailEnabled={emailEnabled}
+            onToggleEmail={setEmailEnabled}
+            recipients={emailRecipients}
+            onUpdateRecipients={setEmailRecipients}
+            surveys={surveys}
+            wellName={editedSurvey.wellName || wellInfo?.wellName || ""}
+            rigName={editedSurvey.rigName || wellInfo?.rigName || ""}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

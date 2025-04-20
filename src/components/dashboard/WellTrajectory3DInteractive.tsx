@@ -17,6 +17,8 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
+import { project3DPoint, processSurveyData } from "@/utils/3dUtils";
+import { useSurveys } from "@/context/SurveyContext";
 
 interface WellTrajectory3DInteractiveProps {
   surveys?: Array<{
@@ -41,10 +43,47 @@ interface WellTrajectory3DInteractiveProps {
 }
 
 const WellTrajectory3DInteractive = ({
-  surveys = [],
+  surveys: propSurveys,
   offsetWells = [],
   onExport = () => {},
 }: WellTrajectory3DInteractiveProps) => {
+  // Get surveys from context if not provided via props
+  const { surveys: contextSurveys } = useSurveys();
+
+  // Use surveys from props if provided, otherwise use from context
+  const surveys =
+    propSurveys && propSurveys.length > 0
+      ? propSurveys
+      : Array.isArray(contextSurveys)
+        ? contextSurveys
+            .map((survey) => {
+              // Validate survey data before mapping
+              if (!survey || typeof survey !== "object") {
+                console.warn(
+                  "Invalid survey object encountered in WellTrajectory3DInteractive",
+                );
+                return null;
+              }
+              return {
+                md: typeof survey.bitDepth === "number" ? survey.bitDepth : 0,
+                inc:
+                  typeof survey.inclination === "number"
+                    ? survey.inclination
+                    : 0,
+                az: typeof survey.azimuth === "number" ? survey.azimuth : 0,
+                tvd: 0, // Will be calculated by processSurveyData
+                ns: 0, // Will be calculated by processSurveyData
+                ew: 0, // Will be calculated by processSurveyData
+                gamma: typeof survey.gamma === "number" ? survey.gamma : 50, // Use actual gamma if available, otherwise default
+                vibration:
+                  typeof survey.vibration === "number" ? survey.vibration : 0, // Use actual vibration if available, otherwise default
+                toolTemp:
+                  typeof survey.toolTemp === "number" ? survey.toolTemp : 0, // Use actual tool temperature if available
+                timestamp: survey.timestamp, // Include timestamp for sorting if needed
+              };
+            })
+            .filter(Boolean) // Remove any null entries
+        : [];
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [rotation, setRotation] = useState({ x: 0.5, y: 0.3 });
@@ -53,63 +92,9 @@ const WellTrajectory3DInteractive = ({
   const [currentSurveyIndex, setCurrentSurveyIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [sortedSurveys, setSortedSurveys] = useState([]);
 
-  // Generate fallback survey data if needed for testing
-  function generateFallbackSurveys(
-    nsOffset = 0,
-    ewOffset = 0,
-    randomFactor = 10,
-  ) {
-    const fallbackSurveys = [];
-    let tvd = 0;
-    let ns = nsOffset;
-    let ew = ewOffset;
-    let inc = 0;
-    let az = 90;
-
-    for (let md = 0; md <= 8500; md += 100) {
-      // Gradually build angle for first 2000ft
-      if (md < 2000) {
-        inc = (md / 2000) * 30;
-      }
-      // Hold angle for next 3000ft
-      else if (md < 5000) {
-        inc = 30 + (Math.random() - 0.5) * 2;
-      }
-      // Build more angle and turn for production zone
-      else {
-        inc = Math.min(inc + (Math.random() - 0.3) * 0.5, 45);
-        az = (az + (Math.random() - 0.4) * 1) % 360;
-      }
-
-      // Calculate position
-      const radInc = (inc * Math.PI) / 180;
-      const radAz = (az * Math.PI) / 180;
-
-      if (md > 0) {
-        const courseLength = 100; // Distance between surveys
-        tvd += courseLength * Math.cos(radInc);
-        const horizontalDistance = courseLength * Math.sin(radInc);
-        ns +=
-          horizontalDistance * Math.cos(radAz) +
-          (Math.random() - 0.5) * randomFactor;
-        ew +=
-          horizontalDistance * Math.sin(radAz) +
-          (Math.random() - 0.5) * randomFactor;
-      }
-
-      fallbackSurveys.push({
-        md,
-        inc,
-        az,
-        tvd,
-        ns,
-        ew,
-      });
-    }
-
-    return fallbackSurveys;
-  }
+  // Using real data from SurveyContext, no fallback surveys needed
 
   // Handle mouse events for 3D interaction
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -164,33 +149,7 @@ const WellTrajectory3DInteractive = ({
     };
   }, []);
 
-  // Project 3D point to 2D - side view perspective
-  const project3DPoint = (
-    x: number,
-    y: number,
-    z: number,
-    centerX: number,
-    centerY: number,
-    scale: number,
-    rotation: { x: number; y: number },
-  ) => {
-    // Apply rotation - modified for side view perspective
-    const cosX = Math.cos(rotation.x);
-    const sinX = Math.sin(rotation.x);
-    const cosY = Math.cos(rotation.y);
-    const sinY = Math.sin(rotation.y);
-
-    // Adjust rotation to emphasize side view (earth cut in half)
-    const rotatedX = x * cosY - z * sinY;
-    const rotatedZ = x * sinY + z * cosY;
-    const rotatedY = y * cosX + rotatedZ * sinX;
-
-    // Project to 2D with enhanced depth perception
-    return {
-      x: centerX + rotatedX * scale,
-      y: centerY + rotatedY * scale * 1.2, // Enhance vertical scale for better side view
-    };
-  };
+  // Project3DPoint function has been moved to utils/3dUtils.ts
 
   // Draw the 3D trajectory
   useEffect(() => {
@@ -222,48 +181,75 @@ const WellTrajectory3DInteractive = ({
     // Draw axes
     drawAxes(ctx, canvas.width, canvas.height, rotation);
 
-    // Use fallback data if no surveys are provided
-    const surveyData = surveys.length > 0 ? surveys : generateFallbackSurveys();
-
-    // Calculate current bit depth for visualization
-    // Use the currentSurveyIndex to determine how much of the well to show
-    const currentBitDepth = surveyData[currentSurveyIndex]?.md || 0;
-
-    // Create a filtered survey array that only includes points up to the current bit depth
-    const visibleSurveys = surveyData.filter(
-      (survey) => survey.md <= currentBitDepth,
+    // Process the survey data to ensure all required coordinates are calculated
+    const processedSurveys = processSurveyData(
+      surveys.length > 0 ? surveys : [],
     );
 
-    // Draw offset wells (use real data or empty array)
-    const wellsToRender = offsetWells.length > 0 ? offsetWells : [];
-    wellsToRender.forEach((well) => {
+    // Sort surveys by measured depth to ensure proper rendering
+    const sortedSurveysData = [...processedSurveys].sort(
+      (a, b) => (a.md || 0) - (b.md || 0),
+    );
+
+    // Update the state with sorted surveys
+    setSortedSurveys(sortedSurveysData);
+
+    // Log the number of surveys being processed for debugging
+    if (processedSurveys.length > 0) {
+      console.log(
+        `Rendering ${processedSurveys.length} surveys in 3D visualization`,
+      );
+    }
+
+    // Calculate current measured depth for visualization
+    // Use the currentSurveyIndex to determine how much of the well to show
+    const currentMeasuredDepth =
+      sortedSurveys.length > 0
+        ? sortedSurveys[Math.min(currentSurveyIndex, sortedSurveys.length - 1)]
+            ?.md || 0
+        : 0;
+
+    // Create a filtered survey array that only includes points up to the current measured depth
+    const visibleSurveys =
+      sortedSurveys.length > 0
+        ? sortedSurveys.filter(
+            (survey) => (survey.md || 0) <= currentMeasuredDepth,
+          )
+        : [];
+
+    // Draw offset wells (only if data is provided)
+    if (offsetWells.length > 0) {
+      offsetWells.forEach((well) => {
+        drawWellPath(
+          ctx,
+          canvas.width,
+          canvas.height,
+          well.surveys,
+          rotation,
+          well.color,
+          1,
+          zoom,
+        );
+      });
+    }
+
+    // Draw main well path up to current bit depth (only if we have survey data)
+    if (visibleSurveys.length > 0) {
       drawWellPath(
         ctx,
         canvas.width,
         canvas.height,
-        well.surveys,
+        visibleSurveys,
         rotation,
-        well.color,
-        1,
+        "#00aaff",
+        2,
         zoom,
       );
-    });
+    }
 
-    // Draw main well path up to current bit depth
-    drawWellPath(
-      ctx,
-      canvas.width,
-      canvas.height,
-      visibleSurveys,
-      rotation,
-      "#00aaff",
-      2,
-      zoom,
-    );
-
-    // Draw current survey point
-    if (surveyData.length > 0 && currentSurveyIndex < surveyData.length) {
-      const currentSurvey = surveyData[currentSurveyIndex];
+    // Draw current survey point (only if we have survey data)
+    if (sortedSurveys.length > 0 && currentSurveyIndex < sortedSurveys.length) {
+      const currentSurvey = sortedSurveys[currentSurveyIndex];
       const point = project3DPoint(
         currentSurvey.ew / 100,
         -currentSurvey.tvd / 100,
@@ -286,17 +272,42 @@ const WellTrajectory3DInteractive = ({
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // Draw survey info
+      // Draw survey info with null checks
       ctx.fillStyle = "#ffffff";
       ctx.font = "12px monospace";
-      ctx.fillText(`MD: ${currentSurvey.md.toFixed(1)} ft`, 10, 20);
-      ctx.fillText(`Inc: ${currentSurvey.inc.toFixed(2)}°`, 10, 40);
-      ctx.fillText(`Az: ${currentSurvey.az.toFixed(2)}°`, 10, 60);
-      ctx.fillText(`TVD: ${currentSurvey.tvd.toFixed(1)} ft`, 10, 80);
+      ctx.fillText(`MD: ${currentSurvey.md?.toFixed(1) || "N/A"} ft`, 10, 20);
+      ctx.fillText(`Inc: ${currentSurvey.inc?.toFixed(2) || "N/A"}°`, 10, 40);
+      ctx.fillText(`Az: ${currentSurvey.az?.toFixed(2) || "N/A"}°`, 10, 60);
+      ctx.fillText(`TVD: ${currentSurvey.tvd?.toFixed(1) || "N/A"} ft`, 10, 80);
+      ctx.fillText(`NS: ${currentSurvey.ns?.toFixed(1) || "N/A"} ft`, 10, 100);
+      ctx.fillText(`EW: ${currentSurvey.ew?.toFixed(1) || "N/A"} ft`, 10, 120);
+    } else if (surveys.length === 0) {
+      // Display a message when no survey data is available
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "16px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        "No survey data available",
+        canvas.width / 2,
+        canvas.height / 2 - 20,
+      );
+      ctx.font = "14px monospace";
+      ctx.fillText(
+        "Add surveys to visualize well trajectory",
+        canvas.width / 2,
+        canvas.height / 2 + 20,
+      );
+      ctx.font = "12px monospace";
+      ctx.fillText(
+        "Use the Survey tool to add new surveys",
+        canvas.width / 2,
+        canvas.height / 2 + 50,
+      );
+      ctx.textAlign = "left";
     }
 
-    // Auto-rotation disabled by default
-    if (isAutoRotating) {
+    // Auto-rotation disabled in production mode
+    if (isAutoRotating && process.env.NODE_ENV !== "production") {
       const rotationTimer = setTimeout(() => {
         setRotation((prev) => ({
           x: prev.x + 0.005,
@@ -757,7 +768,7 @@ const WellTrajectory3DInteractive = ({
     ctx.restore();
   };
 
-  // Draw oil rig at surface - enhanced for more detail
+  // Draw oil rig at surface - enhanced for more detail and proper scaling
   const drawOilRig = (
     ctx: CanvasRenderingContext2D,
     centerX: number,
@@ -776,123 +787,197 @@ const WellTrajectory3DInteractive = ({
       rotation,
     );
 
-    // Draw rig base - larger and more detailed
+    // Calculate scale factor based on grid size for consistent proportions
+    const scaleFactor = gridSize / 400;
+    const rigWidth = 60 * scaleFactor;
+    const rigHeight = 30 * scaleFactor;
+    const derrickHeight = 90 * scaleFactor;
+
+    // Draw rig base - properly scaled
     ctx.fillStyle = "#444444";
     ctx.strokeStyle = "#333333";
     ctx.lineWidth = 1;
 
     // Base platform
     ctx.beginPath();
-    ctx.rect(rigBasePoint.x - 30, rigBasePoint.y - 15, 60, 30);
+    ctx.rect(
+      rigBasePoint.x - rigWidth / 2,
+      rigBasePoint.y - rigHeight / 2,
+      rigWidth,
+      rigHeight,
+    );
     ctx.fill();
     ctx.stroke();
 
     // Add platform details
     ctx.fillStyle = "#555555";
     ctx.beginPath();
-    ctx.rect(rigBasePoint.x - 25, rigBasePoint.y - 10, 50, 20);
+    ctx.rect(
+      rigBasePoint.x - rigWidth * 0.42,
+      rigBasePoint.y - rigHeight / 3,
+      rigWidth * 0.84,
+      rigHeight * 0.67,
+    );
     ctx.fill();
     ctx.stroke();
 
-    // Draw derrick - taller and more detailed
+    // Draw derrick - properly scaled
     ctx.beginPath();
     // Left leg
-    ctx.moveTo(rigBasePoint.x - 20, rigBasePoint.y - 15);
-    ctx.lineTo(rigBasePoint.x - 15, rigBasePoint.y - 90);
+    ctx.moveTo(rigBasePoint.x - rigWidth / 3, rigBasePoint.y - rigHeight / 2);
+    ctx.lineTo(rigBasePoint.x - rigWidth / 4, rigBasePoint.y - derrickHeight);
     // Right leg
-    ctx.moveTo(rigBasePoint.x + 20, rigBasePoint.y - 15);
-    ctx.lineTo(rigBasePoint.x + 15, rigBasePoint.y - 90);
+    ctx.moveTo(rigBasePoint.x + rigWidth / 3, rigBasePoint.y - rigHeight / 2);
+    ctx.lineTo(rigBasePoint.x + rigWidth / 4, rigBasePoint.y - derrickHeight);
     // Top
-    ctx.moveTo(rigBasePoint.x - 15, rigBasePoint.y - 90);
-    ctx.lineTo(rigBasePoint.x + 15, rigBasePoint.y - 90);
+    ctx.moveTo(rigBasePoint.x - rigWidth / 4, rigBasePoint.y - derrickHeight);
+    ctx.lineTo(rigBasePoint.x + rigWidth / 4, rigBasePoint.y - derrickHeight);
 
-    // Cross supports - more of them for detail
+    // Cross supports - properly scaled
     for (let i = 1; i <= 4; i++) {
-      const y = rigBasePoint.y - 15 - i * 18;
-      ctx.moveTo(rigBasePoint.x - 20 + i * 1, rigBasePoint.y - 15);
-      ctx.lineTo(rigBasePoint.x + 20 - i * 1, y);
-      ctx.moveTo(rigBasePoint.x + 20 - i * 1, rigBasePoint.y - 15);
-      ctx.lineTo(rigBasePoint.x - 20 + i * 1, y);
+      const y = rigBasePoint.y - rigHeight / 2 - i * (derrickHeight / 5);
+      ctx.moveTo(
+        rigBasePoint.x - rigWidth / 3 + i * (rigWidth / 30),
+        rigBasePoint.y - rigHeight / 2,
+      );
+      ctx.lineTo(rigBasePoint.x + rigWidth / 3 - i * (rigWidth / 30), y);
+      ctx.moveTo(
+        rigBasePoint.x + rigWidth / 3 - i * (rigWidth / 30),
+        rigBasePoint.y - rigHeight / 2,
+      );
+      ctx.lineTo(rigBasePoint.x - rigWidth / 3 + i * (rigWidth / 30), y);
     }
 
     ctx.strokeStyle = "#666666";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * scaleFactor;
     ctx.stroke();
 
     // Draw rig floor
     ctx.fillStyle = "#555555";
     ctx.beginPath();
-    ctx.rect(rigBasePoint.x - 25, rigBasePoint.y - 25, 50, 10);
+    ctx.rect(
+      rigBasePoint.x - rigWidth * 0.42,
+      rigBasePoint.y - rigHeight * 0.83,
+      rigWidth * 0.84,
+      rigHeight / 3,
+    );
     ctx.fill();
     ctx.stroke();
 
     // Draw crown block at top
     ctx.fillStyle = "#666666";
     ctx.beginPath();
-    ctx.rect(rigBasePoint.x - 15, rigBasePoint.y - 95, 30, 5);
+    ctx.rect(
+      rigBasePoint.x - rigWidth / 4,
+      rigBasePoint.y - derrickHeight - 5 * scaleFactor,
+      rigWidth / 2,
+      5 * scaleFactor,
+    );
     ctx.fill();
 
     // Draw traveling block
     ctx.fillStyle = "#777777";
     ctx.beginPath();
-    ctx.rect(rigBasePoint.x - 10, rigBasePoint.y - 70, 20, 10);
+    ctx.rect(
+      rigBasePoint.x - rigWidth / 6,
+      rigBasePoint.y - derrickHeight * 0.78,
+      rigWidth / 3,
+      rigHeight / 3,
+    );
     ctx.fill();
     ctx.stroke();
 
-    // Draw drill line from top of derrick - multiple lines for detail
+    // Draw drill line from top of derrick
     ctx.beginPath();
     // Main line
-    ctx.moveTo(rigBasePoint.x, rigBasePoint.y - 90);
-    ctx.lineTo(rigBasePoint.x, rigBasePoint.y - 70);
+    ctx.moveTo(rigBasePoint.x, rigBasePoint.y - derrickHeight);
+    ctx.lineTo(rigBasePoint.x, rigBasePoint.y - derrickHeight * 0.78);
     // Line from traveling block to surface
-    ctx.moveTo(rigBasePoint.x, rigBasePoint.y - 60);
+    ctx.moveTo(rigBasePoint.x, rigBasePoint.y - derrickHeight * 0.67);
     ctx.lineTo(rigBasePoint.x, rigBasePoint.y);
     ctx.strokeStyle = "#888888";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.5 * scaleFactor;
     ctx.stroke();
 
-    // Draw drill pipe
+    // Draw drill pipe from rig to current survey point
     ctx.beginPath();
     ctx.moveTo(rigBasePoint.x, rigBasePoint.y);
-    // Draw pipe going into the ground
-    const depthPoint = project3DPoint(
-      0,
-      -2,
-      0,
-      centerX,
-      centerY,
-      gridSize,
-      rotation,
+
+    // Get the current survey point if available
+    const currentSurvey = sortedSurveys[currentSurveyIndex];
+
+    // Calculate endpoint for drill pipe - either to current survey or default depth
+    const drillPipeEndPoint = currentSurvey
+      ? project3DPoint(
+          currentSurvey.ew / 100,
+          -currentSurvey.tvd / 100,
+          currentSurvey.ns / 100,
+          centerX,
+          centerY,
+          gridSize,
+          rotation,
+        )
+      : project3DPoint(0, -2, 0, centerX, centerY, gridSize, rotation);
+
+    // Create gradient for modern drill pipe look
+    const pipeGradient = ctx.createLinearGradient(
+      rigBasePoint.x,
+      rigBasePoint.y,
+      drillPipeEndPoint.x,
+      drillPipeEndPoint.y,
     );
-    ctx.lineTo(depthPoint.x, depthPoint.y);
-    ctx.strokeStyle = "#aaaaaa";
-    ctx.lineWidth = 8;
+    pipeGradient.addColorStop(0, "#cccccc"); // Lighter at top
+    pipeGradient.addColorStop(0.3, "#aaaaaa");
+    pipeGradient.addColorStop(1, "#00aaff"); // Blue tint at bottom
+
+    // Draw the pipe with gradient
+    ctx.lineTo(drillPipeEndPoint.x, drillPipeEndPoint.y);
+    ctx.strokeStyle = pipeGradient;
+    ctx.lineWidth = 8 * scaleFactor;
+    ctx.lineCap = "round";
     ctx.stroke();
+
+    // Add glow effect for modern look
+    ctx.shadowColor = "#00aaff80";
+    ctx.shadowBlur = 10 * scaleFactor;
+    ctx.lineWidth = 6 * scaleFactor;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
 
     // Add glow to indicate active drilling
     ctx.beginPath();
-    ctx.arc(rigBasePoint.x, rigBasePoint.y, 8, 0, Math.PI * 2);
+    ctx.arc(rigBasePoint.x, rigBasePoint.y, 8 * scaleFactor, 0, Math.PI * 2);
     ctx.fillStyle = "#00aaff";
     ctx.fill();
 
     // Add glow effect
     ctx.shadowColor = "#00aaff80";
-    ctx.shadowBlur = 1;
+    ctx.shadowBlur = 3 * scaleFactor;
     ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Add small equipment around the rig
+    // Add small equipment around the rig - properly scaled
     // Mud pumps
     ctx.fillStyle = "#666666";
     ctx.beginPath();
-    ctx.rect(rigBasePoint.x - 50, rigBasePoint.y - 10, 15, 20);
+    ctx.rect(
+      rigBasePoint.x - rigWidth * 0.83,
+      rigBasePoint.y - rigHeight / 3,
+      rigWidth / 4,
+      rigHeight * 0.67,
+    );
     ctx.fill();
     ctx.stroke();
 
     // Mud tanks
     ctx.fillStyle = "#555555";
     ctx.beginPath();
-    ctx.rect(rigBasePoint.x + 40, rigBasePoint.y - 5, 25, 15);
+    ctx.rect(
+      rigBasePoint.x + rigWidth * 0.67,
+      rigBasePoint.y - rigHeight / 6,
+      rigWidth * 0.42,
+      rigHeight / 2,
+    );
     ctx.fill();
     ctx.stroke();
   };
@@ -907,52 +992,30 @@ const WellTrajectory3DInteractive = ({
     // Axes removed as requested
   };
 
-  // Generate gamma data for visualization
-  const generateGammaData = (pathData: any[]) => {
+  // Process gamma data for visualization
+  const processGammaData = (pathData: any[]) => {
     return pathData.map((point) => {
-      // Generate gamma values based on depth
-      let gamma = 50;
-      if (point.tvd > 8000) {
-        // Shale formation (high gamma)
-        gamma = 80 + Math.random() * 40;
-      } else if (point.tvd > 7500) {
-        // Sandstone (low gamma)
-        gamma = 20 + Math.random() * 15;
-      } else if (point.tvd > 7000) {
-        // Limestone (medium gamma)
-        gamma = 40 + Math.random() * 20;
-      } else if (point.tvd > 6500) {
-        // Shale again
-        gamma = 90 + Math.random() * 30;
-      } else if (point.tvd > 6000) {
-        // Sandstone again
-        gamma = 15 + Math.random() * 10;
-      } else {
-        // Mixed formation
-        gamma = 50 + Math.random() * 25;
-      }
+      // Use actual gamma data if available, otherwise use a default value
+      const gamma = point.gamma !== undefined ? point.gamma : 50;
       return { ...point, gamma };
     });
   };
 
-  // Generate vibration data for visualization
-  const generateVibrationData = (pathData: any[]) => {
+  // Process vibration data for visualization
+  const processVibrationData = (pathData: any[]) => {
     return pathData.map((point) => {
-      // Generate vibration values - higher in certain sections
-      let vibration = 0;
-      if (point.tvd > 7800 && point.tvd < 8200) {
-        vibration = 70 + Math.random() * 30; // High vibration zone
-      } else if (point.tvd > 6300 && point.tvd < 6700) {
-        vibration = 60 + Math.random() * 30; // Medium-high vibration zone
-      } else if (point.md % 500 < 100) {
-        // Periodic high vibration at connections
-        vibration = 50 + Math.random() * 40;
-      } else {
-        vibration = Math.random() * 30; // Normal background vibration
-      }
+      // Use actual vibration data if available, otherwise use a default value
+      const vibration = point.vibration !== undefined ? point.vibration : 0;
       return { ...point, vibration };
     });
   };
+
+  // Handle empty survey data gracefully
+  useEffect(() => {
+    if (surveys.length === 0) {
+      console.log("No survey data available for 3D visualization");
+    }
+  }, [surveys]);
 
   // Draw well path with enhanced drill string visualization
   const drawWellPath = (
@@ -969,8 +1032,8 @@ const WellTrajectory3DInteractive = ({
     const centerY = height / 3; // Adjusted to match grid center
     const scale = Math.min(width, height) * 0.6 * zoomFactor; // Larger scale to match grid
 
-    // Add gamma and vibration data
-    const enhancedPathData = generateVibrationData(generateGammaData(pathData));
+    // Process gamma and vibration data
+    const enhancedPathData = processVibrationData(processGammaData(pathData));
 
     // Draw gamma heatmap first (as background)
     drawGammaHeatmap(
@@ -984,7 +1047,7 @@ const WellTrajectory3DInteractive = ({
       centerY,
     );
 
-    // Draw drill string segments with consistent coloring (no vibration colors)
+    // Draw drill string segments with modern styling and consistent coloring
     enhancedPathData.forEach((point, index) => {
       if (index === 0) return; // Skip first point (need pairs for segments)
 
@@ -1019,35 +1082,83 @@ const WellTrajectory3DInteractive = ({
         rotation,
       );
 
-      // Use consistent color instead of vibration-based coloring
-      const segmentColor = color;
+      // Modern color scheme with depth-based gradient
+      const depthRatio = Math.min(1, point.tvd / 10000); // Normalize depth for color gradient
+      const baseColor = color;
+      const depthColor =
+        index === enhancedPathData.length - 1
+          ? "#00eeff" // Bright cyan for the last segment (near bit)
+          : `rgba(${0 + Math.round(depthRatio * 50)}, ${170 - Math.round(depthRatio * 100)}, ${255 - Math.round(depthRatio * 100)}, 0.9)`;
 
-      // Draw drill pipe segment with consistent color
+      // Draw modern drill pipe segment with gradient and glow
       ctx.save();
-      ctx.strokeStyle = segmentColor;
-      ctx.lineWidth = lineWidth * 3; // Thicker for better visibility
+
+      // Create gradient for pipe segments
+      const gradient = ctx.createLinearGradient(
+        projectedPoint1.x,
+        projectedPoint1.y,
+        projectedPoint2.x,
+        projectedPoint2.y,
+      );
+      gradient.addColorStop(0, baseColor);
+      gradient.addColorStop(1, depthColor);
+
+      // Draw main pipe with increased thickness for better visibility
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = lineWidth * 3.5; // Thicker for better visibility
+      ctx.lineCap = "round"; // Rounded ends for modern look
       ctx.beginPath();
       ctx.moveTo(projectedPoint1.x, projectedPoint1.y);
       ctx.lineTo(projectedPoint2.x, projectedPoint2.y);
       ctx.stroke();
 
-      // Add very subtle glow effect
-      ctx.shadowColor = segmentColor + "88";
-      ctx.shadowBlur = 3;
+      // Add outer glow effect for modern look
+      ctx.strokeStyle = depthColor;
+      ctx.lineWidth = lineWidth * 4.5;
+      ctx.globalAlpha = 0.3;
+      ctx.shadowColor = depthColor;
+      ctx.shadowBlur = 8;
       ctx.stroke();
+
+      // Add inner highlight for 3D tube effect
+      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.lineWidth = lineWidth * 1.5;
+      ctx.globalAlpha = 0.5;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.moveTo(projectedPoint1.x, projectedPoint1.y);
+      ctx.lineTo(projectedPoint2.x, projectedPoint2.y);
+      ctx.stroke();
+
       ctx.restore();
 
-      // Draw drill pipe connections every 90 feet (3 survey points)
+      // Draw modern drill pipe connections every 90 feet (3 survey points)
       if (index % 3 === 0) {
         ctx.save();
-        ctx.fillStyle = "#aaaaaa";
-        ctx.strokeStyle = "#888888";
+
+        // Create metallic gradient for connections
+        const connGradient = ctx.createRadialGradient(
+          projectedPoint2.x,
+          projectedPoint2.y,
+          0,
+          projectedPoint2.x,
+          projectedPoint2.y,
+          lineWidth * 3,
+        );
+        connGradient.addColorStop(0, "#ffffff");
+        connGradient.addColorStop(0.3, "#cccccc");
+        connGradient.addColorStop(1, "#888888");
+
+        ctx.fillStyle = connGradient;
+        ctx.strokeStyle = "#666666";
         ctx.lineWidth = 1;
+        ctx.shadowColor = "rgba(0,200,255,0.6)";
+        ctx.shadowBlur = 5;
         ctx.beginPath();
         ctx.arc(
           projectedPoint2.x,
           projectedPoint2.y,
-          lineWidth * 2,
+          lineWidth * 2.5,
           0,
           Math.PI * 2,
         );
@@ -1090,7 +1201,7 @@ const WellTrajectory3DInteractive = ({
         ctx.font = "bold 11px monospace";
         ctx.textAlign = "center";
         ctx.fillText(
-          `${point.md.toFixed(0)}'`,
+          `${point.md?.toFixed(0) || "N/A"}'`,
           projectedPoint2.x,
           projectedPoint2.y - 12,
         );
@@ -1098,7 +1209,7 @@ const WellTrajectory3DInteractive = ({
         // Add inclination and azimuth
         ctx.font = "9px monospace";
         ctx.fillText(
-          `${point.inc.toFixed(1)}° / ${point.az.toFixed(0)}°`,
+          `${point.inc?.toFixed(1) || "N/A"}° / ${point.az?.toFixed(0) || "N/A"}°`,
           projectedPoint2.x,
           projectedPoint2.y - 24,
         );
@@ -1106,7 +1217,7 @@ const WellTrajectory3DInteractive = ({
       }
     });
 
-    // Add bit at the end of the drill string
+    // Add modern drill bit at the end of the drill string
     if (enhancedPathData.length > 0) {
       const lastPoint = enhancedPathData[enhancedPathData.length - 1];
       const x = lastPoint.ew / 100;
@@ -1123,41 +1234,72 @@ const WellTrajectory3DInteractive = ({
         rotation,
       );
 
-      // Draw drill bit
+      // Draw modern drill bit with enhanced effects
       ctx.save();
-      // Outer glow
+
+      // Larger outer glow with more vibrant colors
       const bitGradient = ctx.createRadialGradient(
         projectedBit.x,
         projectedBit.y,
         0,
         projectedBit.x,
         projectedBit.y,
-        12,
+        18,
       );
-      bitGradient.addColorStop(0, "#00eeff");
-      bitGradient.addColorStop(0.6, "#0088ff80");
-      bitGradient.addColorStop(1, "#0044ff00");
+      bitGradient.addColorStop(0, "#00ffff"); // Brighter cyan
+      bitGradient.addColorStop(0.4, "#00aaff"); // Mid blue
+      bitGradient.addColorStop(0.7, "#0066ffaa"); // Semi-transparent blue
+      bitGradient.addColorStop(1, "#0044ff00"); // Transparent edge
 
+      // Draw larger glow for more impact
       ctx.fillStyle = bitGradient;
       ctx.beginPath();
-      ctx.arc(projectedBit.x, projectedBit.y, 12, 0, Math.PI * 2);
+      ctx.arc(projectedBit.x, projectedBit.y, 18, 0, Math.PI * 2);
       ctx.fill();
 
-      // Bit body
-      ctx.fillStyle = "#dddddd";
-      ctx.strokeStyle = "#aaaaaa";
-      ctx.lineWidth = 1;
+      // Create metallic gradient for bit body
+      const metalGradient = ctx.createRadialGradient(
+        projectedBit.x - 2,
+        projectedBit.y - 2,
+        0,
+        projectedBit.x,
+        projectedBit.y,
+        8,
+      );
+      metalGradient.addColorStop(0, "#ffffff"); // Highlight
+      metalGradient.addColorStop(0.3, "#e0e0e0"); // Light silver
+      metalGradient.addColorStop(0.7, "#b0b0b0"); // Medium silver
+      metalGradient.addColorStop(1, "#808080"); // Dark silver
+
+      // Draw bit body with metallic effect
+      ctx.fillStyle = metalGradient;
+      ctx.strokeStyle = "#666666";
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = "#00aaff";
+      ctx.shadowBlur = 8;
       ctx.beginPath();
-      ctx.arc(projectedBit.x, projectedBit.y, 6, 0, Math.PI * 2);
+      ctx.arc(projectedBit.x, projectedBit.y, 8, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
 
-      // Add pulsating effect
-      ctx.shadowColor = "#00aaff";
-      ctx.shadowBlur = 1;
+      // Add inner detail for more realistic bit
+      ctx.fillStyle = "#00ccff";
+      ctx.shadowColor = "#00ffff";
+      ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.arc(projectedBit.x, projectedBit.y, 4, 0, Math.PI * 2);
       ctx.fill();
+
+      // Add animated pulse effect (simulated with multiple circles)
+      for (let i = 1; i <= 3; i++) {
+        ctx.globalAlpha = 0.3 - i * 0.1;
+        ctx.beginPath();
+        ctx.arc(projectedBit.x, projectedBit.y, 8 + i * 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "#00eeff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
       ctx.restore();
     }
   };
@@ -1545,6 +1687,7 @@ const WellTrajectory3DInteractive = ({
               onClick={() =>
                 setCurrentSurveyIndex((prev) => Math.max(prev - 1, 0))
               }
+              disabled={sortedSurveys.length === 0}
             >
               <ArrowUp className="h-5 w-5 text-cyan-300" />
             </Button>
@@ -1554,9 +1697,10 @@ const WellTrajectory3DInteractive = ({
               className="h-10 w-10 bg-gray-800/90 border-cyan-900/50 hover:bg-cyan-900/30 hover:border-cyan-800 rounded-md shadow-lg transition-all duration-200"
               onClick={() =>
                 setCurrentSurveyIndex((prev) =>
-                  Math.min(prev + 1, surveys.length - 1),
+                  Math.min(prev + 1, sortedSurveys.length - 1),
                 )
               }
+              disabled={sortedSurveys.length === 0}
             >
               <ArrowDown className="h-5 w-5 text-cyan-300" />
             </Button>
@@ -1668,7 +1812,7 @@ const WellTrajectory3DInteractive = ({
               </div>
               <div className="bg-gray-800/80 rounded-md p-2 border border-cyan-900/50 text-center">
                 <div className="text-lg text-cyan-300 font-mono font-bold tracking-wider">
-                  {surveys[currentSurveyIndex]?.md.toFixed(1)} ft
+                  {surveys[currentSurveyIndex]?.md?.toFixed(1) || "N/A"} ft
                 </div>
                 <div className="text-[10px] text-gray-400">
                   Current Survey: {currentSurveyIndex + 1} of {surveys.length}
