@@ -48,6 +48,7 @@
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.1.5",
     "framer-motion": "^11.18.0",
+    "html2canvas": "^1.4.1",
     "lucide-react": "^0.394.0",
     "react": "^18.2.0",
     "react-day-picker": "^8.10.1",
@@ -64,6 +65,7 @@
     "tailwindcss-animate": "^1.0.7",
     "usehooks-ts": "^3.1.1",
     "vaul": "^0.9.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -75,7 +77,11 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
     "tailwindcss": "3.4.1",
+<<<<<<< Live
+    "tempo-devtools": "^2.0.102",
+=======
     "tempo-devtools": "^2.0.99",
+>>>>>>> main
     "typescript": "^5.2.2",
     "vite": "^5.2.0"
   }
