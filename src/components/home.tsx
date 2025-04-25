@@ -1,5 +1,4 @@
-import { useState, useEffect, useRef } from "react";
-import { useToast } from "@/components/ui/use-toast";
+import React, { useState, useEffect, useRef } from "react";
 import Navbar from "./layout/Navbar";
 import Header from "./dashboard/Header";
 import RosebudCompass from "./dashboard/RosebudCompass";
@@ -11,13 +10,10 @@ import ControlPanel from "./dashboard/ControlPanel";
 import StatusBar from "./dashboard/StatusBar";
 import GammaPlot from "./dashboard/GammaPlot";
 import SurveyPopup, { SurveyData } from "./dashboard/SurveyPopup";
-import ParameterCard from "./dashboard/widgets/ParameterCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { useWits } from "@/context/WitsContext";
-import { useUser } from "@/context/UserContext";
-import { useSurveys } from "@/context/SurveyContext";
 import {
   Dialog,
   DialogContent,
@@ -33,24 +29,16 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import {
-  Play,
-  Settings,
-  Rewind,
-  FastForward,
-  Save,
-  User,
-  AlertTriangle,
-} from "lucide-react";
+import { Play, Settings, Rewind, FastForward, Save, User } from "lucide-react";
 
 const Home = () => {
-  const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(true);
   const [noiseFilterLevel, setNoiseFilterLevel] = useState(30);
   const [aiFilterEnabled, setAiFilterEnabled] = useState(true);
   const [showSurveyPopup, setShowSurveyPopup] = useState(false);
   const [currentSurvey, setCurrentSurvey] = useState<SurveyData | null>(null);
+  const [surveys, setSurveys] = useState<SurveyData[]>([]);
   const [showReplayStand, setShowReplayStand] = useState(false);
   const [pulseHeight, setPulseHeight] = useState(50);
   const [pulseWidth, setPulseWidth] = useState(50);
@@ -58,22 +46,32 @@ const Home = () => {
   const [currentPulseIndex, setCurrentPulseIndex] = useState(0);
   const replayIntervalRef = useRef<number | null>(null);
   const [showCustomizeDialog, setShowCustomizeDialog] = useState(false);
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+  const [userName, setUserName] = useState("John Doe");
 
   // Get real-time WITS data
   const { isConnected, isReceiving, witsData } = useWits();
-
-  // Get user profile data
-  const { userProfile } = useUser();
-
-  // Get survey data
-  const { surveys, addSurvey } = useSurveys();
 
   // Handle menu toggle
   const handleMenuToggle = () => {
     setMenuOpen(!menuOpen);
   };
 
-  // No longer need to listen for profile updates as we're using the UserContext
+  // Listen for profile updates
+  useEffect(() => {
+    const handleProfileUpdate = (event: any) => {
+      if (event.detail) {
+        if (event.detail.name) setUserName(event.detail.name);
+        if (event.detail.image) setProfileImage(event.detail.image);
+      }
+    };
+
+    window.addEventListener("profileUpdated", handleProfileUpdate);
+
+    return () => {
+      window.removeEventListener("profileUpdated", handleProfileUpdate);
+    };
+  }, []);
 
   // Handle recording toggle
   const handleRecordingToggle = () => {
@@ -92,7 +90,7 @@ const Home = () => {
 
   // Generate surveys based on WITS data
   useEffect(() => {
-    if (isRecording && isReceiving && isConnected) {
+    if (isRecording && isReceiving) {
       const surveyInterval = setInterval(() => {
         // 10% chance to generate a survey when recording and receiving WITS data
         if (Math.random() < 0.1) {
@@ -102,21 +100,10 @@ const Home = () => {
 
       return () => clearInterval(surveyInterval);
     }
-  }, [isRecording, isReceiving, isConnected, witsData]);
+  }, [isRecording, isReceiving, witsData]);
 
   // Generate a new survey using WITS data
   const generateNewSurvey = () => {
-    // Only generate surveys if we have a valid WITS connection
-    if (!isConnected || !isReceiving) {
-      console.warn("Cannot generate survey: No active WITS connection");
-      toast({
-        title: "Survey Generation Failed",
-        description: "Cannot generate survey: No active WITS connection",
-        variant: "destructive",
-      });
-      return;
-    }
-
     // Create a new survey with current WITS data plus some random variation
     const newSurvey: SurveyData = {
       id: Date.now().toString(),
@@ -159,10 +146,21 @@ const Home = () => {
 
   // Handle saving a survey
   const handleSaveSurvey = (survey: SurveyData) => {
-    // Add to global survey context
-    addSurvey(survey);
+    // Add to local surveys array
+    setSurveys([...surveys, survey]);
     setShowSurveyPopup(false);
     setCurrentSurvey(null);
+
+    // Dispatch an event to notify other components that a survey was added
+    // In a real app, this would use context or Redux
+    try {
+      const event = new CustomEvent("surveyAdded", {
+        detail: { survey },
+      });
+      window.dispatchEvent(event);
+    } catch (error) {
+      console.error("Failed to dispatch survey event", error);
+    }
   };
 
   // Handle replay stand controls
@@ -217,37 +215,12 @@ const Home = () => {
     }, 3000);
   };
 
-  // This function is no longer needed as we're handling the connection status in the ParameterCard component
-
   return (
     <div className="flex flex-col h-screen bg-gray-950 text-gray-200">
       {/* Navbar */}
       <Navbar />
       {/* Status Bar */}
       <StatusBar />
-
-      {/* WITS Connection Status */}
-      {!isConnected && (
-        <div className="bg-red-900/30 border-b border-red-800 px-4 py-2 text-center">
-          <p className="text-red-400 text-sm font-medium flex items-center justify-center gap-2">
-            <AlertTriangle className="h-4 w-4" />
-            WITS Connection Not Established
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-2 h-7 bg-red-900/50 border-red-800 hover:bg-red-800 text-red-300"
-              onClick={() => {
-                toast({
-                  title: "Connecting to WITS",
-                  description: "Attempting to establish WITS connection...",
-                });
-              }}
-            >
-              Connect
-            </Button>
-          </p>
-        </div>
-      )}
       {/* Drilling Parameters */}
       <div className="bg-gray-900 border-b border-gray-800 px-4 py-2">
         <div className="grid grid-cols-7 gap-2">
@@ -256,49 +229,42 @@ const Home = () => {
             value={witsData.rop}
             unit="ft/hr"
             color="green"
-            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="WOB"
             value={witsData.wob}
             unit="klbs"
             color="yellow"
-            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="RPM"
             value={witsData.rpm}
             unit="rpm"
             color="blue"
-            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="Torque"
             value={witsData.torque}
             unit="kft-lbs"
             color="cyan"
-            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="SPP"
             value={witsData.spp}
             unit="psi"
             color="red"
-            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="Flow"
             value={witsData.flowRate}
             unit="gpm"
             color="purple"
-            isConnected={isConnected && isReceiving}
           />
           <ParameterCard
             title="Hook Load"
             value={witsData.hookLoad}
             unit="klbs"
             color="orange"
-            isConnected={isConnected && isReceiving}
           />
         </div>
       </div>
@@ -308,8 +274,8 @@ const Home = () => {
         menuOpen={menuOpen}
         systemStatus="online"
         notificationCount={3}
-        profileImage={userProfile.profileImage}
-        userName={`${userProfile.firstName} ${userProfile.lastName}`}
+        profileImage={profileImage}
+        userName={userName}
       />
       {/* Main content */}
       <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
@@ -329,7 +295,15 @@ const Home = () => {
           <div className="col-span-12 lg:col-span-3 flex flex-col gap-4">
             {/* Rosebud Compass */}
             <div className="grow h-[400px]">
-              <RosebudCompass isActive={isRecording && isReceiving} />
+              <RosebudCompass
+                toolFace={witsData.toolFace}
+                inclination={witsData.inclination}
+                azimuth={witsData.azimuth}
+                magneticField={witsData.magneticField}
+                gravity={witsData.gravity}
+                depth={witsData.bitDepth}
+                isActive={isRecording && isReceiving}
+              />
             </div>
 
             {/* Control Panel - Made smaller */}
@@ -340,12 +314,8 @@ const Home = () => {
                 filterLevel={70}
                 onToggleRecording={handleRecordingToggle}
                 onAdjustNoise={handleNoiseFilterChange}
-                signalStrength={
-                  isConnected && isReceiving ? witsData.signalQuality : 0
-                }
-                batteryLevel={
-                  isConnected && isReceiving ? witsData.batteryLevel : 0
-                }
+                signalStrength={witsData.signalQuality}
+                batteryLevel={witsData.batteryLevel}
                 wifiStrength={isConnected ? 90 : 0}
               />
             </div>
@@ -691,9 +661,45 @@ const Home = () => {
   );
 };
 
-// Helper function to get parameter value safely
-const getParameterValue = (value: number | undefined): number => {
-  return value !== undefined ? value : 0;
+// Parameter Card Component for the top drilling parameters bar
+interface ParameterCardProps {
+  title: string;
+  value: number;
+  unit: string;
+  color: string;
+}
+
+const ParameterCard = ({ title, value, unit, color }: ParameterCardProps) => {
+  const getColorClass = () => {
+    switch (color) {
+      case "green":
+        return "text-green-400";
+      case "yellow":
+        return "text-yellow-400";
+      case "blue":
+        return "text-blue-400";
+      case "cyan":
+        return "text-cyan-400";
+      case "red":
+        return "text-red-400";
+      case "purple":
+        return "text-purple-400";
+      case "orange":
+        return "text-orange-400";
+      default:
+        return "text-gray-400";
+    }
+  };
+
+  return (
+    <div className="bg-gray-800/50 rounded-md p-1 flex flex-col items-center">
+      <div className="text-xs text-gray-400">{title}</div>
+      <div className={`text-sm font-bold ${getColorClass()}`}>
+        {value.toFixed(2)}{" "}
+        <span className="text-xs font-normal text-gray-500">{unit}</span>
+      </div>
+    </div>
+  );
 };
 
 export default Home;

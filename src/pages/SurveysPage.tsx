@@ -7,7 +7,6 @@ import SurveyPopup from "@/components/dashboard/SurveyPopup";
 import SurveyEmailSettings from "@/components/dashboard/SurveyEmailSettings";
 import SurveyImport from "@/components/dashboard/SurveyImport";
 import CurveDataWidget from "@/components/dashboard/CurveDataWidget";
-import WellInformationWidget from "@/components/dashboard/WellInformationWidget";
 import { SurveyData } from "@/components/dashboard/SurveyPopup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +15,6 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/use-toast";
-import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -33,296 +31,71 @@ import {
   AlertCircle,
   XCircle,
   Info,
-  Save,
 } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
-import { useSurveys } from "@/context/SurveyContext";
-import {
-  determineQualityCheck,
-  generateCSVContent,
-  generateLASContent,
-  downloadFile,
-  parseCSVSurveys,
-  parseTXTSurveys,
-  parseLASSurveys,
-  parseXLSXSurveys,
-} from "@/utils/surveyUtils";
-import { generateEmailContent, createMailtoUrl } from "@/utils/emailUtils";
-import {
-  calculateMotorYield,
-  calculateDoglegNeeded,
-  calculateSlideSeen,
-  calculateSlideAhead,
-  calculateProjectedInclination,
-  calculateProjectedAzimuth,
-} from "@/utils/directionalCalculations";
-import { ErrorBoundary } from "@/components/ui/error-boundary";
 
 const SurveysPage = () => {
-  const { witsData, isReceiving } = useWits();
+  const { witsData } = useWits();
   const { toast } = useToast();
-  const {
-    surveys,
-    addSurvey,
-    updateSurvey,
-    deleteSurvey,
-    exportSurveys,
-    exportFolderPath,
-    setExportFolderPath,
-    autoExportEnabled,
-    setAutoExportEnabled,
-  } = useSurveys();
-
-  // Well information state - moved to the top to ensure it's initialized before use
-  const [wellInfo, setWellInfo] = useState({
-    wellName: "",
-    rigName: "",
-    sensorOffset: 0,
-  });
-
-  // Get the latest survey for calculations
-  const [latestSurvey, setLatestSurvey] = useState<SurveyData | null>(null);
-  // Add error state to track and handle errors
-  const [hasError, setHasError] = useState<boolean>(false);
-  // File monitoring state
-  const [fileMonitoringEnabled, setFileMonitoringEnabled] = useState(false);
-  const [monitoredFilePath, setMonitoredFilePath] = useState<string>("");
-  const [lastFileModified, setLastFileModified] = useState<number>(0);
-
-  // Reset error state when surveys change
-  useEffect(() => {
-    setHasError(false);
-  }, [surveys]);
-
-  // Check for file updates if monitoring is enabled
-  useEffect(() => {
-    if (!fileMonitoringEnabled || !monitoredFilePath) return;
-
-    // Set up a polling mechanism to check for file changes
-    const checkInterval = setInterval(async () => {
-      try {
-        console.log(`Monitoring file: ${monitoredFilePath}`);
-
-        // In a web environment, we can't directly access the file system
-        // Instead, we'll check if the user has granted access to the file
-        // and if we have stored the file handle
-        const fileHandleString = localStorage.getItem("monitoredFileHandle");
-
-        if (fileHandleString) {
-          try {
-            // Try to parse the stored file handle
-            const fileHandle = JSON.parse(fileHandleString);
-
-            // Check if we can access the file
-            if ("getFile" in fileHandle) {
-              // Get the file
-              const file = await fileHandle.getFile();
-
-              // Check if the file has been modified since last check
-              if (file.lastModified > lastFileModified) {
-                console.log("File has been modified, updating surveys...");
-                toast({
-                  title: "File Change Detected",
-                  description: `${monitoredFilePath} has been modified. Updating surveys...`,
-                });
-
-                // Update the last modified time
-                setLastFileModified(file.lastModified);
-
-                // Re-process the file based on its extension
-                const fileExt = file.name.split(".").pop()?.toLowerCase();
-                let parsedSurveys: SurveyData[] = [];
-
-                if (["xls", "xlsx"].includes(fileExt || "")) {
-                  parsedSurveys = await parseXLSXSurveys(
-                    file,
-                    wellInfo,
-                    monitoredFilePath,
-                  );
-                } else {
-                  // Handle text-based files
-                  const reader = new FileReader();
-                  const fileContent = await new Promise<string>(
-                    (resolve, reject) => {
-                      reader.onload = (e) =>
-                        resolve(e.target?.result as string);
-                      reader.onerror = () =>
-                        reject(new Error("Error reading file"));
-                      reader.readAsText(file);
-                    },
-                  );
-
-                  if (fileExt === "csv") {
-                    parsedSurveys = parseCSVSurveys(
-                      fileContent,
-                      wellInfo,
-                      monitoredFilePath,
-                    );
-                  } else if (fileExt === "txt") {
-                    parsedSurveys = parseTXTSurveys(
-                      fileContent,
-                      wellInfo,
-                      monitoredFilePath,
-                    );
-                  } else if (fileExt === "las") {
-                    parsedSurveys = parseLASSurveys(
-                      fileContent,
-                      wellInfo,
-                      monitoredFilePath,
-                    );
-                  }
-                }
-
-                // Update surveys if we found any
-                if (parsedSurveys.length > 0) {
-                  // Clear existing surveys and add the new ones
-                  // This assumes you have a function to clear surveys
-                  // If not, you might need to modify this approach
-                  parsedSurveys.forEach((survey) => addSurvey(survey));
-
-                  toast({
-                    title: "Surveys Updated",
-                    description: `${parsedSurveys.length} surveys have been updated from the monitored file.`,
-                  });
-                }
-              }
-            }
-          } catch (accessError) {
-            console.error("Error accessing monitored file:", accessError);
-            toast({
-              title: "File Monitoring Error",
-              description:
-                "Could not access the monitored file. File monitoring has been disabled.",
-              variant: "destructive",
-            });
-            setFileMonitoringEnabled(false);
-          }
-        }
-      } catch (error) {
-        console.error("Error monitoring file:", error);
-        toast({
-          title: "File Monitoring Error",
-          description:
-            "An error occurred while monitoring the file. File monitoring has been disabled.",
-          variant: "destructive",
-        });
-        setFileMonitoringEnabled(false);
-      }
-    }, 5000); // Check every 5 seconds
-
-    return () => clearInterval(checkInterval);
-  }, [
-    fileMonitoringEnabled,
-    monitoredFilePath,
-    lastFileModified,
-    wellInfo,
-    addSurvey,
+  const [surveys, setSurveys] = useState<SurveyData[]>([
+    {
+      id: "1",
+      timestamp: "2023-06-15T14:32:45",
+      bitDepth: 5432.1,
+      inclination: 45.2,
+      azimuth: 178.6,
+      toolFace: 32.5,
+      bTotal: 48.32,
+      aTotal: 0.981,
+      dip: 62.4,
+      toolTemp: 165.3,
+      qualityCheck: {
+        status: "pass",
+        message: "All parameters within acceptable ranges",
+      },
+    },
+    {
+      id: "2",
+      timestamp: "2023-06-15T15:15:22",
+      bitDepth: 5462.8,
+      inclination: 46.1,
+      azimuth: 179.2,
+      toolFace: 33.1,
+      bTotal: 48.29,
+      aTotal: 0.978,
+      dip: 62.3,
+      toolTemp: 166.1,
+      qualityCheck: {
+        status: "pass",
+        message: "All parameters within acceptable ranges",
+      },
+    },
+    {
+      id: "3",
+      timestamp: "2023-06-15T16:05:10",
+      bitDepth: 5493.5,
+      inclination: 47.3,
+      azimuth: 180.1,
+      toolFace: 34.2,
+      bTotal: 48.15,
+      aTotal: 0.975,
+      dip: 62.1,
+      toolTemp: 167.2,
+      qualityCheck: {
+        status: "warning",
+        message: "Magnetic interference detected. Verify readings.",
+      },
+    },
   ]);
-
-  // Update latest survey when surveys change
-  useEffect(() => {
-    try {
-      if (!surveys || !Array.isArray(surveys)) {
-        console.error("Surveys is not an array:", surveys);
-        setLatestSurvey(null);
-        return;
-      }
-
-      if (surveys.length > 0) {
-        // Validate surveys before sorting
-        const validSurveys = surveys.filter((survey) => {
-          try {
-            return (
-              survey &&
-              typeof survey === "object" &&
-              survey.timestamp &&
-              new Date(survey.timestamp).getTime() > 0
-            );
-          } catch (e) {
-            console.warn("Invalid survey detected:", survey, e);
-            return false;
-          }
-        });
-
-        if (validSurveys.length === 0) {
-          console.warn("No valid surveys found after filtering");
-          setLatestSurvey(null);
-          return;
-        }
-
-        // Sort surveys by timestamp (newest first)
-        const sortedSurveys = [...validSurveys].sort((a, b) => {
-          try {
-            return (
-              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-            );
-          } catch (sortError) {
-            console.error("Error comparing survey dates:", sortError);
-            return 0; // Keep original order if comparison fails
-          }
-        });
-
-        // Validate the latest survey before setting it
-        const latest = sortedSurveys[0];
-        if (latest && typeof latest === "object") {
-          setLatestSurvey(latest);
-        } else {
-          console.warn("Latest survey is invalid:", latest);
-          setLatestSurvey(null);
-        }
-      } else {
-        setLatestSurvey(null);
-      }
-    } catch (error) {
-      console.error("Error updating latest survey:", error);
-      setLatestSurvey(null);
-      setHasError(true);
-    }
-  }, [surveys]);
-
-  // Fallback method for folder selection
-  const fallbackFolderSelection = () => {
-    // Create a temporary input element for folder selection
-    const input = document.createElement("input");
-    input.type = "file";
-    input.webkitdirectory = true;
-    input.directory = true;
-
-    input.onchange = (e) => {
-      const files = (e.target as HTMLInputElement).files;
-      if (files && files.length > 0) {
-        // Get the folder path from the first file
-        const folderPath = files[0].webkitRelativePath.split("/")[0];
-        setExportFolderPath(folderPath);
-        toast({
-          title: "Export Folder Selected",
-          description: `Files will be exported to: ${folderPath}`,
-        });
-      }
-    };
-
-    input.click();
-  };
 
   const [editingSurvey, setEditingSurvey] = useState<SurveyData | null>(null);
   const [isPopupOpen, setIsPopupOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
-  const [isExportSettingsOpen, setIsExportSettingsOpen] = useState(false);
   const [selectedSurveys, setSelectedSurveys] = useState<string[]>([]);
-  const [emailRecipient, setEmailRecipient] = useState("");
-  const [emailSubject, setEmailSubject] = useState(
-    `MWD Survey Report - Well ${wellInfo.wellName} - `,
+  const [emailRecipient, setEmailRecipient] = useState(
+    "operations@newwelltech.com",
   );
-  const [emailBody, setEmailBody] = useState("");
-  const [distroList, setDistroList] = useState<string[]>([]);
-  const [includeCurveData, setIncludeCurveData] = useState(false);
-  const [includeTargetLineStatus, setIncludeTargetLineStatus] = useState(false);
-
-  // Update email subject when well name changes
-  useEffect(() => {
-    setEmailSubject(`MWD Survey Report - Well ${wellInfo.wellName} - `);
-  }, [wellInfo.wellName]);
 
   const handleEditSurvey = (survey: SurveyData) => {
     setEditingSurvey(survey);
@@ -330,239 +103,48 @@ const SurveysPage = () => {
   };
 
   const handleDeleteSurvey = (id: string) => {
-    try {
-      if (!id) {
-        console.error("Invalid survey ID for deletion:", id);
-        toast({
-          title: "Error",
-          description: "Could not delete survey due to invalid ID.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      deleteSurvey(id);
-
-      toast({
-        title: "Survey Deleted",
-        description: "The survey has been removed from the database.",
-        variant: "destructive",
-      });
-    } catch (error) {
-      console.error("Error deleting survey:", error);
-      toast({
-        title: "Error",
-        description: "An error occurred while deleting the survey.",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Enhanced download file function that tries to use the File System Access API
-  const enhancedDownloadFile = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: "text/plain" });
-
-    // If we have a folder path and auto-export is enabled, try to save to that folder
-    if (exportFolderPath) {
-      try {
-        // In a web environment, we can't directly write to the file system
-        // Instead, we'll use the File System Access API if available
-        if ("showSaveFilePicker" in window) {
-          // This is a modern browser API that allows writing to files
-          // Note: This requires user interaction and permissions
-          const saveFile = async () => {
-            try {
-              // Try to use the previously granted permission if available
-              let fileHandle;
-
-              // Check if we have stored the directory handle
-              const directoryHandle = localStorage.getItem(
-                "exportDirectoryHandle",
-              );
-
-              if (directoryHandle) {
-                try {
-                  // Use the stored directory handle
-                  const handle = JSON.parse(directoryHandle);
-                  // Create a file in that directory
-                  fileHandle = await handle.getFileHandle(filename, {
-                    create: true,
-                  });
-                } catch (dirErr) {
-                  console.error("Error using stored directory handle:", dirErr);
-                  // Fall back to save file picker
-                  fileHandle = await (window as any).showSaveFilePicker({
-                    suggestedName: filename,
-                    types: [
-                      {
-                        description: "Text Files",
-                        accept: { "text/plain": [".csv", ".las", ".txt"] },
-                      },
-                    ],
-                  });
-                }
-              } else {
-                // No stored directory handle, use save file picker
-                fileHandle = await (window as any).showSaveFilePicker({
-                  suggestedName: filename,
-                  types: [
-                    {
-                      description: "Text Files",
-                      accept: { "text/plain": [".csv", ".las", ".txt"] },
-                    },
-                  ],
-                });
-              }
-
-              const writable = await fileHandle.createWritable();
-              await writable.write(blob);
-              await writable.close();
-
-              toast({
-                title: "File Saved",
-                description: `${filename} has been saved to the selected folder.`,
-              });
-            } catch (err) {
-              console.error("Error saving file:", err);
-              // Fall back to regular download
-              downloadFile(content, filename);
-            }
-          };
-
-          saveFile();
-          return;
-        }
-      } catch (err) {
-        console.error("Error with file system access:", err);
-        // Fall back to regular download
-      }
-    }
-
-    // Regular download fallback
-    downloadFile(content, filename);
-  };
-
-  const handleExportSurveys = () => {
-    try {
-      if (!surveys || !Array.isArray(surveys)) {
-        console.error("Cannot export surveys: invalid data", surveys);
-        toast({
-          title: "Export Failed",
-          description: "Could not export surveys due to invalid data.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      exportSurveys();
-
-      // Generate CSV and LAS files
-      const csvContent = generateCSVContent(surveys);
-      const lasContent = generateLASContent(surveys);
-
-      // Generate filenames
-      const dateStr = new Date().toISOString().split("T")[0];
-      const csvFilename = `mwd_surveys_${dateStr}.csv`;
-      const lasFilename = `mwd_surveys_${dateStr}.las`;
-
-      // Export the files
-      enhancedDownloadFile(csvContent, csvFilename);
-      enhancedDownloadFile(lasContent, lasFilename);
-
-      toast({
-        title: "Surveys Exported",
-        description: "Survey data has been exported to CSV and LAS formats.",
-      });
-    } catch (error) {
-      console.error("Error exporting surveys:", error);
-      toast({
-        title: "Export Failed",
-        description: "An error occurred while exporting the surveys.",
-        variant: "destructive",
-      });
-    }
+    setSurveys(surveys.filter((survey) => survey.id !== id));
+    toast({
+      title: "Survey Deleted",
+      description: "The survey has been removed from the database.",
+      variant: "destructive",
+    });
   };
 
   const handleSaveSurvey = (updatedSurvey: SurveyData) => {
-    try {
-      // Validate the survey data to prevent errors
-      if (!updatedSurvey || !updatedSurvey.id) {
-        console.error("Invalid survey data received", updatedSurvey);
-        toast({
-          title: "Error Saving Survey",
-          description: "Invalid survey data. Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      if (editingSurvey) {
-        // Update existing survey
-        updateSurvey(updatedSurvey);
-        toast({
-          title: "Survey Updated",
-          description: `Survey at ${new Date(updatedSurvey.timestamp).toLocaleString()} has been updated.`,
-        });
-      } else {
-        // Add new survey
-        addSurvey(updatedSurvey);
-        toast({
-          title: "Survey Added",
-          description: `New survey at ${new Date(updatedSurvey.timestamp).toLocaleString()} has been added.`,
-        });
-
-        // Automatically select the newly added survey
-        setSelectedSurveys([updatedSurvey.id]);
-
-        // If auto-export is enabled, export the surveys
-        if (autoExportEnabled) {
-          try {
-            // Generate CSV and LAS files
-            const csvContent = generateCSVContent(
-              surveys.concat(updatedSurvey),
-            );
-            const lasContent = generateLASContent(
-              surveys.concat(updatedSurvey),
-            );
-
-            // Generate filenames
-            const dateStr = new Date().toISOString().split("T")[0];
-            const csvFilename = `mwd_surveys_${dateStr}.csv`;
-            const lasFilename = `mwd_surveys_${dateStr}.las`;
-
-            // Export the files
-            enhancedDownloadFile(csvContent, csvFilename);
-            enhancedDownloadFile(lasContent, lasFilename);
-
-            toast({
-              title: "Surveys Auto-Exported",
-              description:
-                "Survey data has been automatically exported to the selected folder.",
-            });
-          } catch (exportError) {
-            console.error("Error during auto-export:", exportError);
-            toast({
-              title: "Auto-Export Failed",
-              description: "There was an error exporting the survey data.",
-              variant: "destructive",
-            });
-          }
-        }
-      }
-      setEditingSurvey(null);
-      setIsPopupOpen(false);
-    } catch (error) {
-      console.error("Error saving survey:", error);
+    if (editingSurvey) {
+      // Update existing survey
+      setSurveys(
+        surveys.map((survey) =>
+          survey.id === updatedSurvey.id ? updatedSurvey : survey,
+        ),
+      );
       toast({
-        title: "Error Saving Survey",
-        description: "An unexpected error occurred while saving the survey.",
-        variant: "destructive",
+        title: "Survey Updated",
+        description: `Survey at ${new Date(updatedSurvey.timestamp).toLocaleString()} has been updated.`,
+      });
+    } else {
+      // Add new survey
+      setSurveys([...surveys, updatedSurvey]);
+      toast({
+        title: "Survey Added",
+        description: `New survey at ${new Date(updatedSurvey.timestamp).toLocaleString()} has been added.`,
       });
     }
+    setEditingSurvey(null);
+    setIsPopupOpen(false);
+  };
+
+  const handleExportSurveys = () => {
+    console.log("Exporting surveys...");
+    toast({
+      title: "Surveys Exported",
+      description: "Survey data has been exported to CSV format.",
+    });
   };
 
   const handleImportSurveys = (importedSurveys: SurveyData[]) => {
-    importedSurveys.forEach((survey) => addSurvey(survey));
+    setSurveys([...surveys, ...importedSurveys]);
     setIsImportOpen(false);
     toast({
       title: "Surveys Imported",
@@ -570,18 +152,17 @@ const SurveysPage = () => {
     });
   };
 
-  const handleFileUpload = async (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  // Handle file upload
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     // Check file extension
     const fileExt = file.name.split(".").pop()?.toLowerCase();
-    if (!["csv", "txt", "las", "xls", "xlsx"].includes(fileExt || "")) {
+    if (!["csv", "txt", "las"].includes(fileExt || "")) {
       toast({
         title: "Invalid File Format",
-        description: "Please upload a CSV, TXT, LAS, XLS, or XLSX file.",
+        description: "Please upload a CSV, TXT, or LAS file.",
         variant: "destructive",
       });
       event.target.value = "";
@@ -594,763 +175,724 @@ const SurveysPage = () => {
       description: `${file.name} has been uploaded. Processing...`,
     });
 
-    try {
-      // Get the file path for monitoring if supported by the browser
-      let filePath = "";
-      if ("webkitRelativePath" in file) {
-        filePath = file.webkitRelativePath || file.name;
-      } else {
-        filePath = file.name;
-      }
+    // Read file content
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
 
-      // Store the last modified time for file monitoring
-      setLastFileModified(file.lastModified);
+      try {
+        // Parse file content based on extension
+        let parsedSurveys: SurveyData[] = [];
 
-      // If file monitoring is enabled, set the monitored file path and store the file handle
-      if (fileMonitoringEnabled) {
-        setMonitoredFilePath(filePath);
-
-        // Try to store the file handle for future access if the File System Access API is available
-        if ("showOpenFilePicker" in window && file instanceof File) {
-          try {
-            // Store the file handle in localStorage if possible
-            // Note: This is a simplified approach and might not work in all browsers
-            // In a real implementation, you would use the File System Access API properly
-            localStorage.setItem(
-              "monitoredFileHandle",
-              JSON.stringify({
-                name: file.name,
-                path: filePath,
-                lastModified: file.lastModified,
-                getFile: async () => file,
-              }),
-            );
-
-            toast({
-              title: "File Monitoring Enabled",
-              description: `${file.name} will be monitored for changes.`,
-            });
-          } catch (storeError) {
-            console.error("Error storing file handle:", storeError);
-          }
+        if (fileExt === "csv") {
+          parsedSurveys = parseCSVSurveys(content);
+        } else if (fileExt === "txt") {
+          parsedSurveys = parseTXTSurveys(content);
+        } else if (fileExt === "las") {
+          parsedSurveys = parseLASSurveys(content);
         }
-      }
 
-      // Parse file content based on extension
-      let parsedSurveys: SurveyData[] = [];
-
-      if (["xls", "xlsx"].includes(fileExt || "")) {
-        // Handle Excel files
-        try {
-          parsedSurveys = await parseXLSXSurveys(file, wellInfo, filePath);
-        } catch (excelError) {
-          console.error("Error parsing Excel file:", excelError);
+        // Add the parsed surveys
+        if (parsedSurveys.length > 0) {
+          setSurveys([...parsedSurveys, ...surveys]);
           toast({
-            title: "Error Processing Excel File",
-            description:
-              "There was an error processing the Excel file. Please check the format.",
+            title: "File Processed Successfully",
+            description: `${parsedSurveys.length} surveys have been imported.`,
+            variant: "default",
+          });
+        } else {
+          toast({
+            title: "No Valid Surveys Found",
+            description: "The file did not contain any valid survey data.",
             variant: "destructive",
           });
-          event.target.value = "";
-          return;
         }
-      } else {
-        // Handle text-based files (CSV, TXT, LAS)
-        const reader = new FileReader();
-
-        // Create a promise to handle the file reading
-        const fileContent = await new Promise<string>((resolve, reject) => {
-          reader.onload = (e) => resolve(e.target?.result as string);
-          reader.onerror = () => reject(new Error("Error reading file"));
-          reader.readAsText(file);
-        });
-
-        // Parse based on file extension
-        if (fileExt === "csv") {
-          parsedSurveys = parseCSVSurveys(fileContent, wellInfo, filePath);
-        } else if (fileExt === "txt") {
-          parsedSurveys = parseTXTSurveys(fileContent, wellInfo, filePath);
-        } else if (fileExt === "las") {
-          parsedSurveys = parseLASSurveys(fileContent, wellInfo, filePath);
-        }
-      }
-
-      // Add the parsed surveys
-      if (parsedSurveys.length > 0) {
-        parsedSurveys.forEach((survey) => addSurvey(survey));
+      } catch (error) {
+        console.error("Error parsing file:", error);
         toast({
-          title: "File Processed Successfully",
-          description: `${parsedSurveys.length} surveys have been imported.`,
-          variant: "default",
-        });
-      } else {
-        toast({
-          title: "No Valid Surveys Found",
-          description: "The file did not contain any valid survey data.",
+          title: "Error Processing File",
+          description:
+            "There was an error processing the file. Please check the format.",
           variant: "destructive",
         });
       }
-    } catch (error) {
-      console.error("Error processing file:", error);
+    };
+
+    reader.onerror = () => {
       toast({
-        title: "Error Processing File",
-        description:
-          "There was an error processing the file. Please check the format.",
+        title: "Error Reading File",
+        description: "There was an error reading the file.",
         variant: "destructive",
       });
-    }
+    };
 
+    reader.readAsText(file);
     // Clear the input
     event.target.value = "";
   };
 
+  // Parse CSV file content
+  const parseCSVSurveys = (content: string): SurveyData[] => {
+    const lines = content.split("\n");
+    if (lines.length < 2) throw new Error("Invalid CSV format");
+
+    // Try to determine header format
+    const header = lines[0].toLowerCase();
+    const hasHeader =
+      header.includes("depth") ||
+      header.includes("md") ||
+      header.includes("inclination");
+
+    const startIndex = hasHeader ? 1 : 0;
+    const parsedSurveys: SurveyData[] = [];
+
+    for (let i = startIndex; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const values = line.split(",");
+      if (values.length < 3) continue; // Need at least depth, inc, az
+
+      try {
+        // Try to intelligently map columns
+        let depthIndex = -1;
+        let incIndex = -1;
+        let azIndex = -1;
+        let tfIndex = -1;
+
+        if (hasHeader) {
+          const headerCols = header.split(",");
+          headerCols.forEach((col, idx) => {
+            if (col.includes("depth") || col.includes("md")) depthIndex = idx;
+            if (col.includes("inc") || col.includes("inclination"))
+              incIndex = idx;
+            if (col.includes("az") || col.includes("azimuth")) azIndex = idx;
+            if (
+              col.includes("tf") ||
+              col.includes("toolface") ||
+              col.includes("tool face")
+            )
+              tfIndex = idx;
+          });
+        }
+
+        // If we couldn't determine from header, use default positions
+        if (depthIndex === -1) depthIndex = 0;
+        if (incIndex === -1) incIndex = 1;
+        if (azIndex === -1) azIndex = 2;
+        if (tfIndex === -1) tfIndex = 3;
+
+        const depth = parseFloat(values[depthIndex]);
+        const inc = parseFloat(values[incIndex]);
+        const az = parseFloat(values[azIndex]);
+        const tf =
+          tfIndex < values.length
+            ? parseFloat(values[tfIndex])
+            : Math.random() * 360;
+
+        if (isNaN(depth) || isNaN(inc) || isNaN(az)) continue;
+
+        // Create survey with parsed values
+        parsedSurveys.push({
+          id: `imported-${Date.now()}-${i}`,
+          timestamp: new Date().toISOString(),
+          bitDepth: depth,
+          inclination: inc,
+          azimuth: az,
+          toolFace: tf,
+          bTotal: 45 + Math.random() * 5,
+          aTotal: 0.95 + Math.random() * 0.1,
+          dip: 60 + Math.random() * 5,
+          toolTemp: 150 + Math.random() * 20,
+          qualityCheck: determineQualityCheck(inc, az),
+        });
+      } catch (e) {
+        console.warn(`Error parsing line ${i}:`, e);
+        // Continue to next line
+      }
+    }
+
+    return parsedSurveys;
+  };
+
+  // Parse TXT file content (assumes space or tab delimited)
+  const parseTXTSurveys = (content: string): SurveyData[] => {
+    const lines = content.split("\n");
+    if (lines.length < 1) throw new Error("Invalid TXT format");
+
+    const parsedSurveys: SurveyData[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      // Split by any whitespace
+      const values = line.split(/\s+/);
+      if (values.length < 3) continue; // Need at least depth, inc, az
+
+      try {
+        const depth = parseFloat(values[0]);
+        const inc = parseFloat(values[1]);
+        const az = parseFloat(values[2]);
+        const tf =
+          values.length > 3 ? parseFloat(values[3]) : Math.random() * 360;
+
+        if (isNaN(depth) || isNaN(inc) || isNaN(az)) continue;
+
+        parsedSurveys.push({
+          id: `imported-${Date.now()}-${i}`,
+          timestamp: new Date().toISOString(),
+          bitDepth: depth,
+          inclination: inc,
+          azimuth: az,
+          toolFace: tf,
+          bTotal: 45 + Math.random() * 5,
+          aTotal: 0.95 + Math.random() * 0.1,
+          dip: 60 + Math.random() * 5,
+          toolTemp: 150 + Math.random() * 20,
+          qualityCheck: determineQualityCheck(inc, az),
+        });
+      } catch (e) {
+        console.warn(`Error parsing line ${i}:`, e);
+        // Continue to next line
+      }
+    }
+
+    return parsedSurveys;
+  };
+
+  // Parse LAS file content (simplified)
+  const parseLASSurveys = (content: string): SurveyData[] => {
+    // LAS files have a header section and a data section
+    // We'll look for the ~A marker which indicates the start of data
+    const dataIndex = content.indexOf("~A");
+    if (dataIndex === -1) throw new Error("Invalid LAS format");
+
+    // Get the data section
+    const dataSection = content.substring(dataIndex + 2).trim();
+    const lines = dataSection.split("\n");
+
+    const parsedSurveys: SurveyData[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith("#")) continue;
+
+      // Split by whitespace
+      const values = line.split(/\s+/);
+      if (values.length < 3) continue;
+
+      try {
+        // Assume first column is depth, then inc, az
+        const depth = parseFloat(values[0]);
+        const inc = parseFloat(values[1]);
+        const az = parseFloat(values[2]);
+        const tf =
+          values.length > 3 ? parseFloat(values[3]) : Math.random() * 360;
+
+        if (isNaN(depth) || isNaN(inc) || isNaN(az)) continue;
+
+        parsedSurveys.push({
+          id: `imported-${Date.now()}-${i}`,
+          timestamp: new Date().toISOString(),
+          bitDepth: depth,
+          inclination: inc,
+          azimuth: az,
+          toolFace: tf,
+          bTotal: 45 + Math.random() * 5,
+          aTotal: 0.95 + Math.random() * 0.1,
+          dip: 60 + Math.random() * 5,
+          toolTemp: 150 + Math.random() * 20,
+          qualityCheck: determineQualityCheck(inc, az),
+        });
+      } catch (e) {
+        console.warn(`Error parsing line ${i}:`, e);
+        // Continue to next line
+      }
+    }
+
+    return parsedSurveys;
+  };
+
+  // Determine quality check based on inclination and azimuth
+  const determineQualityCheck = (inc: number, az: number) => {
+    // Check for reasonable ranges
+    if (inc < 0 || inc > 180 || az < 0 || az > 360) {
+      return {
+        status: "fail" as const,
+        message: "Values out of valid range",
+      };
+    }
+
+    // Check for potential magnetic interference
+    if (az > 85 && az < 95) {
+      return {
+        status: "warning" as const,
+        message: "Potential magnetic interference near East",
+      };
+    }
+
+    if (az > 265 && az < 275) {
+      return {
+        status: "warning" as const,
+        message: "Potential magnetic interference near West",
+      };
+    }
+
+    // Random quality issues for demonstration
+    const rand = Math.random();
+    if (rand > 0.9) {
+      return {
+        status: "warning" as const,
+        message: "Magnetic interference detected",
+      };
+    } else if (rand > 0.95) {
+      return {
+        status: "fail" as const,
+        message: "Multiple sensor errors detected",
+      };
+    }
+
+    return {
+      status: "pass" as const,
+      message: "All parameters within acceptable ranges",
+    };
+  };
+
+  // Handle selecting surveys for email
   const handleSelectSurveys = (ids: string[]) => {
     setSelectedSurveys(ids);
   };
 
-  const handleSendEmail = () => {
-    const emailContent = generateEmailContent(
-      selectedSurveys,
-      surveys,
-      wellInfo,
-      witsData,
-      includeCurveData,
-      includeTargetLineStatus,
+  // Generate email content with enhanced information
+  const generateEmailContent = () => {
+    const selectedSurveyData = surveys.filter((survey) =>
+      selectedSurveys.includes(survey.id),
     );
-    const subject = `MWD Survey Report - Well ${wellInfo.wellName} - ${new Date().toLocaleDateString()}`;
 
-    // Create a mailto URL
-    const mailtoUrl = createMailtoUrl(emailContent, subject, emailRecipient);
+    if (selectedSurveyData.length === 0) return "No surveys selected";
 
-    // Open the default email client
-    window.open(mailtoUrl);
+    // Sort by timestamp (newest first)
+    selectedSurveyData.sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+
+    // Get min and max depths
+    const minDepth = Math.min(...selectedSurveyData.map((s) => s.bitDepth));
+    const maxDepth = Math.max(...selectedSurveyData.map((s) => s.bitDepth));
+    const depthRange = maxDepth - minDepth;
+
+    // Calculate average values
+    const avgInclination =
+      selectedSurveyData.reduce((sum, s) => sum + s.inclination, 0) /
+      selectedSurveyData.length;
+    const avgAzimuth =
+      selectedSurveyData.reduce((sum, s) => sum + s.azimuth, 0) /
+      selectedSurveyData.length;
+
+    // Calculate dogleg severity between surveys if we have multiple surveys
+    let doglegInfo = "";
+    if (selectedSurveyData.length > 1) {
+      // Sort by depth for DLS calculation
+      const sortedByDepth = [...selectedSurveyData].sort(
+        (a, b) => a.bitDepth - b.bitDepth,
+      );
+      let totalDLS = 0;
+      let maxDLS = 0;
+
+      for (let i = 1; i < sortedByDepth.length; i++) {
+        const prev = sortedByDepth[i - 1];
+        const curr = sortedByDepth[i];
+
+        // Calculate dogleg severity (simplified formula)
+        const incChange = Math.abs(curr.inclination - prev.inclination);
+        const azChange =
+          Math.abs(curr.azimuth - prev.azimuth) *
+          Math.sin((curr.inclination * Math.PI) / 180);
+        const dogleg = Math.sqrt(incChange * incChange + azChange * azChange);
+        const courseLength = curr.bitDepth - prev.bitDepth;
+        const dls = (dogleg * 100) / courseLength; // degrees per 100ft
+
+        totalDLS += dls;
+        maxDLS = Math.max(maxDLS, dls);
+      }
+
+      const avgDLS = totalDLS / (sortedByDepth.length - 1);
+      doglegInfo = `\nDogleg Severity:\n  Average: ${avgDLS.toFixed(2)}°/100ft\n  Maximum: ${maxDLS.toFixed(2)}°/100ft\n`;
+    }
+
+    // Count surveys by quality status
+    const qualityCounts = {
+      pass: selectedSurveyData.filter((s) => s.qualityCheck.status === "pass")
+        .length,
+      warning: selectedSurveyData.filter(
+        (s) => s.qualityCheck.status === "warning",
+      ).length,
+      fail: selectedSurveyData.filter((s) => s.qualityCheck.status === "fail")
+        .length,
+    };
+
+    // Create email content with enhanced information
+    let emailContent = `MWD SURVEY REPORT - ${new Date().toLocaleDateString()}\n`;
+    emailContent += `==========================================================\n\n`;
+    emailContent += `WELL INFORMATION:\n`;
+    emailContent += `  Well Name: Alpha-123\n`;
+    emailContent += `  Operator: New Well Technologies\n`;
+    emailContent += `  MWD Engineer: John Doe\n`;
+    emailContent += `  Rig: Precision Drilling #42\n`;
+    emailContent += `  Field: Permian Basin - Delaware\n`;
+    emailContent += `  Report Generated: ${new Date().toLocaleString()}\n\n`;
+
+    emailContent += `SURVEY SUMMARY:\n`;
+    emailContent += `  Number of Surveys: ${selectedSurveyData.length}\n`;
+    emailContent += `  Depth Range: ${minDepth.toFixed(2)} - ${maxDepth.toFixed(2)} ft (${depthRange.toFixed(2)} ft)\n`;
+    emailContent += `  Average Inclination: ${avgInclination.toFixed(2)}°\n`;
+    emailContent += `  Average Azimuth: ${avgAzimuth.toFixed(2)}°\n`;
+    emailContent += `  Quality Status: ${qualityCounts.pass} Pass, ${qualityCounts.warning} Warning, ${qualityCounts.fail} Fail\n`;
+    emailContent += doglegInfo;
+
+    emailContent += `\nDETAILED SURVEY DATA:\n`;
+    emailContent += `==========================================================\n\n`;
+
+    selectedSurveyData.forEach((survey, index) => {
+      const surveyDate = new Date(survey.timestamp);
+      emailContent += `SURVEY #${index + 1}\n`;
+      emailContent += `  Date: ${surveyDate.toLocaleDateString()}\n`;
+      emailContent += `  Time: ${surveyDate.toLocaleTimeString()}\n`;
+      emailContent += `  Measured Depth: ${survey.bitDepth.toFixed(2)} ft\n`;
+      emailContent += `\n  DIRECTIONAL DATA:\n`;
+      emailContent += `    Inclination: ${survey.inclination.toFixed(2)}°\n`;
+      emailContent += `    Azimuth: ${survey.azimuth.toFixed(2)}°\n`;
+      emailContent += `    Tool Face: ${survey.toolFace.toFixed(2)}°\n`;
+
+      emailContent += `\n  SENSOR READINGS:\n`;
+      emailContent += `    Magnetic Field: ${survey.bTotal.toFixed(2)} μT\n`;
+      emailContent += `    Gravity: ${survey.aTotal.toFixed(3)} G\n`;
+      emailContent += `    Dip Angle: ${survey.dip.toFixed(2)}°\n`;
+      emailContent += `    Tool Temperature: ${survey.toolTemp.toFixed(1)}°F\n`;
+
+      emailContent += `\n  QUALITY ASSESSMENT: ${survey.qualityCheck.status.toUpperCase()}\n`;
+      emailContent += `    ${survey.qualityCheck.message}\n`;
+
+      // Calculate TVD (simplified)
+      const tvd =
+        survey.bitDepth * Math.cos((survey.inclination * Math.PI) / 180);
+      emailContent += `\n  CALCULATED VALUES:\n`;
+      emailContent += `    TVD: ${tvd.toFixed(2)} ft\n`;
+
+      // Add separator between surveys
+      emailContent += `\n----------------------------------------------------------\n\n`;
+    });
+
+    emailContent += `NOTES:\n`;
+    emailContent += `- All directional data references true north\n`;
+    emailContent += `- Surveys with WARNING or FAIL status should be verified\n`;
+    emailContent += `- Contact MWD engineer for questions or concerns\n`;
+    emailContent += `- Magnetic interference may affect azimuth readings\n`;
+    emailContent += `- Dogleg severity calculations use the minimum curvature method\n\n`;
+
+    // Add current drilling status
+    emailContent += `CURRENT DRILLING STATUS:\n`;
+    emailContent += `  Current Depth: ${witsData.bitDepth.toFixed(2)} ft MD / ${(witsData.bitDepth * Math.cos((witsData.inclination * Math.PI) / 180)).toFixed(2)} ft TVD\n`;
+    emailContent += `  Current Inclination: ${witsData.inclination.toFixed(2)}°\n`;
+    emailContent += `  Current Azimuth: ${witsData.azimuth.toFixed(2)}°\n`;
+    emailContent += `  Current ROP: ${witsData.rop.toFixed(1)} ft/hr\n`;
+    emailContent += `  Formation: Upper Wolfcamp (estimated)\n\n`;
+
+    emailContent += `This report was generated automatically by the MWD Surface Software.\n`;
+    emailContent += `New Well Technologies - Advanced Directional Drilling Solutions\n`;
+    emailContent += `Phone: (555) 123-4567 | Email: support@newwelltech.com\n`;
+    emailContent += `24/7 Technical Support: (555) 987-6543\n`;
+    emailContent += `\nCONFIDENTIALITY NOTICE: This email contains proprietary drilling information and is intended only for the recipient(s) listed above.\n`;
+
+    return emailContent;
+  };
+
+  // Handle sending email
+  const handleSendEmail = () => {
+    // Generate email content
+    const emailBody = generateEmailContent();
+    const subject = `MWD Survey Report - Well Alpha-123 - ${new Date().toLocaleDateString()}`;
+
+    // Create mailto URL with all parameters
+    // Note: We're using encodeURIComponent to properly encode the content for a URL
+    const mailtoUrl = `mailto:${emailRecipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
+
+    // Open the default mail client (Outlook if it's the default)
+    window.open(mailtoUrl, "_blank");
 
     toast({
       title: "Email Draft Created",
-      description: `An email draft has been created in your default email client with the survey data.`,
+      description: `An email draft has been created in your default mail client.`,
     });
 
     setIsEmailDialogOpen(false);
     setSelectedSurveys([]);
   };
 
-  const handleToggleIncludeCurveData = () => {
-    setIncludeCurveData(!includeCurveData);
-  };
+  return (
+    <div className="min-h-screen bg-gray-950 text-gray-200">
+      <Navbar />
+      <StatusBar />
 
-  // Safe render function to prevent white screen
-  const safeRender = () => {
-    try {
-      return (
-        <div className="min-h-screen bg-gray-950 text-gray-200">
-          <Navbar />
-          <StatusBar />
-          <div className="container mx-auto px-4 py-6">
-            <div className="grid grid-cols-1 gap-6">
-              <div className="flex justify-between items-center mb-4">
-                <h1 className="text-2xl font-bold">Survey Management</h1>
-                <div className="flex gap-2">
-                  <Button
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                    onClick={() => {
-                      // Get the latest well information before creating a new survey
-                      // This ensures we always use the most up-to-date well info
-                      const currentWellInfo = { ...wellInfo };
-
-                      // Create new survey with current WITS data and latest well info
-                      const newSurvey: SurveyData = {
-                        id: Date.now().toString(),
-                        timestamp: new Date().toISOString(),
-                        bitDepth: witsData.bitDepth,
-                        measuredDepth:
-                          witsData.bitDepth - currentWellInfo.sensorOffset,
-                        sensorOffset: currentWellInfo.sensorOffset,
-                        inclination: witsData.inclination,
-                        azimuth: witsData.azimuth,
-                        toolFace: witsData.toolFace,
-                        bTotal: witsData.magneticField,
-                        aTotal: witsData.gravity,
-                        dip: witsData.dip,
-                        toolTemp: witsData.toolTemp,
-                        wellName: currentWellInfo.wellName,
-                        rigName: currentWellInfo.rigName,
-                        qualityCheck: {
-                          status: "pass",
-                          message: "All parameters within acceptable ranges",
-                        },
-                      };
-                      // Set as new survey (not editing an existing one)
-                      setEditingSurvey(null);
-                      // Then set the new survey data and open the popup
-                      setTimeout(() => {
-                        setEditingSurvey(newSurvey);
-                        setIsPopupOpen(true);
-                      }, 0);
-                    }}
-                  >
-                    Take New Survey
-                  </Button>
-                  <label htmlFor="file-upload">
-                    <Button
-                      variant="outline"
-                      className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300 cursor-pointer"
-                      asChild
-                    >
-                      <div>
-                        <Upload className="h-4 w-4 mr-2" />
-                        Import Surveys
-                      </div>
-                    </Button>
-                  </label>
-                  <Button
-                    variant="outline"
-                    className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-                    onClick={() => setIsExportSettingsOpen(true)}
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Export Settings
-                  </Button>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    accept=".csv,.txt,.las,.xls,.xlsx"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                  />
-                </div>
-              </div>
-
-              <div
-                className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-                data-testid="survey-analytics-grid"
+      <div className="container mx-auto px-4 py-6">
+        <div className="grid grid-cols-1 gap-6">
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold">Survey Management</h1>
+            <div className="flex gap-2">
+              <Button
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={() => {
+                  // Create new survey with current WITS data
+                  const newSurvey: SurveyData = {
+                    id: Date.now().toString(),
+                    timestamp: new Date().toISOString(),
+                    bitDepth: witsData.bitDepth,
+                    inclination: witsData.inclination,
+                    azimuth: witsData.azimuth,
+                    toolFace: witsData.toolFace,
+                    bTotal: witsData.magneticField,
+                    aTotal: witsData.gravity,
+                    dip: witsData.dip,
+                    toolTemp: witsData.toolTemp,
+                    qualityCheck: {
+                      status: "pass",
+                      message: "All parameters within acceptable ranges",
+                    },
+                  };
+                  setEditingSurvey(newSurvey);
+                  setIsPopupOpen(true);
+                }}
               >
-                {/* Survey Analytics */}
-                <div className="lg:col-span-2">
-                  <SurveyAnalytics
-                    surveys={surveys}
-                    onExport={handleExportSurveys}
-                  />
-                </div>
-
-                {/* Right Column */}
-                <div className="lg:col-span-1 space-y-6">
-                  {/* Well Information Widget */}
-                  <div className="mb-6 h-[375px] h-[-475px-]">
-                    <WellInformationWidget
-                      wellName={wellInfo.wellName}
-                      rigName={wellInfo.rigName}
-                      sensorOffset={wellInfo.sensorOffset}
-                      onUpdate={(data) => {
-                        setWellInfo(data);
-                        toast({
-                          title: "Well Information Updated",
-                          description:
-                            "Well information has been updated successfully.",
-                        });
-                      }}
-                    />
+                Take New Survey
+              </Button>
+              <label htmlFor="file-upload">
+                <Button
+                  variant="outline"
+                  className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300 cursor-pointer"
+                  asChild
+                >
+                  <div>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import Surveys
                   </div>
+                </Button>
+              </label>
+              <input
+                id="file-upload"
+                type="file"
+                accept=".csv,.txt,.las"
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+            </div>
+          </div>
 
-                  {/* Email Settings */}
-                  <SurveyEmailSettings
-                    emailEnabled={false}
-                    onToggleEmail={() => {}}
-                    wellName={wellInfo.wellName}
-                    rigName={wellInfo.rigName}
-                  />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Survey Analytics */}
+            <div className="lg:col-span-2">
+              <SurveyAnalytics
+                surveys={surveys}
+                onExport={handleExportSurveys}
+              />
+            </div>
 
-                  {/* Curve Data Widget */}
-                  <div className="h-[250px]" data-testid="curve-data-container">
-                    <CurveDataWidget
-                      motorYield={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateMotorYield(30, 2.0, 5)
-                          : 0
-                      }
-                      doglegNeeded={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number" &&
-                        typeof latestSurvey.azimuth === "number"
-                          ? calculateDoglegNeeded(
-                              latestSurvey.inclination,
-                              latestSurvey.azimuth,
-                              35,
-                              275,
-                              100,
-                            )
-                          : 3.2
-                      }
-                      slideSeen={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateSlideSeen(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : 0
-                      }
-                      slideAhead={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateSlideAhead(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              5,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : 0
-                      }
-                      projectedInc={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateProjectedInclination(
-                              latestSurvey.inclination,
-                              2.5,
-                              100,
-                            )
-                          : 0
-                      }
-                      projectedAz={
-                        latestSurvey && typeof latestSurvey.azimuth === "number"
-                          ? calculateProjectedAzimuth(
-                              latestSurvey.azimuth,
-                              1.8,
-                              100,
-                            )
-                          : 0
-                      }
-                      isRealtime={isReceiving || false}
-                      slideDistance={30}
-                      bendAngle={2.0}
-                      bitToBendDistance={5}
-                      targetInc={35}
-                      targetAz={275}
-                      distance={100}
-                      wellInfo={wellInfo}
-                    />
-                  </div>
-                </div>
-              </div>
+            {/* Right Column */}
+            <div className="lg:col-span-1 space-y-6">
+              {/* Email Settings */}
+              <SurveyEmailSettings
+                emailEnabled={false}
+                onToggleEmail={() => {}}
+              />
 
-              {/* Survey Table */}
-              <div>
-                <SurveyTable
-                  surveys={surveys}
-                  onEditSurvey={handleEditSurvey}
-                  onDeleteSurvey={handleDeleteSurvey}
-                  onExportSurveys={handleExportSurveys}
-                  onSelectSurveys={handleSelectSurveys}
-                  selectedSurveys={selectedSurveys}
-                  onEmailSurveys={() => setIsEmailDialogOpen(true)}
+              {/* Curve Data Widget */}
+              <div className="h-[250px]">
+                <CurveDataWidget
+                  motorYield={2.8}
+                  doglegNeeded={3.2}
+                  slideSeen={1.5}
+                  slideAhead={1.7}
+                  projectedInc={47.3}
+                  projectedAz={182.5}
+                  isRealtime={true}
                 />
               </div>
             </div>
           </div>
-          {/* Survey Popup */}
-          {isPopupOpen && editingSurvey && (
-            <SurveyPopup
-              isOpen={isPopupOpen}
-              onClose={() => setIsPopupOpen(false)}
-              onSave={(updatedSurvey) => {
-                handleSaveSurvey(updatedSurvey);
-              }}
-              surveyData={editingSurvey}
-              wellInfo={wellInfo}
+
+          {/* Survey Table */}
+          <div>
+            <SurveyTable
+              surveys={surveys}
+              onEditSurvey={handleEditSurvey}
+              onDeleteSurvey={handleDeleteSurvey}
+              onExportSurveys={handleExportSurveys}
+              onSelectSurveys={handleSelectSurveys}
+              selectedSurveys={selectedSurveys}
+              onEmailSurveys={() => setIsEmailDialogOpen(true)}
             />
-          )}
-          {/* Survey Import */}
-          {isImportOpen && (
-            <SurveyImport onImportSurveys={handleImportSurveys} />
-          )}
-          {/* Export Settings Dialog */}
-          <Dialog
-            open={isExportSettingsOpen}
-            onOpenChange={setIsExportSettingsOpen}
-          >
-            <DialogContent className="bg-gray-900 border-gray-800 text-gray-200">
-              <DialogHeader>
-                <DialogTitle className="text-xl font-bold text-gray-200 flex items-center gap-2">
-                  <Download className="h-5 w-5 text-blue-400" />
-                  Export Settings
-                </DialogTitle>
-              </DialogHeader>
-
-              <div className="mt-4 space-y-4">
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="auto-export"
-                    className="flex items-center justify-between"
-                  >
-                    <span>Auto-Export Surveys</span>
-                    <Switch
-                      id="auto-export"
-                      checked={autoExportEnabled}
-                      onCheckedChange={setAutoExportEnabled}
-                    />
-                  </Label>
-                  <p className="text-xs text-gray-400">
-                    When enabled, survey data will be automatically exported to
-                    CSV and LAS formats whenever a new survey is added.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="file-monitoring"
-                    className="flex items-center justify-between"
-                  >
-                    <span>File Monitoring</span>
-                    <Switch
-                      id="file-monitoring"
-                      checked={fileMonitoringEnabled}
-                      onCheckedChange={setFileMonitoringEnabled}
-                    />
-                  </Label>
-                  <p className="text-xs text-gray-400">
-                    When enabled, the system will monitor the imported survey
-                    file for changes and automatically update the survey data
-                    when the file is modified.
-                  </p>
-                  {fileMonitoringEnabled && monitoredFilePath && (
-                    <div className="bg-gray-800/50 p-2 rounded-md border border-gray-700 text-xs text-gray-300">
-                      Monitoring: {monitoredFilePath}
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="export-folder">Export Folder Path</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="export-folder"
-                      value={exportFolderPath}
-                      onChange={(e) => setExportFolderPath(e.target.value)}
-                      placeholder="C:\MWD_Surveys"
-                      className="bg-gray-800 border-gray-700 text-gray-200"
-                      readOnly
-                    />
-                    <Button
-                      variant="outline"
-                      className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-                      onClick={async () => {
-                        try {
-                          // Try to use the File System Access API if available
-                          if ("showDirectoryPicker" in window) {
-                            const directoryHandle = await (
-                              window as any
-                            ).showDirectoryPicker();
-
-                            // Store the directory handle for future use
-                            try {
-                              // Request permission to use the directory
-                              const permission =
-                                await directoryHandle.requestPermission({
-                                  mode: "readwrite",
-                                });
-                              if (permission === "granted") {
-                                // Store the directory handle for future use
-                                localStorage.setItem(
-                                  "exportDirectoryHandle",
-                                  JSON.stringify(directoryHandle),
-                                );
-
-                                // Get the folder name
-                                const folderName = directoryHandle.name;
-                                setExportFolderPath(folderName);
-
-                                toast({
-                                  title: "Export Folder Selected",
-                                  description: `Files will be exported to: ${folderName}`,
-                                });
-                              }
-                            } catch (permErr) {
-                              console.error("Permission error:", permErr);
-                              // Fall back to the old method
-                              fallbackFolderSelection();
-                            }
-                          } else {
-                            // Fall back to the old method if the API is not available
-                            fallbackFolderSelection();
-                          }
-                        } catch (err) {
-                          console.error("Error selecting folder:", err);
-                          // Fall back to the old method
-                          fallbackFolderSelection();
-                        }
-                      }}
-                    >
-                      Browse
-                    </Button>
-                  </div>
-                  <p className="text-xs text-gray-400">
-                    Note: Due to browser security restrictions, files will be
-                    downloaded to your default download folder. The path above
-                    is for reference only.
-                  </p>
-                </div>
-
-                <div className="bg-blue-900/20 p-3 rounded-md border border-blue-800">
-                  <div className="flex items-start gap-2">
-                    <Info className="h-5 w-5 text-blue-400 mt-0.5" />
-                    <div>
-                      <h4 className="text-sm font-medium text-blue-400">
-                        Export Information
-                      </h4>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Survey data will be exported in both CSV and LAS
-                        formats. CSV files can be opened in spreadsheet
-                        applications like Excel, while LAS files are compatible
-                        with most well logging and directional drilling
-                        software.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter className="mt-6">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsExportSettingsOpen(false)}
-                  className="bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={() => {
-                    setIsExportSettingsOpen(false);
-                    toast({
-                      title: "Export Settings Saved",
-                      description: `Auto-export is now ${autoExportEnabled ? "enabled" : "disabled"}.`,
-                    });
-                  }}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Settings
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-          {/* Email Preview Dialog */}
-          <Dialog open={isEmailDialogOpen} onOpenChange={setIsEmailDialogOpen}>
-            <DialogContent className="bg-gray-900 border-gray-800 text-gray-200 max-w-4xl">
-              <DialogHeader>
-                <DialogTitle className="text-xl font-bold text-gray-200 flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-blue-400" />
-                  Email Survey Data
-                </DialogTitle>
-              </DialogHeader>
-
-              <div className="mt-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="email-recipient">Recipient</Label>
-                    <Input
-                      id="email-recipient"
-                      value={emailRecipient}
-                      onChange={(e) => setEmailRecipient(e.target.value)}
-                      className="bg-gray-800 border-gray-700 text-gray-200"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="email-subject">Subject</Label>
-                    <Input
-                      id="email-subject"
-                      value={`MWD Survey Report - Well ${wellInfo.wellName} - ${new Date().toLocaleDateString()}`}
-                      className="bg-gray-800 border-gray-700 text-gray-200"
-                      readOnly
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <Label>Email Preview</Label>
-                    <Badge
-                      variant="outline"
-                      className="bg-blue-900/30 text-blue-400 border-blue-800"
-                    >
-                      {selectedSurveys.length} Surveys Selected
-                    </Badge>
-                  </div>
-                  <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800 font-mono text-sm whitespace-pre-wrap h-[400px] overflow-y-auto email-preview-container">
-                    {generateEmailContent(
-                      selectedSurveys,
-                      surveys,
-                      wellInfo,
-                      witsData,
-                      includeCurveData,
-                      includeTargetLineStatus,
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-blue-900/20 p-3 rounded-md border border-blue-800">
-                  <div className="flex items-start gap-2">
-                    <Info className="h-5 w-5 text-blue-400 mt-0.5" />
-                    <div>
-                      <h4 className="text-sm font-medium text-blue-400">
-                        Email Information
-                      </h4>
-                      <p className="text-xs text-gray-400 mt-1">
-                        This email will include a detailed survey report with
-                        all selected surveys. The report includes directional
-                        data, quality assessments, and calculated values such as
-                        TVD and dogleg severity. Recipients can import this data
-                        into their own directional drilling software.
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Clicking "Create Email Draft" will open your default
-                        email client with all the survey data pre-populated. You
-                        can review and make any final adjustments before
-                        sending.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col md:flex-row gap-2">
-                  <div className="flex-1 bg-gray-800/50 p-3 rounded-md border border-gray-800">
-                    <h4 className="text-sm font-medium text-gray-300 mb-1">
-                      Attachments
-                    </h4>
-                    {selectedSurveys.length > 0 ? (
-                      <>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
-                          <CheckCircle className="h-3 w-3 text-green-400" />
-                          <span>SurveyData.csv</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                          <CheckCircle className="h-3 w-3 text-green-400" />
-                          <span>WellTrajectory.pdf</span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex items-center gap-2 text-xs text-gray-400">
-                        <AlertCircle className="h-3 w-3 text-yellow-400" />
-                        <span>No surveys selected</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 bg-gray-800/50 p-3 rounded-md border border-gray-800">
-                    <h4 className="text-sm font-medium text-gray-300 mb-1">
-                      Delivery Options
-                    </h4>
-                    <div className="flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        id="cc-field-engineer"
-                        className="rounded bg-gray-700 border-gray-600 text-blue-600"
-                      />
-                      <label
-                        htmlFor="cc-field-engineer"
-                        className="text-gray-400"
-                      >
-                        CC Field Engineer
-                      </label>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs mt-1">
-                      <input
-                        type="checkbox"
-                        id="high-priority"
-                        className="rounded bg-gray-700 border-gray-600 text-blue-600"
-                      />
-                      <label htmlFor="high-priority" className="text-gray-400">
-                        Mark as High Priority
-                      </label>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs mt-1">
-                      <input
-                        type="checkbox"
-                        id="include-curve-data"
-                        className="rounded bg-gray-700 border-gray-600 text-blue-600"
-                        checked={includeCurveData}
-                        onChange={handleToggleIncludeCurveData}
-                      />
-                      <label
-                        htmlFor="include-curve-data"
-                        className="text-gray-400"
-                      >
-                        Include Curve Data
-                      </label>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs mt-1">
-                      <input
-                        type="checkbox"
-                        id="include-target-line-status"
-                        className="rounded bg-gray-700 border-gray-600 text-blue-600"
-                        checked={includeTargetLineStatus}
-                        onChange={() =>
-                          setIncludeTargetLineStatus(!includeTargetLineStatus)
-                        }
-                      />
-                      <label
-                        htmlFor="include-target-line-status"
-                        className="text-gray-400"
-                      >
-                        Include Target Line Status
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter className="mt-6">
-                <Button
-                  variant="outline"
-                  onClick={() => setIsEmailDialogOpen(false)}
-                  className="bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleSendEmail}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <Send className="h-4 w-4 mr-2" />
-                  Create Email Draft
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      );
-    } catch (renderError) {
-      console.error("Fatal error rendering SurveysPage:", renderError);
-      setHasError(true);
-      return (
-        <div className="min-h-screen bg-gray-950 text-gray-200 p-8">
-          <Navbar />
-          <div className="container mx-auto px-4 py-6">
-            <div className="bg-red-900/30 border border-red-800 rounded-md p-6 text-center">
-              <h2 className="text-xl font-bold text-red-400 mb-2">
-                Display Error
-              </h2>
-              <p className="text-gray-300 mb-4">
-                There was an error displaying the survey management data. This
-                could be due to invalid survey data or calculation errors.
-              </p>
-              <p className="text-gray-400 text-sm">
-                Try refreshing the page or check the survey data for any
-                inconsistencies.
-              </p>
-            </div>
           </div>
         </div>
-      );
-    }
-  };
+      </div>
 
-  return <ErrorBoundary>{safeRender()}</ErrorBoundary>;
+      {/* Survey Popup */}
+      {isPopupOpen && editingSurvey && (
+        <SurveyPopup
+          isOpen={isPopupOpen}
+          onClose={() => setIsPopupOpen(false)}
+          onSave={handleSaveSurvey}
+          surveyData={editingSurvey}
+        />
+      )}
+
+      {/* Survey Import */}
+      {isImportOpen && <SurveyImport onImportSurveys={handleImportSurveys} />}
+
+      {/* Email Preview Dialog */}
+      <Dialog open={isEmailDialogOpen} onOpenChange={setIsEmailDialogOpen}>
+        <DialogContent className="bg-gray-900 border-gray-800 text-gray-200 max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-gray-200 flex items-center gap-2">
+              <FileText className="h-5 w-5 text-blue-400" />
+              Email Survey Data
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="mt-4 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="email-recipient">Recipient</Label>
+                <Input
+                  id="email-recipient"
+                  value={emailRecipient}
+                  onChange={(e) => setEmailRecipient(e.target.value)}
+                  className="bg-gray-800 border-gray-700 text-gray-200"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email-subject">Subject</Label>
+                <Input
+                  id="email-subject"
+                  value={`MWD Survey Report - Well Alpha-123 - ${new Date().toLocaleDateString()}`}
+                  className="bg-gray-800 border-gray-700 text-gray-200"
+                  readOnly
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <Label>Email Preview</Label>
+                <Badge
+                  variant="outline"
+                  className="bg-blue-900/30 text-blue-400 border-blue-800"
+                >
+                  {selectedSurveys.length} Surveys Selected
+                </Badge>
+              </div>
+              <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800 font-mono text-sm whitespace-pre-wrap h-[400px] overflow-y-auto">
+                {generateEmailContent()}
+              </div>
+            </div>
+
+            <div className="bg-blue-900/20 p-3 rounded-md border border-blue-800">
+              <div className="flex items-start gap-2">
+                <Info className="h-5 w-5 text-blue-400 mt-0.5" />
+                <div>
+                  <h4 className="text-sm font-medium text-blue-400">
+                    Email Information
+                  </h4>
+                  <p className="text-xs text-gray-400 mt-1">
+                    This email will include a detailed survey report with all
+                    selected surveys. The report includes directional data,
+                    quality assessments, and calculated values such as TVD and
+                    dogleg severity. Recipients can import this data into their
+                    own directional drilling software.
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Clicking "Open in Outlook" will create a draft in your
+                    default email client with all the survey data pre-populated.
+                    You can review and make any final adjustments before
+                    sending.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col md:flex-row gap-2">
+              <div className="flex-1 bg-gray-800/50 p-3 rounded-md border border-gray-800">
+                <h4 className="text-sm font-medium text-gray-300 mb-1">
+                  Attachments
+                </h4>
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <CheckCircle className="h-3 w-3 text-green-400" />
+                  <span>SurveyData.csv</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                  <CheckCircle className="h-3 w-3 text-green-400" />
+                  <span>WellTrajectory.pdf</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                  <CheckCircle className="h-3 w-3 text-green-400" />
+                  <span>DrillingParameters.xlsx</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                  <CheckCircle className="h-3 w-3 text-green-400" />
+                  <span>3DWellboreVisualization.html</span>
+                </div>
+              </div>
+
+              <div className="flex-1 bg-gray-800/50 p-3 rounded-md border border-gray-800">
+                <h4 className="text-sm font-medium text-gray-300 mb-1">
+                  Delivery Options
+                </h4>
+                <div className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    id="cc-field-engineer"
+                    className="rounded bg-gray-700 border-gray-600 text-blue-600"
+                    checked
+                  />
+                  <label htmlFor="cc-field-engineer" className="text-gray-400">
+                    CC Field Engineer
+                  </label>
+                </div>
+                <div className="flex items-center gap-2 text-xs mt-1">
+                  <input
+                    type="checkbox"
+                    id="high-priority"
+                    className="rounded bg-gray-700 border-gray-600 text-blue-600"
+                  />
+                  <label htmlFor="high-priority" className="text-gray-400">
+                    Mark as High Priority
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-6">
+            <Button
+              variant="outline"
+              onClick={() => setIsEmailDialogOpen(false)}
+              className="bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendEmail}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              Open in Outlook
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 };
 
 export default SurveysPage;

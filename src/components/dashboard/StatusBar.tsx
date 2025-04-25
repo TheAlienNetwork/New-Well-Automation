@@ -1,45 +1,52 @@
 import React, { useState, useEffect } from "react";
-import { Drill } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Wifi, Database, Activity, Drill, Layers, ArrowUp } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
-import { useSurveys } from "@/context/SurveyContext";
-import ConnectionStatus from "./status/ConnectionStatus";
-import WellInfo from "./status/WellInfo";
-import SurveyData from "./status/SurveyData";
 
 interface StatusBarProps {
   wellName?: string;
+  isConnected?: boolean;
+  latestSurvey?: {
+    md: number;
+    inc: number;
+    az: number;
+  };
+  bitDepth?: number;
+  gamma?: number;
+  blockHeight?: number;
 }
 
-const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
+const StatusBar = ({
+  wellName = "Well Alpha-123",
+  isConnected: propIsConnected,
+  latestSurvey: propLatestSurvey,
+  bitDepth: propBitDepth,
+  gamma: propGamma,
+  blockHeight: propBlockHeight,
+}: StatusBarProps) => {
   const {
-    isConnected,
+    isConnected: witsConnected,
     isReceiving,
     witsData,
     lastUpdateTime,
-    connectionConfig,
   } = useWits();
-  const { surveys } = useSurveys();
+
+  // Use WITS data if available, otherwise use props
+  const isConnected =
+    propIsConnected !== undefined ? propIsConnected : witsConnected;
+  const latestSurvey = propLatestSurvey || {
+    md: witsData.bitDepth,
+    inc: witsData.inclination,
+    az: witsData.azimuth,
+  };
+  const bitDepth =
+    propBitDepth !== undefined ? propBitDepth : witsData.bitDepth;
+  const gamma = propGamma !== undefined ? propGamma : witsData.gamma;
+  const blockHeight =
+    propBlockHeight !== undefined ? propBlockHeight : witsData.blockHeight;
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [pulseIndicator, setPulseIndicator] = useState(false);
-
-  // Get the latest survey data (sorted by timestamp)
-  const latestSurvey =
-    surveys.length > 0
-      ? [...surveys].sort((a, b) => {
-          // Ensure we have valid timestamps
-          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-          return timeB - timeA;
-        })[0]
-      : null;
-
-  // Use well name from latest survey if available, otherwise from localStorage, props, or default
-  const wellName =
-    latestSurvey?.wellName ||
-    localStorage.getItem("wellName") ||
-    propWellName ||
-    "Well Alpha-123";
 
   // Update time every second
   useEffect(() => {
@@ -63,99 +70,81 @@ const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
     }
   }, [isConnected, isReceiving]);
 
-  // Update time when WITS data updates or when surveys change
+  // Update time when WITS data updates
   useEffect(() => {
     if (lastUpdateTime) {
       setCurrentTime(lastUpdateTime);
     }
   }, [lastUpdateTime]);
 
-  // Update display when surveys change
-  useEffect(() => {
-    if (surveys.length > 0) {
-      // Force a re-render when surveys change
-      setCurrentTime(new Date());
-    }
-  }, [surveys]);
-
-  // Get values with priority to survey data, falling back to WITS data
-  const measuredDepth = latestSurvey?.measuredDepth ?? witsData.measuredDepth;
-  const inclination = latestSurvey?.inclination ?? witsData.inclination;
-  const azimuth = latestSurvey?.azimuth ?? witsData.azimuth;
-
-  // Determine data source for visual indication
-  // Check if the values are actually defined and not just present in the object
-  const mdSource =
-    latestSurvey &&
-    latestSurvey.measuredDepth !== undefined &&
-    latestSurvey.measuredDepth !== null
-      ? "survey"
-      : "wits";
-  const incSource =
-    latestSurvey &&
-    latestSurvey.inclination !== undefined &&
-    latestSurvey.inclination !== null
-      ? "survey"
-      : "wits";
-  const azSource =
-    latestSurvey &&
-    latestSurvey.azimuth !== undefined &&
-    latestSurvey.azimuth !== null
-      ? "survey"
-      : "wits";
-
   return (
     <div className="w-full bg-gray-950 border-b border-gray-800 px-4 py-1 flex items-center justify-between text-xs">
       <div className="flex items-center space-x-4">
-        <ConnectionStatus
-          isConnected={isConnected}
-          isReceiving={isReceiving}
-          pulseIndicator={pulseIndicator}
-        />
+        <div className="flex items-center">
+          <Badge
+            variant="outline"
+            className={`${isConnected ? "bg-green-900/30 text-green-400 border-green-800" : "bg-red-900/30 text-red-400 border-red-800"} mr-2`}
+          >
+            {isConnected ? "CONNECTED" : "DISCONNECTED"}
+          </Badge>
+          <div className="flex items-center gap-1">
+            <Wifi
+              className={`h-3 w-3 ${isConnected ? "text-green-400" : "text-red-400"} ${pulseIndicator ? "animate-pulse" : ""}`}
+            />
+            <span className="text-gray-400">WITS</span>
+          </div>
+        </div>
 
-        <WellInfo wellName={wellName} />
+        <div className="flex items-center gap-1">
+          <Database className="h-3 w-3 text-blue-400" />
+          <span className="text-gray-300">{wellName}</span>
+        </div>
       </div>
 
       <div className="flex items-center space-x-4">
-        <SurveyData
-          measuredDepth={measuredDepth}
-          inclination={inclination}
-          azimuth={azimuth}
-          mdSource={mdSource}
-          incSource={incSource}
-          azSource={azSource}
-        />
+        <div className="flex items-center gap-1">
+          <Layers className="h-3 w-3 text-cyan-400" />
+          <span className="text-gray-500">MD:</span>
+          <span className="text-cyan-400 font-medium">
+            {latestSurvey.md.toFixed(2)}ft
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <ArrowUp className="h-3 w-3 text-green-400" />
+          <span className="text-gray-500">Inc:</span>
+          <span className="text-green-400 font-medium">
+            {latestSurvey.inc.toFixed(2)}°
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <Activity className="h-3 w-3 text-blue-400" />
+          <span className="text-gray-500">Az:</span>
+          <span className="text-blue-400 font-medium">
+            {latestSurvey.az.toFixed(2)}°
+          </span>
+        </div>
 
         <div className="flex items-center gap-1">
           <Drill className="h-3 w-3 text-yellow-400" />
           <span className="text-gray-500">Bit:</span>
           <span className="text-yellow-400 font-medium">
-            {(latestSurvey &&
-            latestSurvey.bitDepth !== undefined &&
-            latestSurvey.bitDepth !== null
-              ? latestSurvey.bitDepth
-              : witsData.bitDepth
-            )?.toFixed(2) || "0.00"}
-            ft
+            {bitDepth.toFixed(2)}ft
           </span>
-          {latestSurvey &&
-            latestSurvey.bitDepth !== undefined &&
-            latestSurvey.bitDepth !== null && (
-              <span className="text-xs text-yellow-600 ml-1">(S)</span>
-            )}
         </div>
 
         <div className="flex items-center gap-1">
           <span className="text-gray-500">Gamma:</span>
           <span className="text-purple-400 font-medium">
-            {witsData.gamma?.toFixed(2) || "0.00"}API
+            {gamma.toFixed(2)}API
           </span>
         </div>
 
         <div className="flex items-center gap-1">
           <span className="text-gray-500">Block:</span>
           <span className="text-orange-400 font-medium">
-            {witsData.blockHeight?.toFixed(2) || "0.00"}ft
+            {blockHeight.toFixed(2)}ft
           </span>
         </div>
 

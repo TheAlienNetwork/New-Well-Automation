@@ -28,33 +28,26 @@ import {
   CheckCircle,
 } from "lucide-react";
 
-// Process real pulse data from WITS
-function processRealPulseData(witsData: any, length: number = 1000): number[] {
-  // If no real data is available, return a flat line
-  if (!witsData || !witsData.pulseData) {
-    return Array(length).fill(0);
-  }
+// Generate dummy pulse data for visualization
+function generateDummyData(length: number): number[] {
+  const result = [];
+  let value = 0;
 
-  // If we have real pulse data, use it
-  if (Array.isArray(witsData.pulseData) && witsData.pulseData.length > 0) {
-    // Ensure we have the right length
-    if (witsData.pulseData.length >= length) {
-      return witsData.pulseData.slice(0, length);
+  for (let i = 0; i < length; i++) {
+    // Create pulse-like patterns with single spikes
+    if (i % 50 === 0) {
+      value = 0.9 + Math.random() * 0.1; // High pulse
+    } else if (i % 50 === 1 || i % 50 === 2) {
+      value = 0.1 + Math.random() * 0.1; // Slightly longer return to baseline
     } else {
-      // Pad with zeros if we don't have enough data
-      const paddedData = [...witsData.pulseData];
-      while (paddedData.length < length) {
-        paddedData.push(0.01);
-      }
-      return paddedData;
+      // Flat line with minimal noise
+      value = Math.random() * 0.03; // Less noise for cleaner look
     }
+    result.push(value);
   }
 
-  // Fallback to a flat line with no noise
-  return Array(length).fill(0);
+  return result;
 }
-
-import { useWits } from "@/context/WitsContext";
 
 interface HorizontalDecoderProps {
   data?: number[];
@@ -67,7 +60,7 @@ interface HorizontalDecoderProps {
 }
 
 const HorizontalDecoder = ({
-  data,
+  data = generateDummyData(1000),
   isLive = true,
   sampleRate = 10,
   noiseLevel = 30,
@@ -75,18 +68,13 @@ const HorizontalDecoder = ({
   onFilterChange = () => {},
   onNoiseFilterChange = () => {},
 }: HorizontalDecoderProps) => {
-  // Get real WITS data
-  const { witsData, isReceiving } = useWits();
-
-  // Process real pulse data or use provided data
-  const pulseData = data || processRealPulseData(witsData, 1000);
   const [zoom, setZoom] = useState(1);
   const [isPaused, setIsPaused] = useState(false);
   const [currentNoiseFilter, setCurrentNoiseFilter] = useState(noiseLevel);
   const [isAiEnabled, setIsAiEnabled] = useState(aiFilterEnabled);
   const [activeTab, setActiveTab] = useState("live");
   const [signalQuality, setSignalQuality] = useState(85);
-  const [decodedBits, setDecodedBits] = useState<string>("");
+  const [decodedBits, setDecodedBits] = useState<string>("10110010");
   const [showStats, setShowStats] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
@@ -163,7 +151,7 @@ const HorizontalDecoder = ({
   ) => {
     const pointsPerPixel = Math.max(
       1,
-      Math.floor(pulseData.length / (canvas.width * zoom)),
+      Math.floor(data.length / (canvas.width * zoom)),
     );
     const visibleDataStart = Math.floor(offset / zoom);
     const spikeWidth = 6; // Wider spike base
@@ -177,13 +165,13 @@ const HorizontalDecoder = ({
     ctx.stroke();
 
     // Draw each spike - moving from right to left
-    for (let i = 0; i < pulseData.length; i += pointsPerPixel) {
+    for (let i = 0; i < data.length; i += pointsPerPixel) {
       // Calculate x position - moving from right to left
       const x = canvas.width - (i - visibleDataStart) / pointsPerPixel;
       if (x < -10 || x > canvas.width + 10) continue;
 
       // Get pulse value with noise filtering
-      let value = pulseData[i];
+      let value = data[i];
       if (Math.abs(value) < currentNoiseFilter / 100) {
         value *= currentNoiseFilter / 100;
       }
@@ -396,10 +384,16 @@ const HorizontalDecoder = ({
         setDecodedBits((prev) => (prev + newBit).slice(-8));
       }
 
-      // Use real-time data if available and we're receiving data
-      if (isReceiving && witsData && witsData.pulseData) {
-        // Use the latest pulse data from WITS
-        // This would be updated in real-time by the WITS context
+      // Occasionally generate new pulse data
+      if (Math.random() < 0.01) {
+        // Add a new pulse at the beginning of the data array
+        const newData = [...data];
+        newData.unshift(0.9 + Math.random() * 0.1); // Add high pulse
+        newData.unshift(0.1 + Math.random() * 0.1); // Add return to baseline
+        // Keep array size constant
+        while (newData.length > data.length) {
+          newData.pop();
+        }
       }
     }
 
