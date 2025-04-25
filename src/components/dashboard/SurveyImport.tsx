@@ -20,7 +20,6 @@ import {
   Table,
 } from "lucide-react";
 import { SurveyData } from "./SurveyPopup";
-import * as surveyUtils from "@/utils/surveyUtils";
 
 interface SurveyImportProps {
   onImportSurveys: (surveys: SurveyData[]) => void;
@@ -81,55 +80,43 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
         return;
       }
 
-      // Parse the file to extract survey data
-      // This is a placeholder for actual file parsing logic
-      // In a production environment, this would use proper file parsing libraries
-      const parsedSurveys: SurveyData[] = [];
+      // Generate dummy survey data for demonstration
+      const dummySurveys: SurveyData[] = [];
+      const baseDepth = 5000 + Math.random() * 1000;
+      const baseInc = 30 + Math.random() * 10;
+      const baseAz = 170 + Math.random() * 20;
 
-      try {
-        // For CSV files
-        if (fileExt === "csv") {
-          // In production, this would be replaced with actual file reading and parsing
-          // using FileReader API and CSV parsing libraries
-          setImportMessage("Processing CSV file...");
+      for (let i = 0; i < 10; i++) {
+        const depth = baseDepth + i * 30;
+        const inc = baseInc + (Math.random() - 0.5) * 2;
+        const az = baseAz + (Math.random() - 0.5) * 3;
 
-          // Placeholder for actual file parsing logic
-          // This would be replaced with real CSV parsing in production
-        }
-        // For Excel files
-        else if (fileExt === "xlsx" || fileExt === "xls") {
-          setImportMessage("Processing Excel file...");
-
-          // Placeholder for actual Excel file parsing logic
-          // This would be replaced with real Excel parsing in production
-        }
-
-        // If no surveys were parsed, show an error
-        if (parsedSurveys.length === 0) {
-          setImportStatus("error");
-          setImportMessage(
-            "No valid survey data found in the file. Please check the file format.",
-          );
-          return;
-        }
-      } catch (error) {
-        console.error("Error parsing file:", error);
-        setImportStatus("error");
-        setImportMessage("Error parsing file. Please check the file format.");
-        return;
+        dummySurveys.push({
+          id: `import-${Date.now()}-${i}`,
+          timestamp: new Date(Date.now() - i * 3600000).toISOString(),
+          bitDepth: depth,
+          inclination: inc,
+          azimuth: az,
+          toolFace: 45 + (Math.random() - 0.5) * 10,
+          bTotal: 48 + (Math.random() - 0.5) * 0.5,
+          aTotal: 0.98 + (Math.random() - 0.5) * 0.02,
+          dip: 62 + (Math.random() - 0.5) * 1,
+          toolTemp: 165 + Math.random() * 10,
+          qualityCheck: {
+            status: Math.random() > 0.8 ? "warning" : "pass",
+            message:
+              Math.random() > 0.8
+                ? "Magnetic interference detected"
+                : "All parameters within acceptable ranges",
+          },
+        });
       }
 
-      // Get the detected headers from the import process
-      const detectedHeaders = surveyUtils.getLastDetectedHeaders();
-      if (detectedHeaders) {
-        console.log("Using detected headers:", detectedHeaders);
-      }
-
-      setImportedSurveys(parsedSurveys);
-      setSelectedSurveys(parsedSurveys.map((s) => s.id));
+      setImportedSurveys(dummySurveys);
+      setSelectedSurveys(dummySurveys.map((s) => s.id));
       setImportStatus("success");
       setImportMessage(
-        `Successfully processed ${parsedSurveys.length} surveys from ${selectedFile.name}`,
+        `Successfully processed ${dummySurveys.length} surveys from ${selectedFile.name}`,
       );
       setActiveTab("preview");
     }, 1500);

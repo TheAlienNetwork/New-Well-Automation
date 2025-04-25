@@ -1,17 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Compass, Ruler, ArrowUp, RotateCw, Zap } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
-import { useSurveys } from "@/context/SurveyContext";
-import {
-  calculateMotorYield,
-  calculateDoglegNeeded,
-  calculateSlideSeen,
-  calculateSlideAhead,
-  calculateProjectedInclination,
-  calculateProjectedAzimuth,
-} from "@/utils/directionalCalculations";
 
 interface CurveDataWidgetProps {
   motorYield?: number;
@@ -21,17 +12,6 @@ interface CurveDataWidgetProps {
   projectedInc?: number;
   projectedAz?: number;
   isRealtime?: boolean;
-  slideDistance?: number;
-  bendAngle?: number;
-  bitToBendDistance?: number;
-  targetInc?: number;
-  targetAz?: number;
-  distance?: number;
-  wellInfo?: {
-    wellName: string;
-    rigName: string;
-    sensorOffset: number;
-  };
 }
 
 const CurveDataWidget = ({
@@ -42,237 +22,24 @@ const CurveDataWidget = ({
   projectedInc: propProjectedInc,
   projectedAz: propProjectedAz,
   isRealtime: propIsRealtime = true,
-  slideDistance = 30,
-  bendAngle = 2.0,
-  bitToBendDistance = 5,
-  targetInc = 90,
-  targetAz = 270,
-  distance = 100,
 }: CurveDataWidgetProps) => {
   const { isReceiving, witsData } = useWits();
-  const { surveys } = useSurveys();
-  const [latestSurveyData, setLatestSurveyData] = useState<any>(null);
 
-  // Get the latest survey data when surveys change
-  useEffect(() => {
-    try {
-      if (surveys && surveys.length > 0) {
-        // Sort surveys by timestamp (newest first)
-        const sortedSurveys = [...surveys].sort((a, b) => {
-          try {
-            return (
-              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-            );
-          } catch (dateError) {
-            console.error("Error comparing survey dates:", dateError);
-            return 0; // Return 0 if date comparison fails
-          }
-        });
-
-        // Validate the survey data before setting it
-        const latestSurvey = sortedSurveys[0];
-        if (latestSurvey) {
-          // Log when a new latest survey is detected
-          console.log("CurveDataWidget: New latest survey detected", {
-            id: latestSurvey.id,
-            timestamp: latestSurvey.timestamp,
-            inclination: latestSurvey.inclination,
-            azimuth: latestSurvey.azimuth,
-          });
-
-          setLatestSurveyData(latestSurvey);
-        } else {
-          console.warn(
-            "CurveDataWidget: No valid survey found in sorted surveys",
-          );
-          setLatestSurveyData(null);
-        }
-      } else {
-        console.log("CurveDataWidget: No surveys available");
-        setLatestSurveyData(null);
-      }
-    } catch (error) {
-      console.error(
-        "Error updating latest survey data in CurveDataWidget:",
-        error,
-      );
-      setLatestSurveyData(null);
-    }
-  }, [surveys]);
-
-  // Calculate values using directional calculation functions
-  const calculateValues = () => {
-    try {
-      // Always prioritize the latest survey data for calculations
-      // Ensure we have valid numeric values with explicit type checking
-      const currentInc =
-        typeof latestSurveyData?.inclination === "number"
-          ? latestSurveyData.inclination
-          : typeof witsData?.inclination === "number"
-            ? witsData.inclination
-            : 0;
-
-      const currentAz =
-        typeof latestSurveyData?.azimuth === "number"
-          ? latestSurveyData.azimuth
-          : typeof witsData?.azimuth === "number"
-            ? witsData.azimuth
-            : 0;
-
-      // Log the source of the data for debugging
-      console.log("CurveDataWidget calculation using:", {
-        incSource:
-          typeof latestSurveyData?.inclination === "number" ? "survey" : "wits",
-        azSource:
-          typeof latestSurveyData?.azimuth === "number" ? "survey" : "wits",
-        currentInc,
-        currentAz,
-      });
-
-      // Calculate motor yield
-      const calculatedMotorYield = calculateMotorYield(
-        slideDistance,
-        bendAngle,
-        bitToBendDistance,
-      );
-
-      // Determine if the tool is rotating based on rotary RPM
-      // If rotary RPM is above a threshold (e.g., 5 RPM), consider it rotating
-      const isRotating =
-        typeof witsData?.rotaryRpm === "number"
-          ? witsData.rotaryRpm > 5
-          : false;
-
-      console.log("Rotation status:", {
-        rotaryRpm: witsData?.rotaryRpm,
-        isRotating,
-        source: "CurveDataWidget calculation",
-      });
-
-      // Calculate slide seen with rotation status
-      const calculatedSlideSeen = calculateSlideSeen(
-        calculatedMotorYield,
-        slideDistance,
-        isRotating,
-      );
-
-      // Calculate slide ahead with rotation status
-      const calculatedSlideAhead = calculateSlideAhead(
-        calculatedMotorYield,
-        slideDistance,
-        bitToBendDistance,
-        isRotating,
-      );
-
-      // Calculate projected inclination using build rate (not motor yield)
-      const calculatedProjectedInc = calculateProjectedInclination(
-        currentInc,
-        2.5, // Use a standard build rate instead of motor yield
-        distance,
-      );
-
-      // Calculate projected azimuth
-      const calculatedProjectedAz = calculateProjectedAzimuth(
-        currentAz,
-        1.8, // Standard turn rate
-        distance,
-      );
-
-      // Calculate dogleg needed
-      const calculatedDoglegNeeded = calculateDoglegNeeded(
-        currentInc,
-        currentAz,
-        targetInc,
-        targetAz,
-        distance,
-      );
-
-      return {
-        motorYield: calculatedMotorYield,
-        slideSeen: calculatedSlideSeen,
-        slideAhead: calculatedSlideAhead,
-        projectedInc: calculatedProjectedInc,
-        projectedAz: calculatedProjectedAz,
-        doglegNeeded: calculatedDoglegNeeded,
-      };
-    } catch (error) {
-      console.error("Error calculating values in CurveDataWidget:", error);
-      // Return default values if calculation fails
-      return {
-        motorYield: 0,
-        slideSeen: 0,
-        slideAhead: 0,
-        projectedInc: 0,
-        projectedAz: 0,
-        doglegNeeded: 0,
-      };
-    }
-  };
-
-  // Get calculated values - recalculate on every render to ensure latest data is used
-  const calculatedValues = calculateValues();
-
-  // Use props first, then calculated values, regardless of connection status
-  // This ensures values are always displayed and updated correctly
+  // Use WITS data if available, otherwise use props
   const motorYield =
-    propMotorYield !== undefined ? propMotorYield : calculatedValues.motorYield;
+    propMotorYield !== undefined ? propMotorYield : witsData.motorYield;
   const doglegNeeded =
-    propDoglegNeeded !== undefined
-      ? propDoglegNeeded
-      : calculatedValues.doglegNeeded;
+    propDoglegNeeded !== undefined ? propDoglegNeeded : witsData.doglegNeeded;
   const slideSeen =
-    propSlideSeen !== undefined ? propSlideSeen : calculatedValues.slideSeen;
+    propSlideSeen !== undefined ? propSlideSeen : witsData.slideSeen;
   const slideAhead =
-    propSlideAhead !== undefined ? propSlideAhead : calculatedValues.slideAhead;
+    propSlideAhead !== undefined ? propSlideAhead : witsData.slideAhead;
   const projectedInc =
-    propProjectedInc !== undefined
-      ? propProjectedInc
-      : calculatedValues.projectedInc;
+    propProjectedInc !== undefined ? propProjectedInc : witsData.projectedInc;
   const projectedAz =
-    propProjectedAz !== undefined
-      ? propProjectedAz
-      : calculatedValues.projectedAz;
+    propProjectedAz !== undefined ? propProjectedAz : witsData.projectedAz;
   const isRealtime =
     propIsRealtime !== undefined ? propIsRealtime : isReceiving;
-
-  // Log the values for debugging
-  useEffect(() => {
-    try {
-      console.log("CurveDataWidget values:", {
-        motorYield,
-        doglegNeeded,
-        slideSeen,
-        slideAhead,
-        projectedInc,
-        projectedAz,
-        rotaryRpm: witsData?.rotaryRpm,
-        isRotating:
-          typeof witsData?.rotaryRpm === "number"
-            ? witsData.rotaryRpm > 5
-            : false,
-        latestSurveyData: latestSurveyData
-          ? {
-              id: latestSurveyData.id,
-              timestamp: latestSurveyData.timestamp,
-              inclination: latestSurveyData.inclination,
-              azimuth: latestSurveyData.azimuth,
-            }
-          : null,
-      });
-    } catch (error) {
-      console.error("Error logging CurveDataWidget values:", error);
-    }
-  }, [
-    motorYield,
-    doglegNeeded,
-    slideSeen,
-    slideAhead,
-    projectedInc,
-    projectedAz,
-    latestSurveyData,
-    witsData?.rotaryRpm,
-  ]);
-
   return (
     <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
       <CardHeader className="p-3 pb-0 flex flex-row items-center justify-between">

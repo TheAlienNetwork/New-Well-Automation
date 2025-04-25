@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { useSurveys } from "@/context/SurveyContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -52,8 +51,7 @@ const ControlPanel = ({
   onAdjustFilter = () => {},
   onAdjustNoise = () => {},
 }: ControlPanelProps) => {
-  const [activeTab, setActiveTab] = useState("surveys");
-  const { surveys } = useSurveys();
+  const [activeTab, setActiveTab] = useState("controls");
   const [aiAssistEnabled, setAiAssistEnabled] = useState(true);
   const [autoFilterEnabled, setAutoFilterEnabled] = useState(true);
   const [alertsEnabled, setAlertsEnabled] = useState(true);
@@ -72,9 +70,6 @@ const ControlPanel = ({
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid grid-cols-4 mb-4 bg-gray-800">
-            <TabsTrigger value="surveys" className="text-sm">
-              Surveys
-            </TabsTrigger>
             <TabsTrigger value="controls" className="text-sm">
               Controls
             </TabsTrigger>
@@ -83,6 +78,9 @@ const ControlPanel = ({
             </TabsTrigger>
             <TabsTrigger value="settings" className="text-sm">
               Settings
+            </TabsTrigger>
+            <TabsTrigger value="surveys" className="text-sm">
+              Surveys
             </TabsTrigger>
           </TabsList>
 
@@ -284,56 +282,51 @@ const ControlPanel = ({
                     <th className="text-left p-2 text-gray-400">Inc (°)</th>
                     <th className="text-left p-2 text-gray-400">Az (°)</th>
                     <th className="text-left p-2 text-gray-400">TF (°)</th>
-                    <th className="text-left p-2 text-gray-400">Quality</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {surveys.length > 0 ? (
-                    surveys.slice(0, 10).map((survey) => (
-                      <tr
-                        key={survey.id}
-                        className="border-t border-gray-800 hover:bg-gray-800/30"
-                      >
-                        <td className="p-2 text-gray-300">
-                          {survey.bitDepth.toFixed(2)}
-                        </td>
-                        <td className="p-2 text-gray-300">
-                          {survey.inclination.toFixed(2)}
-                        </td>
-                        <td className="p-2 text-gray-300">
-                          {survey.azimuth.toFixed(2)}
-                        </td>
-                        <td className="p-2 text-gray-300">
-                          {survey.toolFace.toFixed(2)}
-                        </td>
-                        <td className="p-2">
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-xs ${survey.qualityCheck.status === "pass" ? "bg-green-900/30 text-green-400" : survey.qualityCheck.status === "warning" ? "bg-yellow-900/30 text-yellow-400" : "bg-red-900/30 text-red-400"}`}
-                          >
-                            {survey.qualityCheck.status.toUpperCase()}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr className="border-t border-gray-800">
-                      <td colSpan={5} className="p-4 text-center text-gray-500">
-                        No survey data available
-                      </td>
-                    </tr>
-                  )}
+                  <tr className="border-t border-gray-800 hover:bg-gray-800/30">
+                    <td className="p-2 text-gray-300">8452.60</td>
+                    <td className="p-2 text-gray-300">32.50</td>
+                    <td className="p-2 text-gray-300">275.80</td>
+                    <td className="p-2 text-gray-300">45.20</td>
+                  </tr>
+                  <tr className="border-t border-gray-800 hover:bg-gray-800/30">
+                    <td className="p-2 text-gray-300">8422.40</td>
+                    <td className="p-2 text-gray-300">31.80</td>
+                    <td className="p-2 text-gray-300">274.50</td>
+                    <td className="p-2 text-gray-300">44.80</td>
+                  </tr>
+                  <tr className="border-t border-gray-800 hover:bg-gray-800/30">
+                    <td className="p-2 text-gray-300">8392.20</td>
+                    <td className="p-2 text-gray-300">31.20</td>
+                    <td className="p-2 text-gray-300">273.90</td>
+                    <td className="p-2 text-gray-300">44.30</td>
+                  </tr>
+                  <tr className="border-t border-gray-800 hover:bg-gray-800/30">
+                    <td className="p-2 text-gray-300">8362.00</td>
+                    <td className="p-2 text-gray-300">30.70</td>
+                    <td className="p-2 text-gray-300">273.20</td>
+                    <td className="p-2 text-gray-300">43.90</td>
+                  </tr>
+                  <tr className="border-t border-gray-800 hover:bg-gray-800/30">
+                    <td className="p-2 text-gray-300">8331.80</td>
+                    <td className="p-2 text-gray-300">30.10</td>
+                    <td className="p-2 text-gray-300">272.60</td>
+                    <td className="p-2 text-gray-300">43.50</td>
+                  </tr>
+                  <tr className="border-t border-gray-800 hover:bg-gray-800/30">
+                    <td className="p-2 text-gray-300">8301.60</td>
+                    <td className="p-2 text-gray-300">29.50</td>
+                    <td className="p-2 text-gray-300">272.10</td>
+                    <td className="p-2 text-gray-300">43.10</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
             <Button
               variant="outline"
               className="w-full bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-              onClick={() => {
-                if (surveys.length > 0) {
-                  // In a real implementation, this would export the survey data
-                  console.log("Exporting survey data:", surveys);
-                }
-              }}
             >
               <Download className="mr-2 h-4 w-4" />
               Export Survey Data

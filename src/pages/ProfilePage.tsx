@@ -1,5 +1,4 @@
-// ProfilePage.js
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Navbar from "@/components/layout/Navbar";
 import StatusBar from "@/components/dashboard/StatusBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +10,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { useUser } from "@/context/UserContext";
 import {
   User,
   Mail,
@@ -27,7 +25,6 @@ import {
   Edit,
   CheckCircle,
   AlertTriangle,
-  Trash,
 } from "lucide-react";
 
 interface TimeEntry {
@@ -40,25 +37,33 @@ interface TimeEntry {
 }
 
 const ProfilePage = () => {
-  const { userProfile, updateUserProfile, updateProfileImage } = useUser();
   const [activeTab, setActiveTab] = useState("profile");
-  const [taxRate, setTaxRate] = useState(0.22); // Default tax rate at 22%
+  const [profileImage, setProfileImage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [hourlyRate, setHourlyRate] = useState(85);
-  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
-
-  // Load time entries from localStorage on component mount
-  useEffect(() => {
-    const savedEntries = localStorage.getItem("timeEntries");
-    if (savedEntries) {
-      setTimeEntries(JSON.parse(savedEntries));
-    }
-  }, []);
-
-  // Save time entries to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem("timeEntries", JSON.stringify(timeEntries));
-  }, [timeEntries]);
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([
+    {
+      id: "1",
+      date: "2023-06-15",
+      hours: 8,
+      project: "Alpha-123 Well",
+      description: "Directional drilling operations",
+    },
+    {
+      id: "2",
+      date: "2023-06-16",
+      hours: 10,
+      project: "Alpha-123 Well",
+      description: "Survey analysis and reporting",
+    },
+    {
+      id: "3",
+      date: "2023-06-17",
+      hours: 6,
+      project: "Alpha-123 Well",
+      description: "Tool maintenance and calibration",
+    },
+  ]);
 
   const [newEntry, setNewEntry] = useState<Omit<TimeEntry, "id">>({
     date: new Date().toISOString().split("T")[0],
@@ -67,41 +72,25 @@ const ProfilePage = () => {
     description: "",
   });
 
-  // Local state to track changes before saving to context
   const [profileData, setProfileData] = useState({
-    firstName: userProfile.firstName,
-    lastName: userProfile.lastName,
-    email: userProfile.email,
-    phone: userProfile.phone,
-    position: userProfile.position,
-    company: userProfile.company,
-    location: userProfile.location,
-    bio: userProfile.bio,
-    emailSignature: userProfile.emailSignature,
+    firstName: "John",
+    lastName: "Doe",
+    email: "john.doe@newwelltech.com",
+    phone: "(555) 123-4567",
+    position: "Senior MWD Engineer",
+    company: "New Well Technologies",
+    location: "Houston, TX",
+    bio: "Experienced MWD engineer with over 10 years in directional drilling operations. Specialized in high-temperature, high-pressure environments and complex well trajectories.",
+    emailSignature:
+      "John Doe\nSenior MWD Engineer\nNew Well Technologies\nPhone: (555) 123-4567\nEmail: john.doe@newwelltech.com",
   });
-
-  // Update local state when userProfile changes
-  useEffect(() => {
-    setProfileData({
-      firstName: userProfile.firstName,
-      lastName: userProfile.lastName,
-      email: userProfile.email,
-      phone: userProfile.phone,
-      position: userProfile.position,
-      company: userProfile.company,
-      location: userProfile.location,
-      bio: userProfile.bio,
-      emailSignature: userProfile.emailSignature,
-    });
-  }, [userProfile]);
 
   const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        const imageUrl = event.target?.result as string;
-        updateProfileImage(imageUrl);
+        setProfileImage(event.target?.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -116,28 +105,26 @@ const ProfilePage = () => {
 
   const handleSaveProfile = () => {
     setIsEditing(false);
-
     // Update email signature with current profile data
-    const updatedEmailSignature = `${profileData.firstName} ${profileData.lastName}\n${profileData.position}\n${profileData.company}\nPhone: ${profileData.phone}\nEmail: ${profileData.email}`;
-
-    // Update local state
     setProfileData({
       ...profileData,
-      emailSignature: updatedEmailSignature,
+      emailSignature: `${profileData.firstName} ${profileData.lastName}\n${profileData.position}\n${profileData.company}\nPhone: ${profileData.phone}\nEmail: ${profileData.email}`,
     });
 
-    // Update global context
-    updateUserProfile({
-      ...profileData,
-      emailSignature: updatedEmailSignature,
-    });
-
-    // Log confirmation for debugging
-    console.log(
-      "Profile updated:",
-      profileData.firstName,
-      profileData.lastName,
-    );
+    // Update global state (in a real app, this would use context or Redux)
+    // This is a mock implementation since we don't have access to the global state
+    try {
+      // Simulate updating global state
+      const event = new CustomEvent("profileUpdated", {
+        detail: {
+          name: `${profileData.firstName} ${profileData.lastName}`,
+          image: profileImage,
+        },
+      });
+      window.dispatchEvent(event);
+    } catch (error) {
+      console.error("Failed to update global profile state", error);
+    }
   };
 
   const handleNewEntryChange = (
@@ -164,53 +151,20 @@ const ProfilePage = () => {
     });
   };
 
-  const handleDeleteTimeEntry = (id: string) => {
-    const updatedEntries = timeEntries.filter((entry) => entry.id !== id);
-    setTimeEntries(updatedEntries);
-  };
-
   const calculateTotalHours = () => {
     return timeEntries.reduce((total, entry) => total + entry.hours, 0);
   };
 
   const calculateRegularHours = () => {
-    // Group entries by date to calculate daily hours
-    const dailyHours: Record<string, number> = {};
-
-    timeEntries.forEach((entry) => {
-      if (!dailyHours[entry.date]) {
-        dailyHours[entry.date] = 0;
-      }
-      dailyHours[entry.date] += entry.hours;
-    });
-
-    // Calculate regular hours (8 hours per day max)
-    let regularHours = 0;
-    Object.values(dailyHours).forEach((hours) => {
-      regularHours += Math.min(hours, 8);
-    });
-
-    return regularHours;
+    // Regular hours are capped at 80 hours per pay period (assuming 2 weeks)
+    const totalHours = calculateTotalHours();
+    return Math.min(totalHours, 80);
   };
 
   const calculateOvertimeHours = () => {
-    // Group entries by date to calculate daily overtime
-    const dailyHours: Record<string, number> = {};
-
-    timeEntries.forEach((entry) => {
-      if (!dailyHours[entry.date]) {
-        dailyHours[entry.date] = 0;
-      }
-      dailyHours[entry.date] += entry.hours;
-    });
-
-    // Calculate overtime hours (hours over 8 per day)
-    let overtimeHours = 0;
-    Object.values(dailyHours).forEach((hours) => {
-      overtimeHours += Math.max(0, hours - 8);
-    });
-
-    return overtimeHours;
+    // Overtime hours are any hours over 80 in the pay period
+    const totalHours = calculateTotalHours();
+    return Math.max(0, totalHours - 80);
   };
 
   const calculateTotalPay = () => {
@@ -250,10 +204,29 @@ ${profileData.emailSignature}
     <div className="min-h-screen bg-gray-950 text-gray-200">
       <Navbar />
       <StatusBar />
+
       <div className="container mx-auto px-4 py-6">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">User Profile</h1>
-          {activeTab === "profile" && <></>}
+          {activeTab === "profile" && (
+            <Button
+              variant="outline"
+              className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+              onClick={() => setIsEditing(!isEditing)}
+            >
+              {isEditing ? (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Profile
+                </>
+              ) : (
+                <>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Profile
+                </>
+              )}
+            </Button>
+          )}
         </div>
 
         <Tabs
@@ -277,13 +250,6 @@ ${profileData.emailSignature}
               <Clock className="h-4 w-4 mr-2" />
               Timesheet
             </TabsTrigger>
-            <TabsTrigger
-              value="payroll"
-              className="data-[state=active]:bg-gray-700 data-[state=active]:text-blue-400"
-            >
-              <DollarSign className="h-4 w-4 mr-2" />
-              Payroll
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="space-y-6">
@@ -294,7 +260,7 @@ ${profileData.emailSignature}
                     <Avatar className="h-24 w-24 border-4 border-gray-800">
                       <AvatarImage
                         src={
-                          userProfile.profileImage ||
+                          profileImage ||
                           "https://api.dicebear.com/7.x/avataaars/svg?seed=john"
                         }
                       />
@@ -640,9 +606,6 @@ ${profileData.emailSignature}
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
                             Description
                           </th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
-                            Actions
-                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-800">
@@ -708,17 +671,6 @@ ${profileData.emailSignature}
                                   }}
                                   className="bg-transparent border-0 hover:bg-gray-800 focus:bg-gray-800 text-gray-300 text-sm h-7 p-1"
                                 />
-                              </td>
-                              <td className="px-4 py-2">
-                                <Button
-                                  variant="destructive"
-                                  className="bg-red-600 hover:bg-red-700 text-white"
-                                  onClick={() =>
-                                    handleDeleteTimeEntry(entry.id)
-                                  }
-                                >
-                                  <Trash className="h-4 w-4" />
-                                </Button>
                               </td>
                             </tr>
                           );
@@ -807,145 +759,6 @@ ${profileData.emailSignature}
                           >
                             Add
                           </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="payroll" className="space-y-6">
-            <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
-              <CardHeader className="p-4 border-b border-gray-800 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900">
-                <div className="flex justify-between items-center">
-                  <CardTitle className="text-lg font-medium text-gray-200 flex items-center gap-2">
-                    <DollarSign className="h-5 w-5 text-green-400" />
-                    Bi-Weekly Pay Breakdown
-                  </CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className="bg-purple-900/30 text-purple-400 border-purple-800"
-                    >
-                      <Calendar className="h-3 w-3 mr-1" />
-                      Current Pay Period
-                    </Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-gray-300">
-                      Pay Summary
-                    </h3>
-                    <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800">
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Regular Hours:</span>
-                          <span className="text-green-400 font-medium">
-                            {calculateRegularHours()} hrs
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Regular Pay:</span>
-                          <span className="text-green-400 font-medium">
-                            ${(calculateRegularHours() * hourlyRate).toFixed(2)}
-                          </span>
-                        </div>
-                        <Separator className="bg-gray-700 my-2" />
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Overtime Hours:</span>
-                          <span className="text-orange-400 font-medium">
-                            {calculateOvertimeHours()} hrs
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Overtime Pay:</span>
-                          <span className="text-orange-400 font-medium">
-                            $
-                            {(
-                              calculateOvertimeHours() *
-                              hourlyRate *
-                              1.5
-                            ).toFixed(2)}
-                          </span>
-                        </div>
-                        <Separator className="bg-gray-700 my-2" />
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Gross Pay:</span>
-                          <span className="text-blue-400 font-medium">
-                            ${calculateTotalPay().toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <h3 className="text-lg font-medium text-gray-300">
-                      Deductions
-                    </h3>
-                    <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800">
-                      <div className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">
-                            Federal Tax Rate:
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-red-400 font-medium">
-                              {(taxRate * 100).toFixed(0)}%
-                            </span>
-                            <Input
-                              type="number"
-                              min="0"
-                              max="50"
-                              step="1"
-                              value={taxRate * 100}
-                              onChange={(e) =>
-                                setTaxRate(Number(e.target.value) / 100)
-                              }
-                              className="bg-gray-700 border-gray-600 text-gray-200 w-16 h-7 text-sm"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Federal Tax:</span>
-                          <span className="text-red-400 font-medium">
-                            -${(calculateTotalPay() * taxRate).toFixed(2)}
-                          </span>
-                        </div>
-                        <Separator className="bg-gray-700 my-2" />
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Net Pay:</span>
-                          <span className="text-purple-400 font-bold">
-                            ${(calculateTotalPay() * (1 - taxRate)).toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-gray-800/50 p-4 rounded-md border border-gray-800 mt-4">
-                      <h4 className="text-sm font-medium text-gray-300 mb-2">
-                        Projected Annual Income
-                      </h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Annual Gross:</span>
-                          <span className="text-blue-400 font-medium">
-                            ${(calculateTotalPay() * 26).toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-400">Annual Net:</span>
-                          <span className="text-purple-400 font-medium">
-                            $
-                            {(calculateTotalPay() * (1 - taxRate) * 26).toFixed(
-                              2,
-                            )}
-                          </span>
                         </div>
                       </div>
                     </div>

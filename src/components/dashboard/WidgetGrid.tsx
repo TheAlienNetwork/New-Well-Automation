@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { Plus, X, Move } from "lucide-react";
@@ -20,8 +20,6 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useWits } from "@/context/WitsContext";
-import { useSurveys } from "@/context/SurveyContext";
 
 interface WidgetData {
   id: string;
@@ -116,148 +114,63 @@ const WidgetItem = ({
 };
 
 const WidgetGrid = ({
-  widgets = [],
+  widgets = [
+    {
+      id: "1",
+      type: "parameter",
+      title: "Inclination",
+      value: 45.2,
+      unit: "°",
+      min: 0,
+      max: 90,
+      trend: "up" as const,
+      color: "#00ffaa",
+      history: [42.1, 43.5, 44.2, 45.0, 45.2],
+      isExpanded: false,
+    },
+    {
+      id: "2",
+      type: "parameter",
+      title: "Azimuth",
+      value: 178.3,
+      unit: "°",
+      min: 0,
+      max: 360,
+      trend: "stable" as const,
+      color: "#ff9900",
+      history: [177.8, 178.0, 178.1, 178.2, 178.3],
+      isExpanded: false,
+    },
+    {
+      id: "3",
+      type: "parameter",
+      title: "Gamma",
+      value: 67.5,
+      unit: "API",
+      min: 0,
+      max: 150,
+      trend: "down" as const,
+      color: "#ff00cc",
+      history: [72.3, 71.1, 69.8, 68.2, 67.5],
+      isExpanded: false,
+    },
+    {
+      id: "4",
+      type: "parameter",
+      title: "ROP",
+      value: 12.7,
+      unit: "m/hr",
+      min: 0,
+      max: 30,
+      trend: "up" as const,
+      color: "#00ccff",
+      history: [10.2, 11.0, 11.5, 12.1, 12.7],
+      isExpanded: false,
+    },
+  ],
   onWidgetChange = () => {},
 }: WidgetGridProps) => {
   const [localWidgets, setLocalWidgets] = useState<WidgetData[]>(widgets);
-  const { witsData, isConnected } = useWits();
-  const { surveys } = useSurveys();
-
-  // Initialize default widgets if none provided
-  useEffect(() => {
-    if (widgets.length === 0 && localWidgets.length === 0) {
-      const defaultWidgets: WidgetData[] = [
-        {
-          id: "inclination-widget",
-          type: "parameter",
-          title: "Inclination",
-          value: 0,
-          unit: "°",
-          min: 0,
-          max: 90,
-          trend: "stable" as const,
-          color: "#00ffaa",
-          history: [],
-          isExpanded: false,
-        },
-        {
-          id: "azimuth-widget",
-          type: "parameter",
-          title: "Azimuth",
-          value: 0,
-          unit: "°",
-          min: 0,
-          max: 360,
-          trend: "stable" as const,
-          color: "#ff9900",
-          history: [],
-          isExpanded: false,
-        },
-        {
-          id: "gamma-widget",
-          type: "parameter",
-          title: "Gamma",
-          value: 0,
-          unit: "API",
-          min: 0,
-          max: 150,
-          trend: "stable" as const,
-          color: "#ff00cc",
-          history: [],
-          isExpanded: false,
-        },
-        {
-          id: "rop-widget",
-          type: "parameter",
-          title: "ROP",
-          value: 0,
-          unit: "m/hr",
-          min: 0,
-          max: 30,
-          trend: "stable" as const,
-          color: "#00ccff",
-          history: [],
-          isExpanded: false,
-        },
-      ];
-      setLocalWidgets(defaultWidgets);
-    }
-  }, [widgets, localWidgets.length]);
-
-  // Update widgets with real-time data
-  useEffect(() => {
-    if (!isConnected || !witsData) return;
-
-    setLocalWidgets((prevWidgets) => {
-      return prevWidgets.map((widget) => {
-        // Create a copy of the widget to modify
-        const updatedWidget = { ...widget };
-
-        // Get the previous value to determine trend
-        const prevValue = updatedWidget.value;
-
-        // Update widget based on its title
-        switch (widget.title.toLowerCase()) {
-          case "inclination":
-            if (witsData.inclination !== undefined) {
-              updatedWidget.value = witsData.inclination;
-              updatedWidget.history = [
-                ...updatedWidget.history.slice(-4),
-                witsData.inclination,
-              ];
-              updatedWidget.trend = determineTrend(
-                prevValue,
-                witsData.inclination,
-              );
-            }
-            break;
-          case "azimuth":
-            if (witsData.azimuth !== undefined) {
-              updatedWidget.value = witsData.azimuth;
-              updatedWidget.history = [
-                ...updatedWidget.history.slice(-4),
-                witsData.azimuth,
-              ];
-              updatedWidget.trend = determineTrend(prevValue, witsData.azimuth);
-            }
-            break;
-          case "gamma":
-            if (witsData.gamma !== undefined) {
-              updatedWidget.value = witsData.gamma;
-              updatedWidget.history = [
-                ...updatedWidget.history.slice(-4),
-                witsData.gamma,
-              ];
-              updatedWidget.trend = determineTrend(prevValue, witsData.gamma);
-            }
-            break;
-          case "rop":
-            if (witsData.rop !== undefined) {
-              updatedWidget.value = witsData.rop;
-              updatedWidget.history = [
-                ...updatedWidget.history.slice(-4),
-                witsData.rop,
-              ];
-              updatedWidget.trend = determineTrend(prevValue, witsData.rop);
-            }
-            break;
-          // Add more cases for other parameter types as needed
-        }
-
-        return updatedWidget;
-      });
-    });
-  }, [witsData, isConnected]);
-
-  // Helper function to determine trend
-  const determineTrend = (
-    prevValue: number,
-    newValue: number,
-  ): "up" | "down" | "stable" => {
-    const difference = newValue - prevValue;
-    if (Math.abs(difference) < 0.1) return "stable";
-    return difference > 0 ? "up" : "down";
-  };
   const [isAddWidgetOpen, setIsAddWidgetOpen] = useState(false);
   const [newWidgetData, setNewWidgetData] = useState({
     title: "New Parameter",
