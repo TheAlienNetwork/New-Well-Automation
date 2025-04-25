@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSurveys } from "@/context/SurveyContext";
 import {
   Bell,
   Settings,
@@ -25,6 +26,9 @@ import {
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Link } from "react-router-dom";
+import { useUser } from "@/context/UserContext";
+import { useWits } from "@/context/WitsContext";
 
 interface HeaderProps {
   systemStatus?: "online" | "offline" | "warning";
@@ -34,18 +38,77 @@ interface HeaderProps {
   notificationCount?: number;
   onMenuToggle?: () => void;
   menuOpen?: boolean;
+  profileImage?: string | null;
+  wellName?: string;
+  rigName?: string;
 }
 
 const Header = ({
   systemStatus = "online",
   companyName = "OilTech Solutions",
   projectName = "Well Alpha-123",
-  userName = "John Operator",
+  userName,
   notificationCount = 3,
   onMenuToggle = () => {},
   menuOpen = false,
+  profileImage,
+  wellName: propWellName,
+  rigName: propRigName,
 }: HeaderProps) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const { userProfile } = useUser();
+  const { surveys } = useSurveys();
+  const { witsData, isConnected } = useWits();
+
+  // State for well information
+  const [wellName, setWellName] = useState(propWellName || "Well Alpha-123");
+  const [rigName, setRigName] = useState(
+    propRigName || "Precision Drilling #42",
+  );
+  const [latestSurvey, setLatestSurvey] = useState<any>(null);
+
+  // Always use the latest userProfile data, but allow props to override if provided
+  const displayName =
+    userName !== undefined
+      ? userName
+      : `${userProfile.firstName} ${userProfile.lastName}`;
+
+  // Update display name when userProfile changes
+  useEffect(() => {
+    if (!userName) {
+      // Only update if not explicitly provided via props
+      setWellName(userProfile.wellName || propWellName || "Well Alpha-123");
+      setRigName(
+        userProfile.rigName || propRigName || "Precision Drilling #42",
+      );
+    }
+  }, [userProfile, userName, propWellName, propRigName]);
+  const displayImage =
+    profileImage !== undefined ? profileImage : userProfile.profileImage;
+
+  // Update well information and latest survey when surveys change
+  useEffect(() => {
+    if (surveys.length > 0) {
+      // Sort surveys by timestamp (newest first)
+      const sortedSurveys = [...surveys].sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+
+      // Get the latest survey
+      const latest = sortedSurveys[0];
+      setLatestSurvey(latest);
+
+      // Update well name and rig name if available in the survey
+      if (latest.wellName && !propWellName) {
+        setWellName(latest.wellName);
+      }
+
+      if (latest.rigName && !propRigName) {
+        setRigName(latest.rigName);
+      }
+    }
+  }, [surveys, propWellName, propRigName]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -62,28 +125,20 @@ const Header = ({
   };
 
   const getStatusIcon = () => {
-    switch (systemStatus) {
-      case "online":
-        return <Wifi className="h-4 w-4 text-green-500" />;
-      case "offline":
-        return <WifiOff className="h-4 w-4 text-red-500" />;
-      case "warning":
-        return <AlertTriangle className="h-4 w-4 text-yellow-500" />;
-      default:
-        return <Wifi className="h-4 w-4 text-green-500" />;
+    // Use actual connection status from WitsContext
+    if (isConnected) {
+      return <Wifi className="h-4 w-4 text-green-500" />;
+    } else {
+      return <WifiOff className="h-4 w-4 text-red-500" />;
     }
   };
 
   const getStatusText = () => {
-    switch (systemStatus) {
-      case "online":
-        return "System Online";
-      case "offline":
-        return "System Offline";
-      case "warning":
-        return "System Warning";
-      default:
-        return "System Online";
+    // Use actual connection status from WitsContext
+    if (isConnected) {
+      return "System Online";
+    } else {
+      return "System Offline";
     }
   };
 
@@ -106,7 +161,31 @@ const Header = ({
           </div>
           <div className="hidden md:block">
             <h1 className="text-white font-medium">New Well Technologies</h1>
-            <p className="text-gray-400 text-xs">{projectName}</p>
+            <p className="text-gray-400 text-xs">
+              {wellName} {rigName ? `- ${rigName}` : ""}
+              {latestSurvey && (
+                <span className="ml-2 text-blue-400">
+                  Latest Survey:{" "}
+                  {new Date(latestSurvey.timestamp).toLocaleTimeString()} -{" "}
+                  {latestSurvey.bitDepth.toFixed(1)}ft
+                  {latestSurvey.inclination && (
+                    <span className="ml-1">
+                      | Inc: {latestSurvey.inclination.toFixed(2)}°
+                    </span>
+                  )}
+                  {latestSurvey.azimuth && (
+                    <span className="ml-1">
+                      | Az: {latestSurvey.azimuth.toFixed(2)}°
+                    </span>
+                  )}
+                  {latestSurvey.toolFace && (
+                    <span className="ml-1">
+                      | TF: {latestSurvey.toolFace.toFixed(2)}°
+                    </span>
+                  )}
+                </span>
+              )}
+            </p>
           </div>
         </div>
       </div>
@@ -116,6 +195,26 @@ const Header = ({
         <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
           {getStatusIcon()}
           <span className="text-sm text-gray-300">{getStatusText()}</span>
+        </div>
+        <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+          <span className="text-sm text-gray-300">
+            MD: {latestSurvey ? latestSurvey.bitDepth.toFixed(1) : "0.0"}ft
+          </span>
+        </div>
+        <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+          <span className="text-sm text-gray-300">
+            Inc: {latestSurvey ? latestSurvey.inclination.toFixed(2) : "0.00"}°
+            | Az: {latestSurvey ? latestSurvey.azimuth.toFixed(2) : "0.00"}°
+          </span>
+        </div>
+        <div className="flex items-center space-x-2 bg-gray-800 px-3 py-1 rounded-full">
+          <span className="text-sm text-gray-300">
+            TF:{" "}
+            {latestSurvey && latestSurvey.toolFace !== undefined
+              ? latestSurvey.toolFace.toFixed(2)
+              : "0.00"}
+            °
+          </span>
         </div>
       </div>
 
@@ -245,19 +344,31 @@ const Header = ({
               variant="ghost"
               className="text-gray-400 hover:text-white hover:bg-gray-800 flex items-center gap-2 ml-2"
             >
-              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center">
-                <User className="h-4 w-4 text-white" />
+              <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center overflow-hidden">
+                {displayImage ? (
+                  <img
+                    src={displayImage}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <User className="h-4 w-4 text-white" />
+                )}
               </div>
-              <span className="hidden md:inline-block text-sm">{userName}</span>
+              <span className="hidden md:inline-block text-sm font-medium">
+                {displayName}
+              </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
             className="bg-gray-900 border-gray-800 text-gray-300"
           >
-            <DropdownMenuItem className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer">
-              Profile
-            </DropdownMenuItem>
+            <Link to="/profile">
+              <DropdownMenuItem className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer">
+                Profile
+              </DropdownMenuItem>
+            </Link>
             <DropdownMenuItem className="hover:bg-gray-800 focus:bg-gray-800 cursor-pointer">
               Preferences
             </DropdownMenuItem>

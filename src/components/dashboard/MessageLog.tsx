@@ -35,59 +35,8 @@ interface MessageLogProps {
 }
 
 const MessageLog = ({
-  messages = [
-    {
-      id: "1",
-      timestamp: "2023-06-15T14:32:45",
-      type: "survey",
-      message: "Survey data received",
-      details: "Inc: 45.2°, Azi: 178.6°, TVD: 5432.1m",
-      data: { inclination: 45.2, azimuth: 178.6, tvd: 5432.1 },
-    },
-    {
-      id: "2",
-      timestamp: "2023-06-15T14:30:12",
-      type: "system",
-      message: "Connection established with downhole tools",
-      details: "Signal strength: 85%",
-    },
-    {
-      id: "3",
-      timestamp: "2023-06-15T14:28:55",
-      type: "warning",
-      message: "Signal quality degrading",
-      details: "Possible interference detected",
-    },
-    {
-      id: "4",
-      timestamp: "2023-06-15T14:25:30",
-      type: "error",
-      message: "Communication timeout",
-      details: "Retrying connection...",
-    },
-    {
-      id: "5",
-      timestamp: "2023-06-15T14:20:15",
-      type: "info",
-      message: "System calibration complete",
-      details: "All sensors operating within normal parameters",
-    },
-    {
-      id: "6",
-      timestamp: "2023-06-15T14:15:22",
-      type: "survey",
-      message: "Survey data received",
-      details: "Inc: 44.8°, Azi: 177.9°, TVD: 5428.7m",
-      data: { inclination: 44.8, azimuth: 177.9, tvd: 5428.7 },
-    },
-    {
-      id: "7",
-      timestamp: "2023-06-15T14:10:05",
-      type: "system",
-      message: "Pulse decoder reconfigured",
-      details: "Noise filtering level increased to 3",
-    },
-  ],
+  messages = [],
+
   onFilterChange = () => {},
   onSearch = () => {},
   onExport = () => {},

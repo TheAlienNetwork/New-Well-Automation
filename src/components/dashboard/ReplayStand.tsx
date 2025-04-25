@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,13 @@ import {
   Wand2,
 } from "lucide-react";
 
+interface FilterSettings {
+  noiseReduction: boolean;
+  signalBoost: boolean;
+  aiFiltering: boolean;
+  filterStrength: number;
+}
+
 interface ReplayStandProps {
   data?: {
     pulses: number[];
@@ -35,24 +42,22 @@ interface ReplayStandProps {
     noiseLevel: number;
     signalStrength: number;
   };
-  onFilterChange?: (settings: any) => void;
-  onExport?: () => void;
+  onFilterChange?: (settings: FilterSettings) => void;
+  onExport?: (data: any) => void;
 }
 
 const ReplayStand = ({
-  data = {
-    pulses: Array.from({ length: 100 }, () => Math.random() * 2 - 1),
-    timestamps: Array.from({ length: 100 }, (_, i) => {
-      const date = new Date();
-      date.setSeconds(date.getSeconds() - (100 - i));
-      return date.toISOString();
-    }),
-    noiseLevel: 0.3,
-    signalStrength: 0.8,
-  },
+  data,
   onFilterChange = () => {},
   onExport = () => {},
 }: ReplayStandProps) => {
+  // Initialize with empty data if none provided
+  const safeData = data || {
+    pulses: [],
+    timestamps: [],
+    noiseLevel: 0,
+    signalStrength: 0,
+  };
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -65,13 +70,45 @@ const ReplayStand = ({
   });
 
   // Generate waveform data points
-  const waveformPoints = data.pulses
-    .map((val, index) => {
-      const x = (index / (data.pulses.length - 1)) * 100;
-      const y = 50 - val * 40; // Scale to fit in the SVG
-      return `${x},${y}`;
-    })
-    .join(" ");
+  const waveformPoints =
+    safeData.pulses.length > 0
+      ? safeData.pulses
+          .map((val, index) => {
+            const x = (index / (safeData.pulses.length - 1)) * 100;
+            const y = 50 - val * 40; // Scale to fit in the SVG
+            return `${x},${y}`;
+          })
+          .join(" ")
+      : "0,50 100,50"; // Default flat line if no data
+
+  // Format time ago helper function
+  const formatTimeAgo = (referenceTime: string, secondsAgo: number): string => {
+    try {
+      if (!referenceTime) return `-${secondsAgo}s`;
+
+      const date = new Date(referenceTime);
+      if (isNaN(date.getTime())) return `-${secondsAgo}s`;
+
+      return `-${secondsAgo}s`;
+    } catch (error) {
+      console.error("Error formatting time:", error);
+      return `-${secondsAgo}s`;
+    }
+  };
+
+  // Handle export with proper data
+  const handleExport = () => {
+    try {
+      const exportData = {
+        ...safeData,
+        filterSettings,
+        exportedAt: new Date().toISOString(),
+      };
+      onExport(exportData);
+    } catch (error) {
+      console.error("Error exporting data:", error);
+    }
+  };
 
   const handleFilterChange = (key: string, value: any) => {
     const newSettings = { ...filterSettings, [key]: value };
@@ -103,7 +140,7 @@ const ReplayStand = ({
               variant="outline"
               size="sm"
               className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-              onClick={onExport}
+              onClick={handleExport}
             >
               <Download className="h-4 w-4 mr-2" />
               Export Data
@@ -119,6 +156,11 @@ const ReplayStand = ({
             className="h-full w-full relative border border-gray-800 rounded-md bg-gray-950 overflow-hidden"
             style={{ minHeight: "200px" }}
           >
+            {safeData.pulses.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+                No pulse data available
+              </div>
+            )}
             <svg
               width="100%"
               height="100%"
@@ -166,11 +208,23 @@ const ReplayStand = ({
 
             {/* Time markers */}
             <div className="absolute bottom-0 left-0 right-0 flex justify-between px-2 text-xs text-gray-500 bg-gray-900 bg-opacity-50">
-              <span>-60s</span>
-              <span>-45s</span>
-              <span>-30s</span>
-              <span>-15s</span>
-              <span>Now</span>
+              {safeData.timestamps.length > 0 ? (
+                <>
+                  <span>{formatTimeAgo(safeData.timestamps[0], 60)}</span>
+                  <span>{formatTimeAgo(safeData.timestamps[0], 45)}</span>
+                  <span>{formatTimeAgo(safeData.timestamps[0], 30)}</span>
+                  <span>{formatTimeAgo(safeData.timestamps[0], 15)}</span>
+                  <span>Now</span>
+                </>
+              ) : (
+                <>
+                  <span>-60s</span>
+                  <span>-45s</span>
+                  <span>-30s</span>
+                  <span>-15s</span>
+                  <span>Now</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -445,11 +499,13 @@ const ReplayStand = ({
                       <div className="h-2 flex-grow bg-gray-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500"
-                          style={{ width: `${data.signalStrength * 100}%` }}
+                          style={{
+                            width: `${(safeData.signalStrength || 0) * 100}%`,
+                          }}
                         />
                       </div>
                       <span className="text-xs text-gray-400">
-                        {Math.round(data.signalStrength * 100)}%
+                        {Math.round((safeData.signalStrength || 0) * 100)}%
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">
@@ -466,11 +522,13 @@ const ReplayStand = ({
                       <div className="h-2 flex-grow bg-gray-800 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-gradient-to-r from-green-500 via-yellow-500 to-red-500"
-                          style={{ width: `${data.noiseLevel * 100}%` }}
+                          style={{
+                            width: `${(safeData.noiseLevel || 0) * 100}%`,
+                          }}
                         />
                       </div>
                       <span className="text-xs text-gray-400">
-                        {Math.round(data.noiseLevel * 100)}%
+                        {Math.round((safeData.noiseLevel || 0) * 100)}%
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-2">

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Compass, Navigation, RotateCw, Settings } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
+import { useSurveys } from "@/context/SurveyContext";
 import {
   Tooltip,
   TooltipContent,
@@ -36,48 +37,99 @@ const RosebudCompass = ({
   isActive: propIsActive,
 }: RosebudCompassProps) => {
   const { isReceiving, witsData } = useWits();
+  const { surveys } = useSurveys();
 
-  // Use WITS data if available, otherwise use props
+  // Get the latest survey data (sorted by timestamp)
+  const latestSurvey =
+    surveys && surveys.length > 0
+      ? [...surveys].sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        )[0]
+      : null;
+
+  // Use latest survey data if available, then WITS data, then props, default to 0
   const toolFace =
-    propToolFace !== undefined ? propToolFace : witsData.toolFace;
+    propToolFace !== undefined
+      ? propToolFace
+      : latestSurvey?.toolFace !== undefined
+        ? latestSurvey.toolFace
+        : (isReceiving && witsData?.toolFace) || 0;
+
   const inclination =
-    propInclination !== undefined ? propInclination : witsData.inclination;
-  const azimuth = propAzimuth !== undefined ? propAzimuth : witsData.azimuth;
+    propInclination !== undefined
+      ? propInclination
+      : latestSurvey?.inclination !== undefined
+        ? latestSurvey.inclination
+        : (isReceiving && witsData?.inclination) || 0;
+
+  const azimuth =
+    propAzimuth !== undefined
+      ? propAzimuth
+      : latestSurvey?.azimuth !== undefined
+        ? latestSurvey.azimuth
+        : (isReceiving && witsData?.azimuth) || 0;
+
   const magneticField =
     propMagneticField !== undefined
       ? propMagneticField
-      : witsData.magneticField;
-  const gravity = propGravity !== undefined ? propGravity : witsData.gravity;
-  const depth = propDepth !== undefined ? propDepth : witsData.bitDepth;
-  const isActive = propIsActive !== undefined ? propIsActive : isReceiving;
+      : latestSurvey?.bTotal !== undefined
+        ? latestSurvey.bTotal
+        : (isReceiving && witsData?.magneticField) || 0;
+
+  const gravity =
+    propGravity !== undefined
+      ? propGravity
+      : latestSurvey?.aTotal !== undefined
+        ? latestSurvey.aTotal
+        : (isReceiving && witsData?.gravity) || 0;
+
+  const depth =
+    propDepth !== undefined
+      ? propDepth
+      : latestSurvey?.bitDepth !== undefined
+        ? latestSurvey.bitDepth
+        : (isReceiving && witsData?.bitDepth) || 0;
+
+  const isActive =
+    propIsActive !== undefined
+      ? propIsActive
+      : latestSurvey !== null || isReceiving;
   const [rotation, setRotation] = useState(0);
 
-  // Simulate compass movement
+  // No simulation in production mode
   useEffect(() => {
-    if (isActive) {
-      const interval = setInterval(() => {
-        // Small random movement to simulate real-time data fluctuation
-        setRotation((prev) => prev + (Math.random() * 0.4 - 0.2));
-      }, 500);
-
-      return () => clearInterval(interval);
+    // Only update rotation if we have real data
+    if (isActive && isReceiving && witsData) {
+      setRotation(0); // Reset rotation when real data is available
     }
-  }, [isActive]);
+  }, [isActive, isReceiving, witsData]);
 
   // Calculate colors based on values
   const getInclinationColor = () => {
-    if (inclination < 10) return "#00ff88";
-    if (inclination < 45) return "#88ff00";
-    if (inclination < 70) return "#ffaa00";
-    return "#ff3300";
+    try {
+      if (inclination < 10) return "#00ff88";
+      if (inclination < 45) return "#88ff00";
+      if (inclination < 70) return "#ffaa00";
+      return "#ff3300";
+    } catch (error) {
+      console.error("Error calculating inclination color:", error);
+      return "#ffffff"; // Default color in case of error
+    }
   };
 
   const getAzimuthPosition = (angle: number) => {
-    const radians = (angle - 90) * (Math.PI / 180);
-    const radius = 100;
-    const x = radius * Math.cos(radians) + 120;
-    const y = radius * Math.sin(radians) + 120;
-    return { x, y };
+    try {
+      const radians = (angle - 90) * (Math.PI / 180);
+      const radius = 100;
+      return {
+        x: radius * Math.cos(radians) + 120,
+        y: radius * Math.sin(radians) + 120,
+      };
+    } catch (error) {
+      console.error("Error calculating azimuth position:", error);
+      return { x: 120, y: 120 }; // Default position in case of error
+    }
   };
 
   const inclinationColor = getInclinationColor();
@@ -96,7 +148,7 @@ const RosebudCompass = ({
   ];
 
   return (
-    <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden resizable">
+    <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
       <CardContent className="p-4 flex flex-col h-full">
         <div className="flex justify-between items-center mb-2">
           <div className="flex items-center gap-2">
@@ -144,19 +196,11 @@ const RosebudCompass = ({
             {/* Outer circle */}
             <div className="absolute inset-0 rounded-full border-2 border-gray-700 flex items-center justify-center">
               {/* Cardinal direction markers */}
-              {[0, 90, 180, 270].map((angle) => {
+              {cardinalDirections.map(({ label, angle }) => {
                 const radians = (angle - 90) * (Math.PI / 180);
                 const radius = 110;
                 const x = radius * Math.cos(radians) + 120;
                 const y = radius * Math.sin(radians) + 120;
-                const label =
-                  angle === 0
-                    ? "N"
-                    : angle === 90
-                      ? "E"
-                      : angle === 180
-                        ? "S"
-                        : "W";
 
                 return (
                   <div
@@ -166,41 +210,18 @@ const RosebudCompass = ({
                       left: `${x}px`,
                       top: `${y}px`,
                       transform: "translate(-50%, -50%)",
-                      color: label === "N" ? "#ff4444" : "#aaaaff",
+                      color:
+                        label === "N"
+                          ? "#ff4444"
+                          : ["S", "E", "W"].includes(label)
+                            ? "#aaaaff"
+                            : "#777777",
                     }}
                   >
                     {label}
                   </div>
                 );
               })}
-              {cardinalDirections
-                .filter(({ angle }) => ![0, 90, 180, 270].includes(angle))
-                .map(({ label, angle }) => {
-                  const radians = (angle - 90) * (Math.PI / 180);
-                  const radius = 110;
-                  const x = radius * Math.cos(radians) + 120;
-                  const y = radius * Math.sin(radians) + 120;
-
-                  return (
-                    <div
-                      key={label}
-                      className="absolute text-xs font-bold"
-                      style={{
-                        left: `${x}px`,
-                        top: `${y}px`,
-                        transform: "translate(-50%, -50%)",
-                        color:
-                          label === "N"
-                            ? "#ff4444"
-                            : label === "S" || label === "E" || label === "W"
-                              ? "#aaaaff"
-                              : "#777777",
-                      }}
-                    >
-                      {label}
-                    </div>
-                  );
-                })}
 
               {/* Degree markers */}
               {Array.from({ length: 36 }).map((_, i) => {
@@ -286,12 +307,6 @@ const RosebudCompass = ({
                 transform: "translate(-50%, -50%)",
               }}
             >
-              <div
-                className="relative w-full h-full"
-                style={{
-                  transform: `rotate(${toolFace}deg)`,
-                }}
-              ></div>
               <div className="absolute text-yellow-400 font-bold text-sm">
                 {toolFace.toFixed(1)}°
               </div>
@@ -375,17 +390,27 @@ const RosebudCompass = ({
         <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
           <div className="flex justify-between items-center p-1 rounded bg-gray-800/30">
             <span className="text-gray-500">Mag:</span>
-            <span className="text-gray-300">{magneticField} μT</span>
+            <span className="text-gray-300">{magneticField.toFixed(1)} μT</span>
           </div>
           <div className="flex justify-between items-center p-1 rounded bg-gray-800/30">
             <span className="text-gray-500">Grav:</span>
-            <span className="text-gray-300">{gravity} G</span>
+            <span className="text-gray-300">{gravity.toFixed(1)} G</span>
           </div>
           <div className="flex justify-between items-center p-1 rounded bg-gray-800/30">
             <span className="text-gray-500">Depth:</span>
             <span className="text-gray-300">{depth.toFixed(1)} ft</span>
           </div>
         </div>
+
+        {/* Display data source indicator */}
+        {latestSurvey && (
+          <div className="mt-2 text-xs text-gray-500 text-center">
+            <span className="bg-blue-900/30 text-blue-400 px-1 py-0.5 rounded">
+              Survey data from{" "}
+              {new Date(latestSurvey.timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

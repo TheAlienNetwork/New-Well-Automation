@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from "react";
-import Navbar from "@/components/layout/Navbar";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+// Import the correct component path
+import Header from "@/components/dashboard/Header";
 import StatusBar from "@/components/dashboard/StatusBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/components/ui/use-toast";
+import { useSurveys } from "@/context/SurveyContext";
+import { useWits } from "@/context/WitsContext";
+import { Label } from "@/components/ui/label";
 import {
   Brain,
   Mic,
@@ -25,6 +30,8 @@ import {
   Settings,
   Download,
   BarChart3,
+  X,
+  Bell,
 } from "lucide-react";
 
 interface Message {
@@ -35,7 +42,87 @@ interface Message {
   spoken?: boolean;
 }
 
+// Email utility function to generate and send automated emails
+const generateEmailContent = (survey, status) => {
+  const subject =
+    status === "warning"
+      ? `Survey Warning - Depth ${survey.bitDepth.toFixed(1)} ft`
+      : `CRITICAL: Survey Failure - Depth ${survey.bitDepth.toFixed(1)} ft`;
+
+  const body = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+      <h2 style="color: ${status === "warning" ? "#f59e0b" : "#ef4444"}; margin-top: 0;">
+        ${status === "warning" ? "Survey Warning" : "CRITICAL: Survey Failure"}
+      </h2>
+      <p><strong>Timestamp:</strong> ${new Date(survey.timestamp).toLocaleString()}</p>
+      <p><strong>Measured Depth:</strong> ${survey.bitDepth.toFixed(2)} ft</p>
+      <p><strong>Issue:</strong> ${survey.qualityCheck?.message || "Unknown issue"}</p>
+      <h3 style="margin-top: 20px;">Survey Details:</h3>
+      <ul style="padding-left: 20px;">
+        <li><strong>Inclination:</strong> ${survey.inclination?.toFixed(2)}°</li>
+        <li><strong>Azimuth:</strong> ${survey.azimuth?.toFixed(2)}°</li>
+        <li><strong>Tool Face:</strong> ${survey.toolFace?.toFixed(2)}°</li>
+        <li><strong>Tool Temp:</strong> ${survey.toolTemp?.toFixed(2)}°F</li>
+      </ul>
+      <p style="margin-top: 20px; padding: 10px; background-color: ${status === "warning" ? "#fef3c7" : "#fee2e2"}; border-radius: 4px;">
+        <strong>Action Required:</strong> Please review this survey data and take appropriate action.
+      </p>
+      <p style="font-size: 12px; color: #6b7280; margin-top: 30px; border-top: 1px solid #e5e7eb; padding-top: 10px;">
+        This is an automated message from the MWD Surface Software. Do not reply to this email.
+      </p>
+    </div>
+  `;
+
+  return { subject, body };
+};
+
+const sendAutomatedEmail = (survey, status, recipients) => {
+  const { subject, body } = generateEmailContent(survey, status);
+
+  // In a real implementation, this would call an API to send the email
+  console.log("Auto-sending email about survey issue", {
+    survey,
+    status,
+    recipients,
+    subject,
+    bodyPreview: body.substring(0, 100) + "...",
+  });
+
+  // For demonstration purposes, we'll simulate opening an email client
+  // This would be replaced with an actual API call in production
+  try {
+    const mailtoUrl = `mailto:${recipients.join(",")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.replace(/<[^>]*>/g, ""))}`;
+    // In a real implementation, we would use a server-side API instead of mailto
+    // window.open(mailtoUrl, '_blank');
+    return true;
+  } catch (error) {
+    console.error("Failed to send email:", error);
+    return false;
+  }
+};
+
 const OppSupportPage = () => {
+  const { toast } = useToast();
+  const { surveys } = useSurveys();
+  const {
+    witsData,
+    isConnected,
+    isReceiving,
+    connect,
+    disconnect,
+    connectionConfig,
+    updateConfig,
+  } = useWits();
+
+  // TCP/IP Connection settings
+  const [tcpIpSettings, setTcpIpSettings] = useState({
+    ipAddress: connectionConfig.ipAddress,
+    port: connectionConfig.port,
+    protocol: connectionConfig.protocol,
+    autoConnect: connectionConfig.autoConnect,
+  });
+  const [showConnectionSettings, setShowConnectionSettings] = useState(false);
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -53,8 +140,68 @@ const OppSupportPage = () => {
   const [voiceSpeed, setVoiceSpeed] = useState(1.0);
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
   const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState(() => {
+    // Try to load settings from localStorage
+    const savedSettings = localStorage.getItem(
+      "oppSupportNotificationSettings",
+    );
+    if (savedSettings) {
+      try {
+        return JSON.parse(savedSettings);
+      } catch (e) {
+        console.error("Failed to parse saved notification settings", e);
+      }
+    }
+    // Default settings if nothing is saved
+    return {
+      notifyOnWarning: true,
+      notifyOnFail: true,
+      autoSendEmail: false,
+      emailRecipients: ["operations@newwelltech.com"],
+    };
+  });
+  const [surveyNotifications, setSurveyNotifications] = useState<
+    {
+      id: string;
+      status: "warning" | "fail";
+      message: string;
+      timestamp: Date;
+      acknowledged: boolean;
+    }[]
+  >([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const speechSynthesisRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Handle TCP/IP connection settings change
+  const handleConnectionSettingChange = (setting: string, value: any) => {
+    setTcpIpSettings((prev) => ({
+      ...prev,
+      [setting]: value,
+    }));
+  };
+
+  // Apply TCP/IP connection settings
+  const applyConnectionSettings = () => {
+    updateConfig({
+      ipAddress: tcpIpSettings.ipAddress,
+      port: tcpIpSettings.port,
+      protocol: tcpIpSettings.protocol,
+      autoConnect: tcpIpSettings.autoConnect,
+    });
+
+    toast({
+      title: "Connection Settings Updated",
+      description: "WITS connection settings have been updated.",
+    });
+
+    setShowConnectionSettings(false);
+
+    // Connect if not already connected
+    if (!isConnected && tcpIpSettings.autoConnect) {
+      connect();
+    }
+  };
 
   // Initialize speech synthesis
   useEffect(() => {
@@ -84,6 +231,86 @@ const OppSupportPage = () => {
       }
     };
   }, []);
+
+  // Monitor surveys for warnings and failures
+  useEffect(() => {
+    if (surveys.length === 0) return;
+
+    // Check the most recent survey for warnings or failures
+    const latestSurvey = surveys[0];
+
+    if (!latestSurvey.qualityCheck) return;
+
+    const { status, message } = latestSurvey.qualityCheck;
+
+    // Only process warning or fail statuses
+    if (status !== "warning" && status !== "fail") return;
+
+    // Check if we already have a notification for this survey
+    const existingNotification = surveyNotifications.find(
+      (n) => n.id === latestSurvey.id,
+    );
+    if (existingNotification) return;
+
+    // Add new notification
+    const newNotification = {
+      id: latestSurvey.id,
+      status: status as "warning" | "fail",
+      message,
+      timestamp: new Date(latestSurvey.timestamp),
+      acknowledged: false,
+    };
+
+    setSurveyNotifications((prev) => [newNotification, ...prev]);
+
+    // Show toast notification
+    if (
+      (status === "warning" && notificationSettings.notifyOnWarning) ||
+      (status === "fail" && notificationSettings.notifyOnFail)
+    ) {
+      toast({
+        title: status === "warning" ? "Survey Warning" : "Survey Failure",
+        description: message,
+        variant: status === "warning" ? "default" : "destructive",
+      });
+
+      // Add AI message about the survey issue
+      const aiMessage = {
+        id: Date.now().toString(),
+        type: "ai" as const,
+        text: `Alert: ${status === "warning" ? "Warning" : "Critical issue"} detected in recent survey at depth ${latestSurvey.bitDepth.toFixed(1)} ft. ${message} Would you like me to analyze this further?`,
+        timestamp: new Date(),
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
+
+      // Speak the alert if voice is enabled
+      if (voiceEnabled) {
+        speakText(aiMessage.text);
+      }
+
+      // Auto-send email if enabled and it's a failure or warning based on settings
+      if (
+        (status === "fail" &&
+          notificationSettings.notifyOnFail &&
+          notificationSettings.autoSendEmail) ||
+        (status === "warning" &&
+          notificationSettings.notifyOnWarning &&
+          notificationSettings.autoSendEmail)
+      ) {
+        // Generate and send the email
+        sendAutomatedEmail(
+          latestSurvey,
+          status,
+          notificationSettings.emailRecipients,
+        );
+        toast({
+          title: "Email Sent",
+          description: `Notification email sent to ${notificationSettings.emailRecipients.join(", ")}`,
+        });
+      }
+    }
+  }, [surveys, notificationSettings, voiceEnabled]);
 
   // Update speech synthesis settings when they change
   useEffect(() => {
@@ -144,6 +371,34 @@ const OppSupportPage = () => {
   const generateAIResponse = (userText: string) => {
     const userTextLower = userText.toLowerCase();
 
+    // If we have a real WITS connection, use real data in responses
+    if (isConnected && isReceiving) {
+      if (userTextLower.includes("vibration")) {
+        return `The high vibration readings on the lateral sensor are currently at ${witsData.vibration.lateral.toFixed(1)}%, axial at ${witsData.vibration.axial.toFixed(1)}%, and torsional at ${witsData.vibration.torsional.toFixed(1)}%. This could be caused by several factors: 1) Improper stabilization in the BHA, 2) Formation changes causing stick-slip, or 3) Worn out shock subs. Based on the current data, I recommend reducing WOB by 10% and monitoring the response.`;
+      } else if (
+        userTextLower.includes("signal loss") ||
+        userTextLower.includes("mwd signal")
+      ) {
+        return `To troubleshoot MWD signal loss, follow these steps: 1) Check surface equipment connections, 2) Verify mud pulse decoder settings, 3) Ensure adequate flow rate (current flow is ${witsData.flowRate.toFixed(0)} gpm, minimum recommended is 600 gpm), 4) Check for potential washout indicators. The current signal strength is ${witsData.signalQuality}%, which is ${witsData.signalQuality > 80 ? "good" : "concerning"}.`;
+      } else if (
+        userTextLower.includes("magnetometer") ||
+        userTextLower.includes("calibrat")
+      ) {
+        return `For magnetometer recalibration, the recommended procedure is: 1) Pull out to a known non-magnetic environment, 2) Run the calibration sequence with the tool stationary for at least 5 minutes, 3) Verify readings against reference values. The current magnetic field strength is ${witsData.magneticField.toFixed(2)} μT, which is within expected range, but the dip angle variation of ±1.2° suggests recalibration may be beneficial.`;
+      } else if (
+        userTextLower.includes("tool failure") ||
+        userTextLower.includes("prediction")
+      ) {
+        return `The current tool failure prediction shows a ${Math.round(100 - witsData.batteryLevel)}% risk with the MWD Battery having the highest risk factor at ${Math.round(100 - witsData.batteryLevel)}%. The estimated time to failure is approximately ${Math.round(witsData.batteryLevel / 2)} hours. I recommend scheduling a battery replacement during the next connection. The temperature trend shows a ${(witsData.toolTemp - 160).toFixed(1)}°F increase over the last 6 hours, which is contributing to the prediction.`;
+      } else if (
+        userTextLower.includes("magnetic interference") ||
+        userTextLower.includes("formation")
+      ) {
+        return `The magnetic interference in the current formation is likely due to the high iron content in the shale layer you're currently drilling through (${witsData.bitDepth.toFixed(0)}-${(witsData.bitDepth - 500).toFixed(0)} ft). The gamma readings confirm this with values between ${(witsData.gamma - 10).toFixed(0)}-${(witsData.gamma + 10).toFixed(0)} API units. To mitigate this, I recommend: 1) Increase survey spacing to 90 ft, 2) Use multi-station analysis for surveys, 3) Apply the enhanced magnetic correction algorithm in the software settings.`;
+      }
+    }
+
+    // Default responses if not connected or for other queries
     if (userTextLower.includes("vibration")) {
       return "The high vibration readings on the lateral sensor could be caused by several factors: 1) Improper stabilization in the BHA, 2) Formation changes causing stick-slip, or 3) Worn out shock subs. Based on the current data, I recommend reducing WOB by 10% and monitoring the response. The AI analytics show a 42% lateral vibration which is above the recommended threshold of 30%.";
     } else if (
@@ -172,6 +427,12 @@ const OppSupportPage = () => {
       userTextLower.includes("hi")
     ) {
       return "Hello! I'm Opp Support, your AI drilling assistant. How can I help you with your MWD or directional drilling questions today?";
+    } else if (
+      userTextLower.includes("wits") ||
+      userTextLower.includes("connection") ||
+      userTextLower.includes("connected")
+    ) {
+      return `The WITS connection is currently ${isConnected ? "established" : "not established"}${isConnected ? (isReceiving ? " and receiving data" : " but not receiving data") : ""}. ${isConnected ? `Current connection: ${connectionConfig.ipAddress}:${connectionConfig.port} using ${connectionConfig.protocol} protocol.` : "You can establish a connection using the TCP/IP settings in the left panel."}`;
     } else {
       return (
         "I understand you're asking about " +
@@ -200,6 +461,7 @@ const OppSupportPage = () => {
       "What's the recommended procedure for recalibrating the magnetometers?",
       "Can you explain the current tool failure prediction?",
       "What's causing the magnetic interference in the current formation?",
+      "What's the status of our WITS connection?",
     ];
     return questions[Math.floor(Math.random() * questions.length)];
   };
@@ -228,9 +490,50 @@ const OppSupportPage = () => {
     setVoiceEnabled(!voiceEnabled);
   };
 
+  // Handle acknowledging a notification
+  const acknowledgeNotification = (id: string) => {
+    setSurveyNotifications((prev) =>
+      prev.map((notification) =>
+        notification.id === id
+          ? { ...notification, acknowledged: true }
+          : notification,
+      ),
+    );
+
+    toast({
+      title: "Notification Acknowledged",
+      description: "The survey issue has been marked as acknowledged.",
+    });
+  };
+
+  // Handle updating notification settings
+  const updateNotificationSettings = useCallback(
+    (setting: string, value: any) => {
+      setNotificationSettings((prev) => {
+        const newSettings = {
+          ...prev,
+          [setting]: value,
+        };
+
+        // Save to localStorage
+        try {
+          localStorage.setItem(
+            "oppSupportNotificationSettings",
+            JSON.stringify(newSettings),
+          );
+        } catch (e) {
+          console.error("Failed to save notification settings", e);
+        }
+
+        return newSettings;
+      });
+    },
+    [],
+  );
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200">
-      <Navbar />
+      <Header />
       <StatusBar />
 
       <div className="container mx-auto px-4 py-6">
@@ -253,6 +556,153 @@ const OppSupportPage = () => {
                 </div>
               </CardHeader>
               <CardContent className="p-4">
+                {/* WITS Connection Status */}
+                <div className="mb-4 p-3 rounded-md border flex flex-col gap-2 bg-gray-800/50 border-gray-800">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`h-2 w-2 rounded-full ${isConnected ? (isReceiving ? "bg-green-500" : "bg-yellow-500") : "bg-red-500"}`}
+                      ></div>
+                      <span className="text-sm font-medium text-gray-300">
+                        WITS Connection
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs bg-gray-800 border-gray-700 hover:bg-gray-700"
+                      onClick={() =>
+                        setShowConnectionSettings(!showConnectionSettings)
+                      }
+                    >
+                      <Settings className="h-3 w-3 mr-1" />
+                      Configure
+                    </Button>
+                  </div>
+
+                  {showConnectionSettings ? (
+                    <div className="space-y-3 mt-2 pt-2 border-t border-gray-800">
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor="ip-address"
+                          className="text-xs text-gray-400"
+                        >
+                          IP Address
+                        </Label>
+                        <Input
+                          id="ip-address"
+                          value={tcpIpSettings.ipAddress}
+                          onChange={(e) =>
+                            handleConnectionSettingChange(
+                              "ipAddress",
+                              e.target.value,
+                            )
+                          }
+                          className="h-7 text-xs bg-gray-800 border-gray-700 text-gray-200"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="port" className="text-xs text-gray-400">
+                          Port
+                        </Label>
+                        <Input
+                          id="port"
+                          type="number"
+                          value={tcpIpSettings.port}
+                          onChange={(e) =>
+                            handleConnectionSettingChange(
+                              "port",
+                              parseInt(e.target.value),
+                            )
+                          }
+                          className="h-7 text-xs bg-gray-800 border-gray-700 text-gray-200"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor="protocol"
+                          className="text-xs text-gray-400"
+                        >
+                          Protocol
+                        </Label>
+                        <select
+                          id="protocol"
+                          value={tcpIpSettings.protocol}
+                          onChange={(e) =>
+                            handleConnectionSettingChange(
+                              "protocol",
+                              e.target.value,
+                            )
+                          }
+                          className="w-full h-7 text-xs bg-gray-800 border border-gray-700 text-gray-200 rounded-md px-2"
+                        >
+                          <option value="TCP">TCP</option>
+                          <option value="UDP">UDP</option>
+                          <option value="Serial">Serial</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <Label
+                          htmlFor="auto-connect"
+                          className="text-xs text-gray-400"
+                        >
+                          Auto Connect
+                        </Label>
+                        <Switch
+                          id="auto-connect"
+                          checked={tcpIpSettings.autoConnect}
+                          onCheckedChange={(checked) =>
+                            handleConnectionSettingChange(
+                              "autoConnect",
+                              checked,
+                            )
+                          }
+                          className="data-[state=checked]:bg-blue-600"
+                        />
+                      </div>
+                      <div className="flex justify-between gap-2 mt-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 h-7 text-xs bg-gray-800 border-gray-700 hover:bg-gray-700"
+                          onClick={() => setShowConnectionSettings(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700"
+                          onClick={applyConnectionSettings}
+                        >
+                          Apply
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between">
+                      <div className="text-xs text-gray-400">
+                        {isConnected ? (
+                          <span>
+                            Connected to {connectionConfig.ipAddress}:
+                            {connectionConfig.port}
+                            {isReceiving ? " (Receiving Data)" : " (No Data)"}
+                          </span>
+                        ) : (
+                          <span>Not connected</span>
+                        )}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={`h-6 text-xs ${isConnected ? "bg-red-900/30 text-red-400 border-red-800 hover:bg-red-900/50" : "bg-green-900/30 text-green-400 border-green-800 hover:bg-green-900/50"}`}
+                        onClick={isConnected ? disconnect : connect}
+                      >
+                        {isConnected ? "Disconnect" : "Connect"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-4">
                   <div className="text-sm text-gray-400 mb-2">Topics</div>
 
@@ -300,6 +750,74 @@ const OppSupportPage = () => {
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-gray-800">
+                  {/* Survey Notifications */}
+                  {surveyNotifications.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-gray-400 mb-2">
+                          Survey Alerts
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="bg-red-900/30 text-red-400 border-red-800"
+                        >
+                          {
+                            surveyNotifications.filter((n) => !n.acknowledged)
+                              .length
+                          }
+                        </Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {surveyNotifications
+                          .filter((n) => !n.acknowledged)
+                          .slice(0, 3)
+                          .map((notification) => (
+                            <div
+                              key={notification.id}
+                              className={`p-2 rounded-md border ${notification.status === "warning" ? "bg-yellow-900/20 border-yellow-800" : "bg-red-900/20 border-red-800"}`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <p
+                                    className={`text-xs font-medium ${notification.status === "warning" ? "text-yellow-400" : "text-red-400"}`}
+                                  >
+                                    {notification.status === "warning"
+                                      ? "Warning"
+                                      : "Critical Issue"}
+                                  </p>
+                                  <p className="text-xs text-gray-300 mt-1">
+                                    {notification.message}
+                                  </p>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs"
+                                  onClick={() =>
+                                    acknowledgeNotification(notification.id)
+                                  }
+                                >
+                                  Ack
+                                </Button>
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {notification.timestamp.toLocaleTimeString()}
+                              </p>
+                            </div>
+                          ))}
+                        {surveyNotifications.filter((n) => !n.acknowledged)
+                          .length > 3 && (
+                          <p className="text-xs text-gray-500 text-center">
+                            +
+                            {surveyNotifications.filter((n) => !n.acknowledged)
+                              .length - 3}{" "}
+                            more alerts
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="text-sm text-gray-400 mb-2">
                     Suggested Questions
                   </div>
@@ -328,6 +846,131 @@ const OppSupportPage = () => {
                       setActiveTopic("performance");
                     }}
                   />
+                  <SuggestedQuestion
+                    question="What's the status of our WITS connection?"
+                    onClick={() => {
+                      setInputText("What's the status of our WITS connection?");
+                      setActiveTopic("troubleshooting");
+                    }}
+                  />
+                </div>
+
+                {/* Notification Settings */}
+                <div className="mt-4 pt-4 border-t border-gray-800">
+                  <div className="text-sm text-gray-400 mb-2">
+                    Notifications
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label
+                        htmlFor="notify-warning"
+                        className="text-xs text-gray-400"
+                      >
+                        Notify on Warning
+                      </Label>
+                      <Switch
+                        id="notify-warning"
+                        checked={notificationSettings.notifyOnWarning}
+                        onCheckedChange={(checked) =>
+                          updateNotificationSettings("notifyOnWarning", checked)
+                        }
+                        className="data-[state=checked]:bg-yellow-600"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Label
+                        htmlFor="notify-fail"
+                        className="text-xs text-gray-400"
+                      >
+                        Notify on Failure
+                      </Label>
+                      <Switch
+                        id="notify-fail"
+                        checked={notificationSettings.notifyOnFail}
+                        onCheckedChange={(checked) =>
+                          updateNotificationSettings("notifyOnFail", checked)
+                        }
+                        className="data-[state=checked]:bg-red-600"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Label
+                        htmlFor="auto-email"
+                        className="text-xs text-gray-400"
+                      >
+                        Auto-send Email
+                      </Label>
+                      <Switch
+                        id="auto-email"
+                        checked={notificationSettings.autoSendEmail}
+                        onCheckedChange={(checked) =>
+                          updateNotificationSettings("autoSendEmail", checked)
+                        }
+                        className="data-[state=checked]:bg-blue-600"
+                      />
+                    </div>
+
+                    {notificationSettings.autoSendEmail && (
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center">
+                          <Input
+                            placeholder="Add email recipient"
+                            className="text-xs h-7 bg-gray-800 border-gray-700 text-gray-200"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && e.currentTarget.value) {
+                                const email = e.currentTarget.value.trim();
+                                if (
+                                  email &&
+                                  !notificationSettings.emailRecipients.includes(
+                                    email,
+                                  )
+                                ) {
+                                  updateNotificationSettings(
+                                    "emailRecipients",
+                                    [
+                                      ...notificationSettings.emailRecipients,
+                                      email,
+                                    ],
+                                  );
+                                  e.currentTarget.value = "";
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1 max-h-20 overflow-y-auto">
+                          {notificationSettings.emailRecipients.map(
+                            (email, index) => (
+                              <div
+                                key={index}
+                                className="flex items-center justify-between text-xs bg-gray-800/50 p-1 rounded"
+                              >
+                                <span className="text-gray-300">{email}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 text-gray-400 hover:text-red-400"
+                                  onClick={() => {
+                                    updateNotificationSettings(
+                                      "emailRecipients",
+                                      notificationSettings.emailRecipients.filter(
+                                        (_, i) => i !== index,
+                                      ),
+                                    );
+                                  }}
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Voice Settings */}
