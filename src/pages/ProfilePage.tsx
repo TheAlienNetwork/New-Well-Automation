@@ -250,29 +250,10 @@ ${profileData.emailSignature}
     <div className="min-h-screen bg-gray-950 text-gray-200">
       <Navbar />
       <StatusBar />
-
       <div className="container mx-auto px-4 py-6">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">User Profile</h1>
-          {activeTab === "profile" && (
-            <Button
-              variant="outline"
-              className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-              onClick={() => setIsEditing(!isEditing)}
-            >
-              {isEditing ? (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Profile
-                </>
-              ) : (
-                <>
-                  <Edit className="h-4 w-4 mr-2" />
-                  Edit Profile
-                </>
-              )}
-            </Button>
-          )}
+          {activeTab === "profile" && <></>}
         </div>
 
         <Tabs

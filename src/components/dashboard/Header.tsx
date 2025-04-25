@@ -355,7 +355,7 @@ const Header = ({
                   <User className="h-4 w-4 text-white" />
                 )}
               </div>
-              <span className="hidden md:inline-block text-sm">
+              <span className="hidden md:inline-block text-sm font-medium">
                 {displayName}
               </span>
             </Button>

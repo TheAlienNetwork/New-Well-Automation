@@ -23,6 +23,8 @@ import {
   Server,
   Plug,
   PlugZap,
+  Database,
+  Cpu,
 } from "lucide-react";
 
 interface WitsConnectionPanelProps {
@@ -39,51 +41,65 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
     disconnect,
     lastError,
     clearError,
+    connectionConfig,
+    updateConfig,
+    connectionType,
   } = useWits();
 
-  const [host, setHost] = useState<string>(
-    localStorage.getItem("witsHost") || "localhost",
-  );
-  const [port, setPort] = useState<number>(
-    parseInt(localStorage.getItem("witsPort") || "4000"),
-  );
-  const [protocol, setProtocol] = useState<"tcp" | "udp" | "serial">(
-    (localStorage.getItem("witsProtocol") as any) || "tcp",
-  );
-  const [autoConnect, setAutoConnect] = useState<boolean>(
-    localStorage.getItem("witsAutoConnect") === "true",
-  );
-  const [serialPort, setSerialPort] = useState<string>(
-    localStorage.getItem("witsSerialPort") || "/dev/ttyUSB0",
-  );
-  const [baudRate, setBaudRate] = useState<number>(
-    parseInt(localStorage.getItem("witsBaudRate") || "9600"),
-  );
   const [activeTab, setActiveTab] = useState<string>("connection");
+  const [connectionMode, setConnectionMode] = useState<"wits" | "witsml">(
+    connectionConfig.connectionType,
+  );
+
+  // Form state for WITS connection
+  const [witsHost, setWitsHost] = useState(connectionConfig.ipAddress);
+  const [witsPort, setWitsPort] = useState(connectionConfig.port);
+  const [witsProtocol, setWitsProtocol] = useState<"tcp" | "udp" | "serial">(
+    connectionConfig.protocol.toLowerCase() as any,
+  );
+  const [autoConnect, setAutoConnect] = useState(connectionConfig.autoConnect);
+  const [serialPort, setSerialPort] = useState("/dev/ttyUSB0");
+  const [baudRate, setBaudRate] = useState(9600);
+
+  // Form state for WITSML connection
+  const [witsmlUrl, setWitsmlUrl] = useState(connectionConfig.witsmlConfig.url);
+  const [witsmlUsername, setWitsmlUsername] = useState(
+    connectionConfig.witsmlConfig.username,
+  );
+  const [witsmlPassword, setWitsmlPassword] = useState(
+    connectionConfig.witsmlConfig.password,
+  );
+  const [witsmlWellUid, setWitsmlWellUid] = useState(
+    connectionConfig.witsmlConfig.wellUid,
+  );
+  const [witsmlWellboreUid, setWitsmlWellboreUid] = useState(
+    connectionConfig.witsmlConfig.wellboreUid,
+  );
+  const [witsmlLogUid, setWitsmlLogUid] = useState(
+    connectionConfig.witsmlConfig.logUid,
+  );
+  const [witsmlPollingInterval, setWitsmlPollingInterval] = useState(
+    connectionConfig.witsmlConfig.pollingInterval,
+  );
 
   // Auto-connect on component mount if enabled
   useEffect(() => {
     if (autoConnect && !isConnected) {
-      // Add a small delay to ensure the component is fully mounted
       const timer = setTimeout(() => {
         handleConnect();
       }, 1000);
-
       return () => clearTimeout(timer);
     }
   }, []);
 
   // Update connection status indicators
   useEffect(() => {
-    // If we're connected but not receiving data for more than 10 seconds, show a warning
     let dataTimeoutTimer: NodeJS.Timeout | null = null;
 
     if (isConnected && !isReceiving) {
       dataTimeoutTimer = setTimeout(() => {
         if (isConnected && !isReceiving) {
-          setLastError(
-            "Connected but not receiving data. Check WITS data source.",
-          );
+          setLastError("Connected but not receiving data. Check data source.");
         }
       }, 10000);
     }
@@ -96,44 +112,78 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
   }, [isConnected, isReceiving]);
 
   const handleConnect = () => {
-    // Validate connection settings
-    if (!host || host.trim() === "") {
-      setLastError("Host cannot be empty");
-      return;
-    }
-
-    if (!port || port <= 0 || port > 65535) {
-      setLastError("Port must be between 1 and 65535");
-      return;
-    }
-
-    if (protocol === "serial" && (!serialPort || serialPort.trim() === "")) {
-      setLastError("Serial port cannot be empty");
-      return;
-    }
-
-    // Save connection settings to localStorage
-    localStorage.setItem("witsHost", host);
-    localStorage.setItem("witsPort", port.toString());
-    localStorage.setItem("witsProtocol", protocol);
-    localStorage.setItem("witsAutoConnect", autoConnect.toString());
-    localStorage.setItem("witsSerialPort", serialPort);
-    localStorage.setItem("witsBaudRate", baudRate.toString());
-
-    // Clear any previous error
     clearError();
 
-    // Connect with appropriate options based on protocol
-    try {
-      if (protocol === "serial") {
-        connect(host, port, protocol, { serialPort, baudRate });
-      } else {
-        connect(host, port, protocol);
+    if (connectionMode === "wits") {
+      // Validate WITS connection settings
+      if (!witsHost || witsHost.trim() === "") {
+        setLastError("Host cannot be empty");
+        return;
       }
-    } catch (error) {
-      setLastError(
-        `Connection error: ${error instanceof Error ? error.message : String(error)}`,
-      );
+
+      if (!witsPort || witsPort <= 0 || witsPort > 65535) {
+        setLastError("Port must be between 1 and 65535");
+        return;
+      }
+
+      if (
+        witsProtocol === "serial" &&
+        (!serialPort || serialPort.trim() === "")
+      ) {
+        setLastError("Serial port cannot be empty");
+        return;
+      }
+
+      // Update connection config
+      updateConfig({
+        connectionType: "wits",
+        ipAddress: witsHost,
+        port: witsPort,
+        protocol: witsProtocol.toUpperCase(),
+        autoConnect,
+      });
+
+      // Connect with appropriate options
+      try {
+        if (witsProtocol === "serial") {
+          connect(witsHost, witsPort, witsProtocol, { serialPort, baudRate });
+        } else {
+          connect(witsHost, witsPort, witsProtocol);
+        }
+      } catch (error) {
+        setLastError(
+          `Connection error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else {
+      // Validate WITSML connection settings
+      if (!witsmlUrl || witsmlUrl.trim() === "") {
+        setLastError("WITSML server URL cannot be empty");
+        return;
+      }
+
+      if (!witsmlUsername || witsmlUsername.trim() === "") {
+        setLastError("Username cannot be empty");
+        return;
+      }
+
+      // Update connection config
+      updateConfig({
+        connectionType: "witsml",
+        witsmlConfig: {
+          url: witsmlUrl,
+          username: witsmlUsername,
+          password: witsmlPassword,
+          wellUid: witsmlWellUid,
+          wellboreUid: witsmlWellboreUid,
+          logUid: witsmlLogUid,
+          pollingInterval: witsmlPollingInterval,
+        },
+        autoConnect,
+      });
+
+      // Connect to WITSML server
+      connect();
     }
   };
 
@@ -143,7 +193,12 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
 
   const handleAutoConnectChange = (checked: boolean) => {
     setAutoConnect(checked);
-    localStorage.setItem("witsAutoConnect", checked.toString());
+    updateConfig({ autoConnect: checked });
+  };
+
+  const handleConnectionModeChange = (mode: "wits" | "witsml") => {
+    setConnectionMode(mode);
+    clearError();
   };
 
   return (
@@ -159,16 +214,48 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
               <WifiOff className="h-5 w-5 text-red-400" />
             )}
             <CardTitle className="text-lg font-medium text-gray-200">
-              WITS Connection
+              {connectionMode === "wits" ? "WITS" : "WITSML"} Connection
             </CardTitle>
             {isConnected && (
               <Badge
                 variant="outline"
-                className={`${isReceiving ? "bg-green-900/30 text-green-400 border-green-800" : "bg-yellow-900/30 text-yellow-400 border-yellow-800"}`}
+                className={`${
+                  isReceiving
+                    ? "bg-green-900/30 text-green-400 border-green-800"
+                    : "bg-yellow-900/30 text-yellow-400 border-yellow-800"
+                }`}
               >
                 {isReceiving ? "RECEIVING DATA" : "CONNECTED"}
               </Badge>
             )}
+          </div>
+          <div className="flex space-x-1">
+            <Button
+              variant={connectionMode === "wits" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => handleConnectionModeChange("wits")}
+              className={`${
+                connectionMode === "wits"
+                  ? "bg-blue-600 hover:bg-blue-700"
+                  : "bg-gray-800 hover:bg-gray-700"
+              }`}
+            >
+              <Cpu className="h-4 w-4 mr-2" />
+              WITS
+            </Button>
+            <Button
+              variant={connectionMode === "witsml" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => handleConnectionModeChange("witsml")}
+              className={`${
+                connectionMode === "witsml"
+                  ? "bg-blue-600 hover:bg-blue-700"
+                  : "bg-gray-800 hover:bg-gray-700"
+              }`}
+            >
+              <Database className="h-4 w-4 mr-2" />
+              WITSML
+            </Button>
           </div>
         </div>
       </CardHeader>
@@ -195,108 +282,217 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
           </TabsList>
 
           <TabsContent value="connection" className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="host" className="text-sm text-gray-400">
-                  Host
-                </Label>
-                <Input
-                  id="host"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  disabled={isConnected}
-                  className="bg-gray-800 border-gray-700 text-gray-200"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="port" className="text-sm text-gray-400">
-                  Port
-                </Label>
-                <Input
-                  id="port"
-                  type="number"
-                  value={port}
-                  onChange={(e) => setPort(parseInt(e.target.value))}
-                  disabled={isConnected}
-                  className="bg-gray-800 border-gray-700 text-gray-200"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="protocol" className="text-sm text-gray-400">
-                Protocol
-              </Label>
-              <Select
-                value={protocol}
-                onValueChange={(value) =>
-                  setProtocol(value as "tcp" | "udp" | "serial")
-                }
-                disabled={isConnected}
-              >
-                <SelectTrigger className="bg-gray-800 border-gray-700 text-gray-200">
-                  <SelectValue placeholder="Select protocol" />
-                </SelectTrigger>
-                <SelectContent className="bg-gray-800 border-gray-700">
-                  <SelectItem value="tcp" className="text-gray-200">
-                    TCP
-                  </SelectItem>
-                  <SelectItem value="udp" className="text-gray-200">
-                    UDP
-                  </SelectItem>
-                  <SelectItem value="serial" className="text-gray-200">
-                    Serial
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {protocol === "serial" && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="serialPort" className="text-sm text-gray-400">
-                    Serial Port
-                  </Label>
-                  <Input
-                    id="serialPort"
-                    value={serialPort}
-                    onChange={(e) => setSerialPort(e.target.value)}
-                    disabled={isConnected}
-                    className="bg-gray-800 border-gray-700 text-gray-200"
-                  />
+            {connectionMode === "wits" ? (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="host" className="text-sm text-gray-400">
+                      Host
+                    </Label>
+                    <Input
+                      id="host"
+                      value={witsHost}
+                      onChange={(e) => setWitsHost(e.target.value)}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="port" className="text-sm text-gray-400">
+                      Port
+                    </Label>
+                    <Input
+                      id="port"
+                      type="number"
+                      value={witsPort}
+                      onChange={(e) => setWitsPort(parseInt(e.target.value))}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
                 </div>
+
                 <div className="space-y-2">
-                  <Label htmlFor="baudRate" className="text-sm text-gray-400">
-                    Baud Rate
+                  <Label htmlFor="protocol" className="text-sm text-gray-400">
+                    Protocol
                   </Label>
                   <Select
-                    value={baudRate.toString()}
-                    onValueChange={(value) => setBaudRate(parseInt(value))}
+                    value={witsProtocol}
+                    onValueChange={(value) =>
+                      setWitsProtocol(value as "tcp" | "udp" | "serial")
+                    }
                     disabled={isConnected}
                   >
                     <SelectTrigger className="bg-gray-800 border-gray-700 text-gray-200">
-                      <SelectValue placeholder="Select baud rate" />
+                      <SelectValue placeholder="Select protocol" />
                     </SelectTrigger>
                     <SelectContent className="bg-gray-800 border-gray-700">
-                      <SelectItem value="9600" className="text-gray-200">
-                        9600
+                      <SelectItem value="tcp" className="text-gray-200">
+                        TCP
                       </SelectItem>
-                      <SelectItem value="19200" className="text-gray-200">
-                        19200
+                      <SelectItem value="udp" className="text-gray-200">
+                        UDP
                       </SelectItem>
-                      <SelectItem value="38400" className="text-gray-200">
-                        38400
-                      </SelectItem>
-                      <SelectItem value="57600" className="text-gray-200">
-                        57600
-                      </SelectItem>
-                      <SelectItem value="115200" className="text-gray-200">
-                        115200
+                      <SelectItem value="serial" className="text-gray-200">
+                        Serial
                       </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
+
+                {witsProtocol === "serial" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="serialPort"
+                        className="text-sm text-gray-400"
+                      >
+                        Serial Port
+                      </Label>
+                      <Input
+                        id="serialPort"
+                        value={serialPort}
+                        onChange={(e) => setSerialPort(e.target.value)}
+                        disabled={isConnected}
+                        className="bg-gray-800 border-gray-700 text-gray-200"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="baudRate"
+                        className="text-sm text-gray-400"
+                      >
+                        Baud Rate
+                      </Label>
+                      <Select
+                        value={baudRate.toString()}
+                        onValueChange={(value) => setBaudRate(parseInt(value))}
+                        disabled={isConnected}
+                      >
+                        <SelectTrigger className="bg-gray-800 border-gray-700 text-gray-200">
+                          <SelectValue placeholder="Select baud rate" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-gray-800 border-gray-700">
+                          <SelectItem value="9600" className="text-gray-200">
+                            9600
+                          </SelectItem>
+                          <SelectItem value="19200" className="text-gray-200">
+                            19200
+                          </SelectItem>
+                          <SelectItem value="38400" className="text-gray-200">
+                            38400
+                          </SelectItem>
+                          <SelectItem value="57600" className="text-gray-200">
+                            57600
+                          </SelectItem>
+                          <SelectItem value="115200" className="text-gray-200">
+                            115200
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="witsmlUrl" className="text-sm text-gray-400">
+                    WITSML Server URL
+                  </Label>
+                  <Input
+                    id="witsmlUrl"
+                    value={witsmlUrl}
+                    onChange={(e) => setWitsmlUrl(e.target.value)}
+                    disabled={isConnected}
+                    className="bg-gray-800 border-gray-700 text-gray-200"
+                    placeholder="https://witsml.server/store"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="witsmlUsername"
+                      className="text-sm text-gray-400"
+                    >
+                      Username
+                    </Label>
+                    <Input
+                      id="witsmlUsername"
+                      value={witsmlUsername}
+                      onChange={(e) => setWitsmlUsername(e.target.value)}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="witsmlPassword"
+                      className="text-sm text-gray-400"
+                    >
+                      Password
+                    </Label>
+                    <Input
+                      id="witsmlPassword"
+                      type="password"
+                      value={witsmlPassword}
+                      onChange={(e) => setWitsmlPassword(e.target.value)}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="witsmlWellUid"
+                      className="text-sm text-gray-400"
+                    >
+                      Well UID
+                    </Label>
+                    <Input
+                      id="witsmlWellUid"
+                      value={witsmlWellUid}
+                      onChange={(e) => setWitsmlWellUid(e.target.value)}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="witsmlWellboreUid"
+                      className="text-sm text-gray-400"
+                    >
+                      Wellbore UID
+                    </Label>
+                    <Input
+                      id="witsmlWellboreUid"
+                      value={witsmlWellboreUid}
+                      onChange={(e) => setWitsmlWellboreUid(e.target.value)}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="witsmlLogUid"
+                      className="text-sm text-gray-400"
+                    >
+                      Log UID
+                    </Label>
+                    <Input
+                      id="witsmlLogUid"
+                      value={witsmlLogUid}
+                      onChange={(e) => setWitsmlLogUid(e.target.value)}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200"
+                      placeholder="REALTIME"
+                    />
+                  </div>
+                </div>
+              </>
             )}
 
             <div className="flex items-center justify-between pt-2">
@@ -352,14 +548,7 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
                     )}
                     {lastError.includes("timeout") && (
                       <p className="text-xs text-gray-400 mt-1">
-                        Tip: Verify the server is running and accessible at{" "}
-                        {host}:{port}
-                      </p>
-                    )}
-                    {lastError.includes("Maximum reconnect attempts") && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        Tip: Check your network connection or try a different
-                        host/port
+                        Tip: Verify the server is running and accessible
                       </p>
                     )}
                   </div>
@@ -377,43 +566,31 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
           </TabsContent>
 
           <TabsContent value="advanced" className="space-y-4">
-            <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
-              <h3 className="text-sm font-medium text-gray-300 mb-2">
-                Connection Settings
-              </h3>
-              <div className="grid grid-cols-2 gap-4">
+            {connectionMode === "witsml" && (
+              <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
+                <h3 className="text-sm font-medium text-gray-300 mb-2">
+                  WITSML Polling
+                </h3>
                 <div className="space-y-2">
                   <Label
-                    htmlFor="reconnectInterval"
+                    htmlFor="pollingInterval"
                     className="text-xs text-gray-400"
                   >
-                    Reconnect Interval (ms)
+                    Polling Interval (ms)
                   </Label>
                   <Input
-                    id="reconnectInterval"
+                    id="pollingInterval"
                     type="number"
-                    defaultValue="5000"
-                    disabled={isConnected}
-                    className="bg-gray-800 border-gray-700 text-gray-200 h-8 text-sm"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="maxReconnectAttempts"
-                    className="text-xs text-gray-400"
-                  >
-                    Max Reconnect Attempts
-                  </Label>
-                  <Input
-                    id="maxReconnectAttempts"
-                    type="number"
-                    defaultValue="10"
+                    value={witsmlPollingInterval}
+                    onChange={(e) =>
+                      setWitsmlPollingInterval(parseInt(e.target.value))
+                    }
                     disabled={isConnected}
                     className="bg-gray-800 border-gray-700 text-gray-200 h-8 text-sm"
                   />
                 </div>
               </div>
-            </div>
+            )}
 
             <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
               <h3 className="text-sm font-medium text-gray-300 mb-2">
@@ -429,19 +606,6 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
                   </Label>
                   <Switch
                     id="filter-noise"
-                    defaultChecked={true}
-                    className="data-[state=checked]:bg-blue-600"
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label
-                    htmlFor="auto-decode"
-                    className="text-xs text-gray-400"
-                  >
-                    Auto-Decode Pulses
-                  </Label>
-                  <Switch
-                    id="auto-decode"
                     defaultChecked={true}
                     className="data-[state=checked]:bg-blue-600"
                   />
@@ -483,24 +647,46 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
                 >
                   {isConnected ? "Connected" : "Disconnected"}
                 </div>
+                <div className="text-gray-400">Connection Type:</div>
+                <div className="text-gray-300">
+                  {connectionMode.toUpperCase()}
+                </div>
                 <div className="text-gray-400">Data Receiving:</div>
                 <div
                   className={isReceiving ? "text-green-400" : "text-gray-400"}
                 >
                   {isReceiving ? "Yes" : "No"}
                 </div>
-                <div className="text-gray-400">Connection Type:</div>
-                <div className="text-gray-300">{protocol.toUpperCase()}</div>
-                <div className="text-gray-400">Host:</div>
-                <div className="text-gray-300">{host}</div>
-                <div className="text-gray-400">Port:</div>
-                <div className="text-gray-300">{port}</div>
-                {protocol === "serial" && (
+
+                {connectionMode === "wits" ? (
                   <>
-                    <div className="text-gray-400">Serial Port:</div>
-                    <div className="text-gray-300">{serialPort}</div>
-                    <div className="text-gray-400">Baud Rate:</div>
-                    <div className="text-gray-300">{baudRate}</div>
+                    <div className="text-gray-400">Protocol:</div>
+                    <div className="text-gray-300">
+                      {witsProtocol.toUpperCase()}
+                    </div>
+                    <div className="text-gray-400">Host:</div>
+                    <div className="text-gray-300">{witsHost}</div>
+                    <div className="text-gray-400">Port:</div>
+                    <div className="text-gray-300">{witsPort}</div>
+                    {witsProtocol === "serial" && (
+                      <>
+                        <div className="text-gray-400">Serial Port:</div>
+                        <div className="text-gray-300">{serialPort}</div>
+                        <div className="text-gray-400">Baud Rate:</div>
+                        <div className="text-gray-300">{baudRate}</div>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="text-gray-400">Server URL:</div>
+                    <div className="text-gray-300">{witsmlUrl}</div>
+                    <div className="text-gray-400">Username:</div>
+                    <div className="text-gray-300">{witsmlUsername}</div>
+                    <div className="text-gray-400">Well UID:</div>
+                    <div className="text-gray-300">{witsmlWellUid}</div>
+                    <div className="text-gray-400">Wellbore UID:</div>
+                    <div className="text-gray-300">{witsmlWellboreUid}</div>
                   </>
                 )}
               </div>
@@ -512,15 +698,26 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
                   Data Statistics
                 </h3>
                 <div className="grid grid-cols-2 gap-y-2 text-sm">
-                  <div className="text-gray-400">Packets Received:</div>
-                  <div className="text-gray-300">1,245</div>
-                  <div className="text-gray-400">Packets/Second:</div>
-                  <div className="text-gray-300">4.2</div>
-                  <div className="text-gray-400">Last Packet:</div>
+                  <div className="text-gray-400">Last Update:</div>
                   <div className="text-gray-300">
                     {new Date().toLocaleTimeString()}
                   </div>
-                  <div className="text-gray-400">Decode Quality:</div>
+                  {connectionMode === "wits" ? (
+                    <>
+                      <div className="text-gray-400">Packets Received:</div>
+                      <div className="text-gray-300">1,245</div>
+                      <div className="text-gray-400">Packets/Second:</div>
+                      <div className="text-gray-300">4.2</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-gray-400">Queries Sent:</div>
+                      <div className="text-gray-300">42</div>
+                      <div className="text-gray-400">Data Points:</div>
+                      <div className="text-gray-300">1,856</div>
+                    </>
+                  )}
+                  <div className="text-gray-400">Data Quality:</div>
                   <div className="text-green-400">98%</div>
                 </div>
               </div>

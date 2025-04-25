@@ -1,197 +1,97 @@
 /**
- * WITS Connection Handler
- * Manages real-time connection to WITS data sources
+ * Universal WITS Connection Handler
+ * Supports both browser (WebSocket) and Node.js (direct TCP/UDP/Serial)
+ * Optimized for Noralis MWD while maintaining standard WITS compatibility
  */
 
 import { WitsDataType, WitsMappings } from "@/context/WitsContext";
 
 type ConnectionCallback = (connected: boolean) => void;
 type DataCallback = (data: WitsDataType) => void;
-type ErrorCallback = (error: string) => void;
+type ErrorCallback = (error: string | null) => void;
 
 interface WitsConnectionOptions {
   port?: number;
   host?: string;
-  protocol?: "tcp" | "udp" | "serial";
+  protocol?: "tcp" | "udp" | "serial" | "ws";
   baudRate?: number;
   serialPort?: string;
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
+  wsEndpoint?: string;
+  noralisMode?: boolean;
+  witsVersion?: "0" | "1"; // WITS Level 0 or 1
+  delimiter?: string; // Custom record delimiter
 }
 
 class WitsConnection {
   private connected: boolean = false;
   private connecting: boolean = false;
-  private socket: WebSocket | null = null;
-  private reconnectTimer: number | null = null;
+  private socket: any = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts: number = 0;
   private connectionCallbacks: ConnectionCallback[] = [];
   private dataCallbacks: DataCallback[] = [];
   private errorCallbacks: ErrorCallback[] = [];
   private witsMappings: WitsMappings | null = null;
-  private options: WitsConnectionOptions = {
-    port: 4000,
-    host: "localhost",
-    protocol: "tcp",
-    reconnectInterval: 5000,
-    maxReconnectAttempts: 10,
-  };
+  private options: WitsConnectionOptions;
+  private isBrowser: boolean;
+  private lastDataTime: number = 0;
+  private buffer: string = "";
+  private net: any;
+  private dgram: any;
+  private SerialPort: any;
 
   constructor(options?: WitsConnectionOptions) {
-    if (options) {
-      this.options = { ...this.options, ...options };
+    this.isBrowser = typeof window !== "undefined";
+    this.options = {
+      port: this.isBrowser ? 80 : 4000,
+      host: "localhost",
+      protocol: this.isBrowser ? "ws" : "tcp",
+      reconnectInterval: 5000,
+      maxReconnectAttempts: 10,
+      wsEndpoint: "/wits",
+      noralisMode: false,
+      witsVersion: "0",
+      delimiter: this.isBrowser ? "\n" : "\r\n",
+      ...options,
+    };
+
+    if (!this.isBrowser) {
+      try {
+        this.net = require("net");
+        this.dgram = require("dgram");
+        this.SerialPort = require("serialport");
+      } catch (err) {
+        console.error("Failed to load Node.js dependencies:", err);
+      }
     }
   }
 
-  /**
-   * Connect to WITS data source
-   */
+  /* Public Methods */
   public connect(): void {
     if (this.connected || this.connecting) return;
 
     this.connecting = true;
-    this.notifyErrorCallbacks("Connecting to WITS server...");
+    this.notifyErrorCallbacks(
+      this.options.noralisMode
+        ? "Connecting to Noralis MWD..."
+        : "Connecting to WITS server...",
+    );
 
     try {
-      // Determine the appropriate WebSocket protocol based on the connection type
-      let wsUrl = "";
-      const isSecure = window.location.protocol === "https:";
-      const wsProtocol = isSecure ? "wss://" : "ws://";
-
-      // Handle different protocol types
-      switch (this.options.protocol) {
-        case "tcp":
-          // For TCP connections, we use a WebSocket that bridges to TCP
-          wsUrl = `${wsProtocol}${this.options.host}:${this.options.port}/wits`;
-          break;
-        case "udp":
-          // For UDP connections, specify UDP in the path
-          wsUrl = `${wsProtocol}${this.options.host}:${this.options.port}/wits/udp`;
-          break;
-        case "serial":
-          // For serial connections, include serial port info in the path
-          const serialPort = encodeURIComponent(
-            this.options.serialPort || "/dev/ttyUSB0",
-          );
-          const baudRate = this.options.baudRate || 9600;
-          wsUrl = `${wsProtocol}${this.options.host}:${this.options.port}/wits/serial?port=${serialPort}&baud=${baudRate}`;
-          break;
-        default:
-          wsUrl = `${wsProtocol}${this.options.host}:${this.options.port}/wits`;
+      if (this.isBrowser) {
+        this.connectWebSocket();
+      } else {
+        this.connectDirect();
       }
-
-      console.log(`Connecting to WITS data source at ${wsUrl}`);
-
-      // Create a connection timeout
-      const connectionTimeout = setTimeout(() => {
-        if (this.socket && this.socket.readyState !== WebSocket.OPEN) {
-          console.error("WITS connection timeout");
-          this.socket.close();
-          this.socket = null;
-          this.connecting = false;
-          this.notifyErrorCallbacks(
-            "Connection timeout. Please check server address and port.",
-          );
-          this.attemptReconnect();
-        }
-      }, 10000); // 10 second timeout
-
-      this.socket = new WebSocket(wsUrl);
-
-      this.socket.onopen = () => {
-        clearTimeout(connectionTimeout);
-        console.log("WITS connection established");
-        this.connected = true;
-        this.connecting = false;
-        this.reconnectAttempts = 0;
-        this.notifyConnectionCallbacks(true);
-        this.notifyErrorCallbacks(null); // Clear any previous error messages
-
-        // Send an initial handshake message
-        this.sendCommand("handshake", { protocol: this.options.protocol });
-      };
-
-      this.socket.onmessage = (event) => {
-        try {
-          // Check if the message is a string or binary data
-          let rawData: WitsDataType;
-
-          if (typeof event.data === "string") {
-            rawData = JSON.parse(event.data) as WitsDataType;
-          } else {
-            // Handle binary data if needed
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              try {
-                const result = e.target?.result as string;
-                rawData = JSON.parse(result) as WitsDataType;
-                const mappedData = this.applyWitsMappings(rawData);
-                this.notifyDataCallbacks(mappedData);
-              } catch (parseError) {
-                console.error("Error parsing binary WITS data:", parseError);
-                this.notifyErrorCallbacks("Error parsing binary WITS data");
-              }
-            };
-            reader.readAsText(event.data);
-            return; // Early return as we're handling the data asynchronously
-          }
-
-          // Apply user-defined mappings to the raw data
-          const mappedData = this.applyWitsMappings(rawData);
-          this.notifyDataCallbacks(mappedData);
-        } catch (error) {
-          console.error("Error parsing WITS data:", error);
-          this.notifyErrorCallbacks(
-            "Error parsing WITS data: " +
-              (error instanceof Error ? error.message : String(error)),
-          );
-        }
-      };
-
-      this.socket.onclose = (event) => {
-        clearTimeout(connectionTimeout);
-        console.log(`WITS connection closed: ${event.code} - ${event.reason}`);
-        this.connected = false;
-        this.connecting = false;
-        this.notifyConnectionCallbacks(false);
-
-        // Provide more detailed error messages based on close code
-        if (event.code === 1006) {
-          this.notifyErrorCallbacks(
-            "Connection closed abnormally. Server may be unavailable.",
-          );
-        } else if (event.code === 1000) {
-          this.notifyErrorCallbacks("Connection closed normally.");
-        } else {
-          this.notifyErrorCallbacks(
-            `Connection closed: ${event.code} - ${event.reason || "Unknown reason"}`,
-          );
-        }
-
-        this.attemptReconnect();
-      };
-
-      this.socket.onerror = (error) => {
-        clearTimeout(connectionTimeout);
-        console.error("WITS connection error:", error);
-        this.notifyErrorCallbacks(
-          "WITS connection error. Please check network and server status.",
-        );
-      };
     } catch (error) {
-      console.error("Failed to connect to WITS:", error);
-      this.connecting = false;
-      this.notifyErrorCallbacks(
-        "Failed to connect to WITS: " +
-          (error instanceof Error ? error.message : String(error)),
+      this.handleConnectionError(
+        error instanceof Error ? error : new Error(String(error)),
       );
-      this.attemptReconnect();
     }
   }
 
-  /**
-   * Disconnect from WITS data source
-   */
   public disconnect(): void {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -199,105 +99,385 @@ class WitsConnection {
     }
 
     if (this.socket) {
-      this.socket.close();
+      if (this.isBrowser) {
+        this.socket.close();
+      } else {
+        if (this.options.protocol === "udp") {
+          this.socket.close();
+        } else {
+          this.socket.end();
+          this.socket.destroy();
+        }
+      }
       this.socket = null;
     }
 
     this.connected = false;
     this.connecting = false;
+    this.buffer = "";
     this.notifyConnectionCallbacks(false);
   }
 
-  /**
-   * Check if connected to WITS data source
-   */
   public isConnected(): boolean {
     return this.connected;
   }
 
-  /**
-   * Register connection status callback
-   */
   public onConnectionChange(callback: ConnectionCallback): void {
     this.connectionCallbacks.push(callback);
   }
 
-  /**
-   * Register data callback
-   */
   public onData(callback: DataCallback): void {
     this.dataCallbacks.push(callback);
   }
 
-  /**
-   * Register error callback
-   */
   public onError(callback: ErrorCallback): void {
     this.errorCallbacks.push(callback);
   }
 
-  /**
-   * Remove connection status callback
-   */
   public removeConnectionCallback(callback: ConnectionCallback): void {
     this.connectionCallbacks = this.connectionCallbacks.filter(
       (cb) => cb !== callback,
     );
   }
 
-  /**
-   * Remove data callback
-   */
   public removeDataCallback(callback: DataCallback): void {
     this.dataCallbacks = this.dataCallbacks.filter((cb) => cb !== callback);
   }
 
-  /**
-   * Remove error callback
-   */
   public removeErrorCallback(callback: ErrorCallback): void {
     this.errorCallbacks = this.errorCallbacks.filter((cb) => cb !== callback);
   }
 
-  /**
-   * Update connection options
-   */
   public updateOptions(options: WitsConnectionOptions): void {
     const wasConnected = this.connected;
-
-    if (wasConnected) {
-      this.disconnect();
-    }
-
+    if (wasConnected) this.disconnect();
     this.options = { ...this.options, ...options };
-
-    if (wasConnected) {
-      this.connect();
-    }
+    if (wasConnected) this.connect();
   }
 
-  /**
-   * Update WITS mappings
-   */
   public updateWitsMappings(mappings: WitsMappings): void {
     this.witsMappings = mappings;
-    console.log("WITS connection mappings updated:", mappings);
   }
 
-  /**
-   * Apply WITS mappings to raw data
-   */
-  private applyWitsMappings(rawData: WitsDataType): WitsDataType {
-    // If no mappings are defined, return raw data as is
-    if (!this.witsMappings) {
-      return rawData;
+  public sendCommand(command: string, params?: any): void {
+    if (!this.connected || !this.socket) {
+      this.notifyErrorCallbacks("Cannot send command: Not connected");
+      return;
     }
 
     try {
-      // Create a copy of the raw data
+      const message = JSON.stringify({ command, params });
+      if (this.isBrowser) {
+        this.socket.send(message);
+      } else {
+        this.socket.write(message + this.options.delimiter);
+      }
+    } catch (error) {
+      this.notifyErrorCallbacks(
+        "Error sending command: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  /* Private Methods */
+  private connectWebSocket(): void {
+    if (this.options.noralisMode && !this.options.wsEndpoint) {
+      this.options.wsEndpoint = "/noralis";
+    }
+
+    const isSecure = window.location.protocol === "https:";
+    const wsProtocol = isSecure ? "wss://" : "ws://";
+    let wsUrl = `${wsProtocol}${this.options.host}:${this.options.port}${this.options.wsEndpoint}`;
+
+    if (this.options.noralisMode) {
+      wsUrl += `?protocol=tcp&noralis=true&version=${this.options.witsVersion}`;
+    }
+
+    const connectionTimeout = setTimeout(() => {
+      if (!this.connected) {
+        this.handleConnectionError(new Error("WebSocket connection timeout"));
+      }
+    }, 10000);
+
+    this.socket = new WebSocket(wsUrl);
+
+    this.socket.onopen = () => {
+      clearTimeout(connectionTimeout);
+      this.handleConnectionSuccess();
+    };
+
+    this.socket.onmessage = (event: MessageEvent) => {
+      this.lastDataTime = Date.now();
+      this.handleIncomingData(event.data);
+    };
+
+    this.socket.onclose = (event: CloseEvent) => {
+      clearTimeout(connectionTimeout);
+      this.handleConnectionClose(event.code, event.reason);
+    };
+
+    this.socket.onerror = (error: Event) => {
+      clearTimeout(connectionTimeout);
+      this.handleConnectionError(new Error("WebSocket error"));
+    };
+  }
+
+  private connectDirect(): void {
+    if (!this.net && !this.isBrowser) {
+      throw new Error("Net module not available");
+    }
+
+    const connectionTimeout = setTimeout(() => {
+      if (!this.connected) {
+        this.socket?.destroy();
+        this.handleConnectionError(new Error("Connection timeout"));
+      }
+    }, 15000);
+
+    switch (this.options.protocol) {
+      case "tcp":
+        this.socket = new this.net.Socket();
+        this.socket.connect(this.options.port!, this.options.host!, () => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionSuccess();
+        });
+
+        this.socket.on("data", (data: Buffer) => {
+          this.lastDataTime = Date.now();
+          this.buffer += data.toString("ascii");
+          this.processDataBuffer();
+        });
+
+        this.socket.on("close", (hadError: boolean) => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionClose(
+            hadError ? 1006 : 1000,
+            hadError ? "Connection error" : "Connection closed",
+          );
+        });
+
+        this.socket.on("error", (err: Error) => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionError(err);
+        });
+
+        // TCP optimizations
+        this.socket.setKeepAlive(true, 5000);
+        this.socket.setNoDelay(true);
+        break;
+
+      case "udp":
+        this.socket = this.dgram.createSocket("udp4");
+        this.socket.bind(this.options.port);
+
+        this.socket.on("message", (msg: Buffer) => {
+          this.lastDataTime = Date.now();
+          this.buffer += msg.toString("ascii");
+          this.processDataBuffer();
+        });
+
+        this.socket.on("listening", () => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionSuccess();
+        });
+
+        this.socket.on("close", () => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionClose(1000, "UDP connection closed");
+        });
+
+        this.socket.on("error", (err: Error) => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionError(err);
+        });
+        break;
+
+      case "serial":
+        if (!this.SerialPort) {
+          throw new Error("SerialPort module not available");
+        }
+
+        this.socket = new this.SerialPort(
+          this.options.serialPort || "/dev/ttyUSB0",
+          {
+            baudRate: this.options.baudRate || 9600,
+            dataBits: 8,
+            parity: "none",
+            stopBits: 1,
+          },
+        );
+
+        this.socket.on("open", () => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionSuccess();
+        });
+
+        this.socket.on("data", (data: Buffer) => {
+          this.lastDataTime = Date.now();
+          this.buffer += data.toString("ascii");
+          this.processDataBuffer();
+        });
+
+        this.socket.on("close", () => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionClose(1000, "Serial connection closed");
+        });
+
+        this.socket.on("error", (err: Error) => {
+          clearTimeout(connectionTimeout);
+          this.handleConnectionError(err);
+        });
+        break;
+
+      default:
+        throw new Error(`Unsupported protocol: ${this.options.protocol}`);
+    }
+  }
+
+  private processDataBuffer(): void {
+    const delimiter =
+      this.options.delimiter || (this.options.noralisMode ? "\r\n" : "\n");
+    const records = this.buffer.split(delimiter);
+
+    // Keep incomplete record in buffer
+    this.buffer = records.pop() || "";
+
+    records.forEach((record) => {
+      if (record.trim().length > 0) {
+        if (this.options.noralisMode) {
+          this.parseNoralisRecord(record);
+        } else {
+          this.parseStandardWitsRecord(record);
+        }
+      }
+    });
+  }
+
+  private parseNoralisRecord(record: string): void {
+    // Noralis format: "01 1234.5 02 5678.9 03 91011.12 ..."
+    const items = record.trim().split(/\s+/g);
+
+    if (items.length % 2 !== 0) {
+      console.warn(
+        "Invalid Noralis WITS record - odd number of items:",
+        record,
+      );
+      return;
+    }
+
+    const witsData: Partial<WitsDataType> = {
+      timestamp: new Date().toISOString(),
+      source: "noralis",
+    };
+
+    for (let i = 0; i < items.length; i += 2) {
+      const channelStr = items[i];
+      const valueStr = items[i + 1];
+
+      if (!/^\d{2}$/.test(channelStr)) continue;
+
+      const channel = parseInt(channelStr, 10);
+      const value = parseFloat(valueStr);
+
+      if (!isNaN(value)) {
+        witsData[channel] = value;
+      }
+    }
+
+    const mappedData = this.applyWitsMappings(witsData as WitsDataType);
+    this.notifyDataCallbacks(mappedData);
+  }
+
+  private parseStandardWitsRecord(record: string): void {
+    // Standard WITS Level 0 format: fixed-width fields
+    if (this.options.witsVersion === "0") {
+      const recordLength = 120; // Standard WITS Level 0 record length
+      if (record.length < recordLength) return;
+
+      const items = [];
+      for (let i = 0; i < record.length; i += 6) {
+        items.push(record.substr(i, 6).trim());
+      }
+
+      const witsData: Partial<WitsDataType> = {
+        timestamp: new Date().toISOString(),
+        source: "wits",
+      };
+
+      for (let channel = 1; channel < items.length; channel++) {
+        const value = parseFloat(items[channel]);
+        if (!isNaN(value)) {
+          witsData[channel] = value;
+        }
+      }
+
+      const mappedData = this.applyWitsMappings(witsData as WitsDataType);
+      this.notifyDataCallbacks(mappedData);
+    }
+    // WITS Level 1 format (JSON)
+    else if (this.options.witsVersion === "1") {
+      try {
+        const data = JSON.parse(record) as WitsDataType;
+        data.timestamp = data.timestamp || new Date().toISOString();
+        data.source = data.source || "wits";
+        const mappedData = this.applyWitsMappings(data);
+        this.notifyDataCallbacks(mappedData);
+      } catch (error) {
+        console.error("Error parsing WITS Level 1 record:", error);
+      }
+    }
+  }
+
+  private handleIncomingData(data: string | Blob | ArrayBuffer): void {
+    try {
+      let rawData: WitsDataType;
+
+      if (typeof data === "string") {
+        if (this.options.noralisMode) {
+          this.buffer += data;
+          this.processDataBuffer();
+          return;
+        }
+        rawData = JSON.parse(data) as WitsDataType;
+      } else if (data instanceof Blob) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const result = e.target?.result as string;
+            this.buffer += result;
+            this.processDataBuffer();
+          } catch (error) {
+            this.notifyErrorCallbacks("Error parsing binary data");
+          }
+        };
+        reader.readAsText(data);
+        return;
+      } else {
+        const decoder = new TextDecoder();
+        this.buffer += decoder.decode(data);
+        this.processDataBuffer();
+        return;
+      }
+
+      rawData.timestamp = rawData.timestamp || new Date().toISOString();
+      rawData.source = rawData.source || "wits";
+      const mappedData = this.applyWitsMappings(rawData);
+      this.notifyDataCallbacks(mappedData);
+    } catch (error) {
+      this.notifyErrorCallbacks(
+        "Error parsing data: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  private applyWitsMappings(rawData: WitsDataType): WitsDataType {
+    if (!this.witsMappings) return rawData;
+
+    try {
       const mappedData = { ...rawData };
 
-      // Helper function to convert parameter name to camelCase
       const toCamelCase = (name: string): string => {
         return (
           name.charAt(0).toLowerCase() +
@@ -305,18 +485,13 @@ class WitsConnection {
         );
       };
 
-      // Apply drilling parameter mappings
-      if (this.witsMappings.drilling) {
-        this.witsMappings.drilling.forEach((mapping) => {
-          // Check if mapping has both channel and witsId defined
+      // Process all mappings
+      const processMappings = (mappings: any[]) => {
+        mappings.forEach((mapping) => {
           if (mapping.witsId && rawData[mapping.witsId] !== undefined) {
             const paramName = toCamelCase(mapping.name);
             const rawValue = rawData[mapping.witsId];
-
-            // Apply the mapping - store both in the specific property and keep the channel mapping
             mappedData[paramName] = rawValue;
-
-            // Also store in the channel property if channel is defined
             if (mapping.channel) {
               mappedData[mapping.channel] = rawValue;
             }
@@ -324,108 +499,122 @@ class WitsConnection {
             mapping.channel &&
             rawData[mapping.channel] !== undefined
           ) {
-            // If witsId is not available but channel is, use channel directly
             const paramName = toCamelCase(mapping.name);
             mappedData[paramName] = rawData[mapping.channel];
           }
         });
-      }
+      };
 
-      // Apply directional parameter mappings
-      if (this.witsMappings.directional) {
-        this.witsMappings.directional.forEach((mapping) => {
-          if (mapping.witsId && rawData[mapping.witsId] !== undefined) {
-            const paramName = toCamelCase(mapping.name);
-            const rawValue = rawData[mapping.witsId];
-
-            // Apply the mapping - store both in the specific property and keep the channel mapping
-            mappedData[paramName] = rawValue;
-
-            // Also store in the channel property if channel is defined
-            if (mapping.channel) {
-              mappedData[mapping.channel] = rawValue;
-            }
-          } else if (
-            mapping.channel &&
-            rawData[mapping.channel] !== undefined
-          ) {
-            // If witsId is not available but channel is, use channel directly
-            const paramName = toCamelCase(mapping.name);
-            mappedData[paramName] = rawData[mapping.channel];
-          }
-        });
-      }
-
-      // Apply calculated parameters if needed
-      if (this.witsMappings.calculated) {
-        // For now, we're just acknowledging these exist
-        // Actual calculations would be implemented based on specific requirements
-        // This is a placeholder for future implementation
-      }
+      if (this.witsMappings.drilling)
+        processMappings(this.witsMappings.drilling);
+      if (this.witsMappings.directional)
+        processMappings(this.witsMappings.directional);
+      if (this.witsMappings.custom) processMappings(this.witsMappings.custom);
 
       return mappedData;
     } catch (error) {
       console.error("Error applying WITS mappings:", error);
-      // Return original data if there's an error
       return rawData;
     }
   }
 
-  /**
-   * Send command to WITS data source
-   */
-  public sendCommand(command: string, params?: any): void {
-    if (!this.connected || !this.socket) {
-      this.notifyErrorCallbacks("Cannot send command: Not connected to WITS");
-      return;
-    }
+  private handleConnectionSuccess(): void {
+    console.log("Connection established");
+    this.connected = true;
+    this.connecting = false;
+    this.reconnectAttempts = 0;
+    this.notifyConnectionCallbacks(true);
+    this.notifyErrorCallbacks(null);
+    this.lastDataTime = Date.now();
+    this.monitorConnectionHealth();
 
-    try {
-      const message = JSON.stringify({ command, params });
-      this.socket.send(message);
-    } catch (error) {
-      console.error("Error sending command to WITS:", error);
-      this.notifyErrorCallbacks("Error sending command to WITS");
+    // Send initial handshake if needed
+    if (this.options.noralisMode && this.socket && !this.isBrowser) {
+      this.socket.write(this.options.delimiter);
     }
   }
 
-  /**
-   * Attempt to reconnect to WITS data source
-   */
+  private handleConnectionClose(code: number, reason: string): void {
+    console.log(`Connection closed: ${code} - ${reason}`);
+    this.connected = false;
+    this.connecting = false;
+    this.notifyConnectionCallbacks(false);
+
+    if (code === 1006) {
+      this.notifyErrorCallbacks("Connection closed abnormally");
+    } else if (code !== 1000) {
+      this.notifyErrorCallbacks(
+        `Connection closed: ${reason || "Unknown reason"}`,
+      );
+    }
+
+    this.attemptReconnect();
+  }
+
+  private handleConnectionError(error: Error): void {
+    console.error("Connection error:", error);
+    this.connected = false;
+    this.connecting = false;
+    this.notifyConnectionCallbacks(false);
+    this.notifyErrorCallbacks(`Connection error: ${error.message}`);
+    this.attemptReconnect();
+  }
+
+  private monitorConnectionHealth(): void {
+    if (this.reconnectTimer) {
+      clearInterval(this.reconnectTimer as unknown as number);
+    }
+
+    const healthCheck = setInterval(() => {
+      if (!this.connected) {
+        clearInterval(healthCheck);
+        return;
+      }
+
+      const dataTimeout = this.options.noralisMode ? 60000 : 30000;
+      if (Date.now() - this.lastDataTime > dataTimeout) {
+        this.notifyErrorCallbacks(
+          `No data received for ${dataTimeout / 1000} seconds`,
+        );
+        this.disconnect();
+        this.attemptReconnect();
+      }
+
+      // Send keepalive if needed
+      if (this.options.noralisMode && this.socket && !this.isBrowser) {
+        this.socket.write(this.options.delimiter);
+      } else if (this.isBrowser && this.socket?.readyState === WebSocket.OPEN) {
+        this.socket.send(JSON.stringify({ command: "ping" }));
+      }
+    }, 10000);
+  }
+
   private attemptReconnect(): void {
     if (this.reconnectTimer || this.connecting || this.connected) return;
 
     const maxAttempts = this.options.maxReconnectAttempts || 10;
     if (this.reconnectAttempts >= maxAttempts) {
-      console.log("Maximum reconnect attempts reached");
       this.notifyErrorCallbacks(
-        `Maximum reconnect attempts (${maxAttempts}) reached. Please check connection settings and try again manually.`,
+        `Maximum reconnect attempts (${maxAttempts}) reached`,
       );
       return;
     }
 
     this.reconnectAttempts++;
     const reconnectInterval = this.options.reconnectInterval || 5000;
-    const backoffFactor = Math.min(this.reconnectAttempts, 5); // Cap at 5x for reasonable times
-    const adjustedInterval = reconnectInterval * (1 + backoffFactor * 0.5); // Exponential backoff
-
-    console.log(
-      `Attempting to reconnect (${this.reconnectAttempts}/${maxAttempts}) in ${adjustedInterval / 1000} seconds...`,
-    );
+    const backoffFactor = Math.min(this.reconnectAttempts, 5);
+    const adjustedInterval = reconnectInterval * (1 + backoffFactor * 0.5);
 
     this.notifyErrorCallbacks(
-      `Reconnecting (attempt ${this.reconnectAttempts}/${maxAttempts}) in ${Math.round(adjustedInterval / 1000)} seconds...`,
+      `Reconnecting (attempt ${this.reconnectAttempts}/${maxAttempts})...`,
     );
 
-    this.reconnectTimer = window.setTimeout(() => {
+    this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
     }, adjustedInterval);
   }
 
-  /**
-   * Notify all connection callbacks
-   */
   private notifyConnectionCallbacks(connected: boolean): void {
     this.connectionCallbacks.forEach((callback) => {
       try {
@@ -436,9 +625,6 @@ class WitsConnection {
     });
   }
 
-  /**
-   * Notify all data callbacks
-   */
   private notifyDataCallbacks(data: WitsDataType): void {
     this.dataCallbacks.forEach((callback) => {
       try {
@@ -449,13 +635,10 @@ class WitsConnection {
     });
   }
 
-  /**
-   * Notify all error callbacks
-   */
   private notifyErrorCallbacks(error: string | null): void {
     this.errorCallbacks.forEach((callback) => {
       try {
-        callback(error as string); // Cast to string to maintain backward compatibility
+        callback(error);
       } catch (err) {
         console.error("Error in error callback:", err);
       }
@@ -463,7 +646,5 @@ class WitsConnection {
   }
 }
 
-// Export singleton instance
 export const witsConnection = new WitsConnection();
-
 export default WitsConnection;

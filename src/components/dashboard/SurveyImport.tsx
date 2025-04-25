@@ -20,6 +20,7 @@ import {
   Table,
 } from "lucide-react";
 import { SurveyData } from "./SurveyPopup";
+import * as surveyUtils from "@/utils/surveyUtils";
 
 interface SurveyImportProps {
   onImportSurveys: (surveys: SurveyData[]) => void;
@@ -116,6 +117,12 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
         setImportStatus("error");
         setImportMessage("Error parsing file. Please check the file format.");
         return;
+      }
+
+      // Get the detected headers from the import process
+      const detectedHeaders = surveyUtils.getLastDetectedHeaders();
+      if (detectedHeaders) {
+        console.log("Using detected headers:", detectedHeaders);
       }
 
       setImportedSurveys(parsedSurveys);

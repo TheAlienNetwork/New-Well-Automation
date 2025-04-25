@@ -73,6 +73,7 @@ const SurveyTable = ({
   useEffect(() => {
     const lastHeaders = getLastDetectedHeaders();
     if (lastHeaders && lastHeaders.headers.length > 0) {
+      console.log("SurveyTable: Using detected headers:", lastHeaders);
       setDynamicHeaders(lastHeaders);
     }
   }, [surveys]);
@@ -242,7 +243,7 @@ const SurveyTable = ({
       headerLower.includes("gravity") ||
       headerLower.includes("g total")
     ) {
-      return survey.aTotal.toFixed(2);
+      return survey.aTotal.toFixed(3);
     }
 
     // Check for dip related headers
@@ -252,7 +253,7 @@ const SurveyTable = ({
 
     // Check for temperature related headers
     if (headerLower.includes("temp") || headerLower.includes("temperature")) {
-      return survey.toolTemp.toFixed(2);
+      return survey.toolTemp.toFixed(1);
     }
 
     // Check for above/below related headers
@@ -270,7 +271,7 @@ const SurveyTable = ({
         horizontalDistance * Math.cos((survey.azimuth * Math.PI) / 180);
       const aboveBelow = (ns * 0.8 - tvd * 0.2).toFixed(2);
       const prefix = parseFloat(aboveBelow) >= 0 ? "+" : "";
-      return `${prefix}${aboveBelow}°`;
+      return `${prefix}${aboveBelow}`;
     }
 
     // Check for left/right related headers
@@ -288,7 +289,7 @@ const SurveyTable = ({
         horizontalDistance * Math.sin((survey.azimuth * Math.PI) / 180);
       const leftRight = (ew * 0.8 - tvd * 0.1).toFixed(2);
       const prefix = parseFloat(leftRight) >= 0 ? "+" : "";
-      return `${prefix}${leftRight}°`;
+      return `${prefix}${leftRight}`;
     }
 
     // For any other headers, try to find a matching property in the survey object
@@ -542,13 +543,13 @@ const SurveyTable = ({
                           {survey.bTotal.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-gray-300">
-                          {survey.aTotal.toFixed(2)}
+                          {survey.aTotal.toFixed(3)}
                         </TableCell>
                         <TableCell className="text-gray-300">
                           {survey.dip.toFixed(2)}
                         </TableCell>
                         <TableCell className="text-gray-300">
-                          {survey.toolTemp.toFixed(2)}
+                          {survey.toolTemp.toFixed(1)}
                         </TableCell>
                         <TableCell className="text-gray-300">
                           {(() => {
@@ -579,7 +580,7 @@ const SurveyTable = ({
                             );
                             const prefix =
                               parseFloat(aboveBelow) >= 0 ? "+" : "";
-                            return `${prefix}${aboveBelow}°`;
+                            return `${prefix}${aboveBelow}`;
                           })()}
                         </TableCell>
                         <TableCell className="text-gray-300">
@@ -609,7 +610,7 @@ const SurveyTable = ({
                             const leftRight = (ew * 0.8 - tvd * 0.1).toFixed(2);
                             const prefix =
                               parseFloat(leftRight) >= 0 ? "+" : "";
-                            return `${prefix}${leftRight}°`;
+                            return `${prefix}${leftRight}`;
                           })()}
                         </TableCell>
                       </>

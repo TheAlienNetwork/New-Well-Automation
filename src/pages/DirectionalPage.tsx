@@ -626,7 +626,7 @@ const DirectionalPage = () => {
               <div className="bg-red-900/30 border-b border-red-800 px-4 py-2 text-center mb-6">
                 <p className="text-red-400 text-sm font-medium flex items-center justify-center gap-2">
                   <AlertTriangle className="h-4 w-4" />
-                  WITS Connection Not Established - Data shown is simulated
+                  WITS Connection Not Established
                 </p>
               </div>
             )}

@@ -225,6 +225,34 @@ export const setLastDetectedHeaders = (headers: DetectedFileHeaders | null) => {
 };
 
 /**
+ * Detect if a line contains survey-related keywords
+ */
+export const isSurveyHeaderLine = (line: string): boolean => {
+  const lowerLine = line.toLowerCase();
+  // Check for combinations of keywords that would indicate this is a header line
+  return (
+    // Must have depth or survey related term
+    (lowerLine.includes("depth") ||
+      lowerLine.includes("md") ||
+      lowerLine.includes("sd") ||
+      lowerLine.includes("survey") ||
+      lowerLine.includes("measured")) &&
+    // Must have inclination related term
+    (lowerLine.includes("inclination") ||
+      lowerLine.includes("inc") ||
+      lowerLine.includes("incl") ||
+      lowerLine.includes("angle") ||
+      lowerLine.includes("i")) &&
+    // Must have azimuth related term
+    (lowerLine.includes("azimuth") ||
+      lowerLine.includes("az") ||
+      lowerLine.includes("azi") ||
+      lowerLine.includes("a") ||
+      lowerLine.includes("heading"))
+  );
+};
+
+/**
  * Parses CSV content into survey data
  */
 export const parseCSVSurveys = (
@@ -243,13 +271,7 @@ export const parseCSVSurveys = (
   }
 
   // Try to detect if this is a survey report format (like the one from Altitude Energy Partners)
-  const isReportFormat = lines.some(
-    (line) =>
-      line.includes("Survey") &&
-      (line.includes("Measured") || line.includes("Depth")) &&
-      (line.includes("Inclination") || line.includes("Inc")) &&
-      (line.includes("Azimuth") || line.includes("Azi")),
-  );
+  const isReportFormat = lines.some(isSurveyHeaderLine);
 
   let startRow = 0;
   let headerRow = 0;
@@ -257,17 +279,8 @@ export const parseCSVSurveys = (
   if (isReportFormat) {
     console.log("CSV: Detected survey report format");
     // Find the header row in a report format
-    for (let i = 0; i < Math.min(20, lines.length); i++) {
-      if (
-        (lines[i].includes("Survey") || lines[i].includes("Depth")) &&
-        (lines[i].includes("Measured") ||
-          lines[i].includes("MD") ||
-          lines[i].includes("Depth")) &&
-        (lines[i].includes("Inclination") || lines[i].includes("Inc")) &&
-        (lines[i].includes("Azimuth") ||
-          lines[i].includes("Azi") ||
-          lines[i].includes("Az"))
-      ) {
+    for (let i = 0; i < Math.min(30, lines.length); i++) {
+      if (isSurveyHeaderLine(lines[i])) {
         headerRow = i;
         startRow = i;
         console.log(`CSV: Found header row at line ${i}: ${lines[i]}`);
@@ -432,13 +445,7 @@ export const parseTXTSurveys = (
   const surveys: SurveyData[] = [];
 
   // Try to detect if this is a survey report format (like the one from Altitude Energy Partners)
-  const isReportFormat = lines.some(
-    (line) =>
-      line.includes("Survey") &&
-      (line.includes("Measured") || line.includes("Depth")) &&
-      (line.includes("Inclination") || line.includes("Inc")) &&
-      (line.includes("Azimuth") || line.includes("Azi")),
-  );
+  const isReportFormat = lines.some(isSurveyHeaderLine);
 
   // Try to detect format based on first few lines
   const isTabDelimited = lines.some((line) => line.includes("\t"));
@@ -447,22 +454,8 @@ export const parseTXTSurveys = (
 
   // Find header line (if exists)
   let headerLine = 0;
-  for (let i = 0; i < Math.min(20, lines.length); i++) {
-    const lowerLine = lines[i].toLowerCase();
-    if (
-      (lowerLine.includes("depth") ||
-        lowerLine.includes("md") ||
-        lowerLine.includes("sd") ||
-        lowerLine.includes("survey")) &&
-      (lowerLine.includes("inclination") ||
-        lowerLine.includes("inc") ||
-        lowerLine.includes("incl") ||
-        lowerLine.includes("angle")) &&
-      (lowerLine.includes("azimuth") ||
-        lowerLine.includes("az") ||
-        lowerLine.includes("azi") ||
-        lowerLine.includes("heading"))
-    ) {
+  for (let i = 0; i < Math.min(30, lines.length); i++) {
+    if (isSurveyHeaderLine(lines[i])) {
       headerLine = i;
       console.log(`TXT: Found header at line ${i}: ${lines[i]}`);
       break;
@@ -689,13 +682,7 @@ export const parseLASSurveys = (
   ) {
     console.warn("LAS: File does not appear to be a valid LAS file");
     // Try to detect if this might be a different format with headers in the same row as keywords
-    const isReportFormat = lines.some(
-      (line) =>
-        line.includes("Survey") &&
-        (line.includes("Measured") || line.includes("Depth")) &&
-        (line.includes("Inclination") || line.includes("Inc")) &&
-        (line.includes("Azimuth") || line.includes("Azi")),
-    );
+    const isReportFormat = lines.some(isSurveyHeaderLine);
 
     if (isReportFormat) {
       console.log("LAS: Detected survey report format instead of standard LAS");
@@ -738,19 +725,8 @@ export const parseLASSurveys = (
   if (curveStartIndex === -1) {
     console.log("LAS: No curve section (~C) found, looking for header row");
     // Look for a line that might be a header row (contains keywords like depth, inc, az)
-    for (let i = 0; i < Math.min(20, lines.length); i++) {
-      const lowerLine = lines[i].toLowerCase();
-      if (
-        (lowerLine.includes("depth") ||
-          lowerLine.includes("md") ||
-          lowerLine.includes("survey")) &&
-        (lowerLine.includes("inclination") ||
-          lowerLine.includes("inc") ||
-          lowerLine.includes("angle")) &&
-        (lowerLine.includes("azimuth") ||
-          lowerLine.includes("az") ||
-          lowerLine.includes("heading"))
-      ) {
+    for (let i = 0; i < Math.min(30, lines.length); i++) {
+      if (isSurveyHeaderLine(lines[i])) {
         headerRowIndex = i;
         console.log(
           `LAS: Found potential header row at line ${i}: ${lines[i]}`,
@@ -1065,7 +1041,7 @@ export const parseXLSXSurveys = (
         let isReportFormat = false;
 
         // Look for a row that contains survey-related keywords
-        for (let i = 0; i < Math.min(20, jsonData.length); i++) {
+        for (let i = 0; i < Math.min(30, jsonData.length); i++) {
           const row = jsonData[i];
           if (!row || row.length === 0) continue;
 
@@ -1074,10 +1050,22 @@ export const parseXLSXSurveys = (
 
           // Check if this row contains survey-related keywords
           if (
-            (rowStr.includes("survey") || rowStr.includes("depth")) &&
-            (rowStr.includes("measured") || rowStr.includes("md")) &&
-            (rowStr.includes("inclination") || rowStr.includes("inc")) &&
-            (rowStr.includes("azimuth") || rowStr.includes("az"))
+            // Use a similar check as isSurveyHeaderLine but adapted for joined array
+            (rowStr.includes("depth") ||
+              rowStr.includes("md") ||
+              rowStr.includes("sd") ||
+              rowStr.includes("survey") ||
+              rowStr.includes("measured")) &&
+            (rowStr.includes("inclination") ||
+              rowStr.includes("inc") ||
+              rowStr.includes("incl") ||
+              rowStr.includes("angle") ||
+              rowStr.includes(" i ")) &&
+            (rowStr.includes("azimuth") ||
+              rowStr.includes("az") ||
+              rowStr.includes("azi") ||
+              rowStr.includes(" a ") ||
+              rowStr.includes("heading"))
           ) {
             console.log(
               `Excel: Found potential header row at line ${i}: ${rowStr}`,
@@ -1107,17 +1095,17 @@ export const parseXLSXSurveys = (
         const originalHeaders = jsonData[0].map((h: any) =>
           typeof h === "string" ? h.trim() : String(h),
         );
-        const headers = originalHeaders.map((h) =>
+        const normalizedHeaders = originalHeaders.map((h: string) =>
           typeof h === "string" ? h.toLowerCase() : String(h).toLowerCase(),
         );
         console.log(
-          `Excel: Found ${headers.length} columns: ${headers.join(", ")}`,
+          `Excel: Found ${normalizedHeaders.length} columns: ${normalizedHeaders.join(", ")}`,
         );
 
         // Store the detected headers for later use
         setLastDetectedHeaders({
-          headers,
-          originalHeaders,
+          headers: normalizedHeaders,
+          originalHeaders: originalHeaders,
           fileType: "xlsx",
           filePath,
         });
@@ -1144,7 +1132,7 @@ export const parseXLSXSurveys = (
 
           // Create data object with header keys
           const data: Record<string, any> = {};
-          headers.forEach((header: string, index: number) => {
+          normalizedHeaders.forEach((header: string, index: number) => {
             if (index < row.length) {
               data[header] = row[index];
             }
