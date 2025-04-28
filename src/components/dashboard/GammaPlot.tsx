@@ -128,7 +128,7 @@ const GammaPlot = ({
           {plotData.length > 0 ? (
             <ResponsiveContainer
               width="100%"
-              height={700}
+              height={900}
               className="h-[700px]"
             >
               <ScatterChart

@@ -29,16 +29,16 @@ interface UserContextType {
 }
 
 const defaultUserProfile: UserProfile = {
-  firstName: "John",
-  lastName: "Doe",
-  email: "john.doe@newwelltech.com",
+  firstName: "New Well Technology",
+  lastName: "New Well",
+  email: "NewWelltech@newwelltech.com",
   phone: "(555) 123-4567",
   position: "MWD Engineer",
   company: "New Well Technologies",
   location: "Houston, TX",
   bio: "Experienced MWD engineer with expertise in directional drilling operations.",
   emailSignature:
-    "John Doe\nMWD Engineer\nNew Well Technologies\nPhone: (555) 123-4567\nEmail: john.doe@newwelltech.com",
+    "New Well\nMWD Engineer\nNew Well Technologies\nPhone: (555) 123-4567\nEmail: john.doe@newwelltech.com",
   profileImage: null,
   wellName: localStorage.getItem("wellName") || "Alpha-123",
   rigName: localStorage.getItem("rigName") || "Precision Drilling #42",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useSurveys } from "@/context/SurveyContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ import {
   getLastDetectedHeaders,
   DetectedFileHeaders,
 } from "@/utils/surveyUtils";
+import { format } from "date-fns";
 
 interface SurveyTableProps {
   surveys: SurveyData[];
@@ -56,47 +57,77 @@ const SurveyTable = ({
   selectedSurveys = [],
   onEmailSurveys = () => {},
 }: SurveyTableProps) => {
-  // Auto-select all surveys when the component mounts or surveys change
-  React.useEffect(() => {
-    if (surveys.length > 0 && selectedSurveys.length !== surveys.length) {
-      onSelectSurveys(surveys.map((s) => s.id));
-    }
-  }, [surveys, selectedSurveys.length, onSelectSurveys]);
-  // We can access the global surveys here if needed
   const { surveys: globalSurveys } = useSurveys();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("all");
   const [dynamicHeaders, setDynamicHeaders] =
     useState<DetectedFileHeaders | null>(null);
 
+  // Auto-select all surveys when the component mounts or surveys change
+  useEffect(() => {
+    if (surveys.length > 0 && selectedSurveys.length !== surveys.length) {
+      onSelectSurveys(surveys.map((s) => s.id));
+    }
+  }, [surveys, selectedSurveys.length, onSelectSurveys]);
+
   // Check for dynamic headers when surveys change
   useEffect(() => {
     const lastHeaders = getLastDetectedHeaders();
     if (lastHeaders && lastHeaders.headers.length > 0) {
-      console.log("SurveyTable: Using detected headers:", lastHeaders);
       setDynamicHeaders(lastHeaders);
     }
   }, [surveys]);
 
-  const filteredSurveys = surveys.filter((survey) => {
-    // Filter by search term
-    const matchesSearch =
-      searchTerm === "" ||
-      survey.bitDepth.toString().includes(searchTerm) ||
-      survey.inclination.toString().includes(searchTerm) ||
-      survey.azimuth.toString().includes(searchTerm);
+  // Memoized filtered surveys for better performance
+  const filteredSurveys = useMemo(() => {
+    return surveys.filter((survey) => {
+      // Filter by search term
+      const matchesSearch =
+        searchTerm === "" ||
+        survey.bitDepth.toString().includes(searchTerm) ||
+        survey.inclination.toString().includes(searchTerm) ||
+        survey.azimuth.toString().includes(searchTerm);
 
-    // Filter by tab
-    const matchesTab =
-      activeTab === "all" ||
-      (activeTab === "pass" && survey.qualityCheck.status === "pass") ||
-      (activeTab === "warning" && survey.qualityCheck.status === "warning") ||
-      (activeTab === "fail" && survey.qualityCheck.status === "fail");
+      // Filter by tab
+      const matchesTab =
+        activeTab === "all" ||
+        (activeTab === "pass" && survey.qualityCheck.status === "pass") ||
+        (activeTab === "warning" && survey.qualityCheck.status === "warning") ||
+        (activeTab === "fail" && survey.qualityCheck.status === "fail");
 
-    return matchesSearch && matchesTab;
-  });
+      return matchesSearch && matchesTab;
+    });
+  }, [surveys, searchTerm, activeTab]);
 
-  const getQualityStatusColor = (status: string) => {
+  // Calculate derived survey data once
+  const surveysWithCalculations = useMemo(() => {
+    return filteredSurveys.map((survey) => {
+      const md =
+        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
+      const inclinationRad = (survey.inclination * Math.PI) / 180;
+      const azimuthRad = (survey.azimuth * Math.PI) / 180;
+
+      const tvd = md * Math.cos(inclinationRad);
+      const horizontalDistance = md * Math.sin(inclinationRad);
+      const ns = horizontalDistance * Math.cos(azimuthRad);
+      const ew = horizontalDistance * Math.sin(azimuthRad);
+      const aboveBelow = ns * 0.8 - tvd * 0.2;
+      const leftRight = ew * 0.8 - tvd * 0.1;
+
+      return {
+        ...survey,
+        md,
+        tvd,
+        ns,
+        ew,
+        aboveBelow,
+        leftRight,
+      };
+    });
+  }, [filteredSurveys]);
+
+  // Memoized quality status styles
+  const getQualityStatusColor = useCallback((status: string) => {
     switch (status) {
       case "pass":
         return "bg-green-900/30 text-green-400 border-green-800";
@@ -107,9 +138,9 @@ const SurveyTable = ({
       default:
         return "bg-gray-900/30 text-gray-400 border-gray-800";
     }
-  };
+  }, []);
 
-  const getQualityStatusIcon = (status: string) => {
+  const getQualityStatusIcon = useCallback((status: string) => {
     switch (status) {
       case "pass":
         return <CheckCircle className="h-4 w-4 text-green-500" />;
@@ -119,183 +150,132 @@ const SurveyTable = ({
       default:
         return null;
     }
-  };
+  }, []);
 
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString();
-  };
+  // Format timestamp with date-fns for better localization
+  const formatTimestamp = useCallback((timestamp: string) => {
+    try {
+      return format(new Date(timestamp), "MMM dd, yyyy HH:mm:ss");
+    } catch {
+      return "Invalid date";
+    }
+  }, []);
 
   // Helper function to render dynamic cell content based on header
-  const renderDynamicCell = (
-    survey: SurveyData,
-    headerLower: string,
-    originalHeader: string,
-  ) => {
-    // Check for bit depth related headers
-    if (
-      headerLower.includes("bit") ||
-      headerLower.includes("depth") ||
-      headerLower === "sd" ||
-      headerLower === "survey" ||
-      headerLower.includes("hole")
-    ) {
-      return survey.bitDepth.toFixed(2);
+  const renderDynamicCell = useCallback((survey: any, headerLower: string) => {
+    const mappings: Record<string, () => string> = {
+      // Bit depth related headers
+      bit: () => survey.bitDepth.toFixed(2),
+      depth: () => survey.bitDepth.toFixed(2),
+      sd: () => survey.bitDepth.toFixed(2),
+      survey: () => survey.bitDepth.toFixed(2),
+      hole: () => survey.bitDepth.toFixed(2),
+
+      // Measured depth
+      md: () => survey.md.toFixed(2),
+      measured: () => survey.md.toFixed(2),
+
+      // Sensor offset
+      offset: () => (survey.sensorOffset || 0).toFixed(2),
+      sensor: () => (survey.sensorOffset || 0).toFixed(2),
+
+      // Inclination
+      inc: () => survey.inclination.toFixed(2),
+      inclination: () => survey.inclination.toFixed(2),
+      angle: () => survey.inclination.toFixed(2),
+      incl: () => survey.inclination.toFixed(2),
+      i: () => survey.inclination.toFixed(2),
+
+      // Azimuth
+      az: () => survey.azimuth.toFixed(2),
+      azimuth: () => survey.azimuth.toFixed(2),
+      heading: () => survey.azimuth.toFixed(2),
+      azi: () => survey.azimuth.toFixed(2),
+      a: () => survey.azimuth.toFixed(2),
+
+      // Tool face
+      tf: () => survey.toolFace.toFixed(2),
+      toolface: () => survey.toolFace.toFixed(2),
+      "tool face": () => survey.toolFace.toFixed(2),
+
+      // TVD
+      tvd: () => survey.tvd.toFixed(2),
+      "true vertical": () => survey.tvd.toFixed(2),
+
+      // NS
+      ns: () => survey.ns.toFixed(2),
+      north: () => survey.ns.toFixed(2),
+      south: () => survey.ns.toFixed(2),
+
+      // EW
+      ew: () => survey.ew.toFixed(2),
+      east: () => survey.ew.toFixed(2),
+      west: () => survey.ew.toFixed(2),
+
+      // Magnetic field
+      b: () => survey.bTotal.toFixed(2),
+      magnetic: () => survey.bTotal.toFixed(2),
+      field: () => survey.bTotal.toFixed(2),
+
+      // Gravity
+      a: () => survey.aTotal.toFixed(3),
+      gravity: () => survey.aTotal.toFixed(3),
+      "g total": () => survey.aTotal.toFixed(3),
+
+      // Dip
+      dip: () => survey.dip.toFixed(2),
+
+      // Temperature
+      temp: () => survey.toolTemp.toFixed(1),
+      temperature: () => survey.toolTemp.toFixed(1),
+
+      // Above/below
+      above: () =>
+        `${survey.aboveBelow >= 0 ? "+" : ""}${survey.aboveBelow.toFixed(2)}`,
+      below: () =>
+        `${survey.aboveBelow >= 0 ? "+" : ""}${survey.aboveBelow.toFixed(2)}`,
+      vertical: () =>
+        `${survey.aboveBelow >= 0 ? "+" : ""}${survey.aboveBelow.toFixed(2)}`,
+
+      // Left/right
+      left: () =>
+        `${survey.leftRight >= 0 ? "+" : ""}${survey.leftRight.toFixed(2)}`,
+      right: () =>
+        `${survey.leftRight >= 0 ? "+" : ""}${survey.leftRight.toFixed(2)}`,
+      lateral: () =>
+        `${survey.leftRight >= 0 ? "+" : ""}${survey.leftRight.toFixed(2)}`,
+    };
+
+    for (const [key, fn] of Object.entries(mappings)) {
+      if (headerLower.includes(key)) {
+        return fn();
+      }
     }
 
-    // Check for measured depth related headers
-    if (
-      headerLower.includes("md") ||
-      headerLower.includes("measured") ||
-      (headerLower.includes("depth") && headerLower.includes("measured"))
-    ) {
-      return (
-        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0)
-      ).toFixed(2);
-    }
-
-    // Check for sensor offset related headers
-    if (headerLower.includes("offset") || headerLower.includes("sensor")) {
-      return (survey.sensorOffset || 0).toFixed(2);
-    }
-
-    // Check for inclination related headers
-    if (
-      headerLower.includes("inc") ||
-      headerLower.includes("inclination") ||
-      headerLower.includes("angle") ||
-      headerLower.includes("incl") ||
-      headerLower === "i"
-    ) {
-      return survey.inclination.toFixed(2);
-    }
-
-    // Check for azimuth related headers
-    if (
-      headerLower.includes("az") ||
-      headerLower.includes("azimuth") ||
-      headerLower.includes("heading") ||
-      headerLower.includes("azi") ||
-      headerLower === "a"
-    ) {
-      return survey.azimuth.toFixed(2);
-    }
-
-    // Check for tool face related headers
-    if (
-      headerLower.includes("tf") ||
-      headerLower.includes("toolface") ||
-      headerLower.includes("tool face")
-    ) {
-      return survey.toolFace.toFixed(2);
-    }
-
-    // Check for TVD related headers
-    if (headerLower.includes("tvd") || headerLower.includes("true vertical")) {
-      const md =
-        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
-      const tvd = md * Math.cos((survey.inclination * Math.PI) / 180);
-      return tvd.toFixed(2);
-    }
-
-    // Check for NS related headers
-    if (
-      headerLower.includes("ns") ||
-      headerLower.includes("north") ||
-      headerLower.includes("south")
-    ) {
-      const md =
-        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
-      const horizontalDistance =
-        md * Math.sin((survey.inclination * Math.PI) / 180);
-      const ns =
-        horizontalDistance * Math.cos((survey.azimuth * Math.PI) / 180);
-      return ns.toFixed(2);
-    }
-
-    // Check for EW related headers
-    if (
-      headerLower.includes("ew") ||
-      headerLower.includes("east") ||
-      headerLower.includes("west")
-    ) {
-      const md =
-        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
-      const horizontalDistance =
-        md * Math.sin((survey.inclination * Math.PI) / 180);
-      const ew =
-        horizontalDistance * Math.sin((survey.azimuth * Math.PI) / 180);
-      return ew.toFixed(2);
-    }
-
-    // Check for magnetic field related headers
-    if (
-      headerLower.includes("b") ||
-      headerLower.includes("magnetic") ||
-      headerLower.includes("field")
-    ) {
-      return survey.bTotal.toFixed(2);
-    }
-
-    // Check for gravity related headers
-    if (
-      headerLower.includes("a") ||
-      headerLower.includes("gravity") ||
-      headerLower.includes("g total")
-    ) {
-      return survey.aTotal.toFixed(3);
-    }
-
-    // Check for dip related headers
-    if (headerLower.includes("dip")) {
-      return survey.dip.toFixed(2);
-    }
-
-    // Check for temperature related headers
-    if (headerLower.includes("temp") || headerLower.includes("temperature")) {
-      return survey.toolTemp.toFixed(1);
-    }
-
-    // Check for above/below related headers
-    if (
-      headerLower.includes("above") ||
-      headerLower.includes("below") ||
-      headerLower.includes("vertical")
-    ) {
-      const md =
-        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
-      const tvd = md * Math.cos((survey.inclination * Math.PI) / 180);
-      const horizontalDistance =
-        md * Math.sin((survey.inclination * Math.PI) / 180);
-      const ns =
-        horizontalDistance * Math.cos((survey.azimuth * Math.PI) / 180);
-      const aboveBelow = (ns * 0.8 - tvd * 0.2).toFixed(2);
-      const prefix = parseFloat(aboveBelow) >= 0 ? "+" : "";
-      return `${prefix}${aboveBelow}`;
-    }
-
-    // Check for left/right related headers
-    if (
-      headerLower.includes("left") ||
-      headerLower.includes("right") ||
-      headerLower.includes("lateral")
-    ) {
-      const md =
-        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
-      const tvd = md * Math.cos((survey.inclination * Math.PI) / 180);
-      const horizontalDistance =
-        md * Math.sin((survey.inclination * Math.PI) / 180);
-      const ew =
-        horizontalDistance * Math.sin((survey.azimuth * Math.PI) / 180);
-      const leftRight = (ew * 0.8 - tvd * 0.1).toFixed(2);
-      const prefix = parseFloat(leftRight) >= 0 ? "+" : "";
-      return `${prefix}${leftRight}`;
-    }
-
-    // For any other headers, try to find a matching property in the survey object
-    // or return a placeholder
     return "--";
-  };
+  }, []);
+
+  // Default headers configuration
+  const defaultHeaders = useMemo(
+    () => [
+      { key: "bitDepth", label: "Bit Depth (ft)" },
+      { key: "md", label: "MD (ft)" },
+      { key: "sensorOffset", label: "Sensor Offset (ft)" },
+      { key: "inclination", label: "Inc (°)" },
+      { key: "azimuth", label: "Azi (°)" },
+      { key: "toolFace", label: "TF (°)" },
+      { key: "tvd", label: "TVD (ft)" },
+      { key: "ns", label: "NS (ft)" },
+      { key: "ew", label: "EW (ft)" },
+      { key: "bTotal", label: "B Total" },
+      { key: "aTotal", label: "A Total" },
+      { key: "dip", label: "Dip (°)" },
+      { key: "toolTemp", label: "Temp (°F)" },
+      { key: "aboveBelow", label: "Above/Below" },
+      { key: "leftRight", label: "Left/Right" },
+    ],
+    [],
+  );
 
   return (
     <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden flex flex-col">
@@ -368,10 +348,10 @@ const SurveyTable = ({
       <CardContent className="p-4 pt-4 flex-grow overflow-hidden">
         <ScrollArea
           className="h-full"
-          style={{ maxHeight: surveys.length > 10 ? "500px" : "auto" }}
+          style={{ maxHeight: "calc(100vh - 250px)" }}
         >
           <Table>
-            <TableHeader className="bg-gray-800/50">
+            <TableHeader className="bg-gray-800/50 sticky top-0 z-10">
               <TableRow>
                 <TableHead className="text-gray-400 w-10">
                   <input
@@ -391,37 +371,17 @@ const SurveyTable = ({
                   />
                 </TableHead>
                 <TableHead className="text-gray-400">Time</TableHead>
-                {dynamicHeaders && dynamicHeaders.originalHeaders.length > 0 ? (
-                  // Use dynamic headers if available
-                  dynamicHeaders.originalHeaders.map((header, index) => (
-                    <TableHead key={index} className="text-gray-400">
-                      {header}
-                    </TableHead>
-                  ))
-                ) : (
-                  // Use default headers if no dynamic headers are available
-                  <>
-                    <TableHead className="text-gray-400">
-                      Bit Depth (ft)
-                    </TableHead>
-                    <TableHead className="text-gray-400">MD (ft)</TableHead>
-                    <TableHead className="text-gray-400">
-                      Sensor Offset (ft)
-                    </TableHead>
-                    <TableHead className="text-gray-400">Inc (°)</TableHead>
-                    <TableHead className="text-gray-400">Azi (°)</TableHead>
-                    <TableHead className="text-gray-400">TF (°)</TableHead>
-                    <TableHead className="text-gray-400">TVD (ft)</TableHead>
-                    <TableHead className="text-gray-400">NS (ft)</TableHead>
-                    <TableHead className="text-gray-400">EW (ft)</TableHead>
-                    <TableHead className="text-gray-400">B Total</TableHead>
-                    <TableHead className="text-gray-400">A Total</TableHead>
-                    <TableHead className="text-gray-400">Dip (°)</TableHead>
-                    <TableHead className="text-gray-400">Temp (°F)</TableHead>
-                    <TableHead className="text-gray-400">Above/Below</TableHead>
-                    <TableHead className="text-gray-400">Left/Right</TableHead>
-                  </>
-                )}
+                {dynamicHeaders?.originalHeaders.length > 0
+                  ? dynamicHeaders.originalHeaders.map((header, index) => (
+                      <TableHead key={index} className="text-gray-400">
+                        {header}
+                      </TableHead>
+                    ))
+                  : defaultHeaders.map((header) => (
+                      <TableHead key={header.key} className="text-gray-400">
+                        {header.label}
+                      </TableHead>
+                    ))}
                 <TableHead className="text-gray-400">Quality</TableHead>
                 <TableHead className="text-gray-400 text-right">
                   Actions
@@ -429,8 +389,8 @@ const SurveyTable = ({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredSurveys.length > 0 ? (
-                filteredSurveys.map((survey) => (
+              {surveysWithCalculations.length > 0 ? (
+                surveysWithCalculations.map((survey) => (
                   <TableRow
                     key={survey.id}
                     className={`border-gray-800 hover:bg-gray-800/50 ${selectedSurveys.includes(survey.id) ? "bg-gray-800/30" : ""}`}
@@ -454,167 +414,26 @@ const SurveyTable = ({
                     <TableCell className="text-gray-300">
                       {formatTimestamp(survey.timestamp)}
                     </TableCell>
-                    {dynamicHeaders &&
-                    dynamicHeaders.originalHeaders.length > 0 ? (
-                      // Render cells based on dynamic headers
-                      dynamicHeaders.originalHeaders.map((header, index) => {
-                        const lowerHeader = header.toLowerCase();
-                        return (
-                          <TableCell key={index} className="text-gray-300">
-                            {renderDynamicCell(
-                              survey,
-                              lowerHeader,
-                              dynamicHeaders.headers[index],
-                            )}
+                    {dynamicHeaders?.originalHeaders.length > 0
+                      ? dynamicHeaders.originalHeaders.map((header, index) => {
+                          const lowerHeader = header.toLowerCase();
+                          return (
+                            <TableCell key={index} className="text-gray-300">
+                              {renderDynamicCell(survey, lowerHeader)}
+                            </TableCell>
+                          );
+                        })
+                      : defaultHeaders.map((header) => (
+                          <TableCell key={header.key} className="text-gray-300">
+                            {survey[header.key] !== undefined
+                              ? typeof survey[header.key] === "number"
+                                ? survey[header.key].toFixed(
+                                    header.key.includes("Total") ? 3 : 2,
+                                  )
+                                : survey[header.key]
+                              : "--"}
                           </TableCell>
-                        );
-                      })
-                    ) : (
-                      // Render default cells
-                      <>
-                        <TableCell className="text-gray-300 font-medium">
-                          {survey.bitDepth.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {(
-                            survey.measuredDepth ||
-                            survey.bitDepth - (survey.sensorOffset || 0)
-                          ).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {(survey.sensorOffset || 0).toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {survey.inclination.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {survey.azimuth.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {survey.toolFace.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {(() => {
-                            // Calculate TVD - Measured Depth * cos(inclination)
-                            const md =
-                              survey.measuredDepth ||
-                              survey.bitDepth - (survey.sensorOffset || 0);
-                            const tvd =
-                              md *
-                              Math.cos((survey.inclination * Math.PI) / 180);
-                            return tvd.toFixed(2);
-                          })()}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {(() => {
-                            // Calculate MD (if not provided)
-                            const md =
-                              survey.measuredDepth ||
-                              survey.bitDepth - (survey.sensorOffset || 0);
-                            // Calculate horizontal distance
-                            const horizontalDistance =
-                              md *
-                              Math.sin((survey.inclination * Math.PI) / 180);
-                            // Calculate NS component (North is positive)
-                            const ns =
-                              horizontalDistance *
-                              Math.cos((survey.azimuth * Math.PI) / 180);
-                            return ns.toFixed(2);
-                          })()}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {(() => {
-                            // Calculate MD (if not provided)
-                            const md =
-                              survey.measuredDepth ||
-                              survey.bitDepth - (survey.sensorOffset || 0);
-                            // Calculate horizontal distance
-                            const horizontalDistance =
-                              md *
-                              Math.sin((survey.inclination * Math.PI) / 180);
-                            // Calculate EW component (East is positive)
-                            const ew =
-                              horizontalDistance *
-                              Math.sin((survey.azimuth * Math.PI) / 180);
-                            return ew.toFixed(2);
-                          })()}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {survey.bTotal.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {survey.aTotal.toFixed(3)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {survey.dip.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {survey.toolTemp.toFixed(1)}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {(() => {
-                            // Calculate MD (if not provided)
-                            const md =
-                              survey.measuredDepth ||
-                              survey.bitDepth - (survey.sensorOffset || 0);
-                            // Calculate TVD
-                            const tvd =
-                              md *
-                              Math.cos((survey.inclination * Math.PI) / 180);
-                            // Calculate horizontal distance
-                            const horizontalDistance =
-                              md *
-                              Math.sin((survey.inclination * Math.PI) / 180);
-                            // Calculate NS/EW components
-                            const ns =
-                              horizontalDistance *
-                              Math.cos((survey.azimuth * Math.PI) / 180);
-                            const ew =
-                              horizontalDistance *
-                              Math.sin((survey.azimuth * Math.PI) / 180);
-
-                            // Calculate above/below based on target line (simplified)
-                            // Positive means above target, negative means below
-                            const aboveBelow = (ns * 0.8 - tvd * 0.2).toFixed(
-                              2,
-                            );
-                            const prefix =
-                              parseFloat(aboveBelow) >= 0 ? "+" : "";
-                            return `${prefix}${aboveBelow}`;
-                          })()}
-                        </TableCell>
-                        <TableCell className="text-gray-300">
-                          {(() => {
-                            // Calculate MD (if not provided)
-                            const md =
-                              survey.measuredDepth ||
-                              survey.bitDepth - (survey.sensorOffset || 0);
-                            // Calculate TVD
-                            const tvd =
-                              md *
-                              Math.cos((survey.inclination * Math.PI) / 180);
-                            // Calculate horizontal distance
-                            const horizontalDistance =
-                              md *
-                              Math.sin((survey.inclination * Math.PI) / 180);
-                            // Calculate NS/EW components
-                            const ns =
-                              horizontalDistance *
-                              Math.cos((survey.azimuth * Math.PI) / 180);
-                            const ew =
-                              horizontalDistance *
-                              Math.sin((survey.azimuth * Math.PI) / 180);
-
-                            // Calculate left/right based on target line (simplified)
-                            // Positive means right of target, negative means left
-                            const leftRight = (ew * 0.8 - tvd * 0.1).toFixed(2);
-                            const prefix =
-                              parseFloat(leftRight) >= 0 ? "+" : "";
-                            return `${prefix}${leftRight}`;
-                          })()}
-                        </TableCell>
-                      </>
-                    )}
+                        ))}
                     <TableCell>
                       <Badge
                         variant="outline"
@@ -668,7 +487,11 @@ const SurveyTable = ({
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={11}
+                    colSpan={
+                      dynamicHeaders?.originalHeaders.length
+                        ? dynamicHeaders.originalHeaders.length + 3
+                        : 18
+                    }
                     className="h-24 text-center text-gray-500"
                   >
                     No surveys found

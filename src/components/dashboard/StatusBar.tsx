@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Drill } from "lucide-react";
+import { Drill, PlugZap } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
 import { useSurveys } from "@/context/SurveyContext";
 import ConnectionStatus from "./status/ConnectionStatus";
 import WellInfo from "./status/WellInfo";
 import SurveyData from "./status/SurveyData";
+import { Button } from "@/components/ui/button";
 
 interface StatusBarProps {
   wellName?: string;
@@ -17,11 +18,13 @@ const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
     witsData,
     lastUpdateTime,
     connectionConfig,
+    disconnect,
   } = useWits();
   const { surveys } = useSurveys();
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [pulseIndicator, setPulseIndicator] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   // Get the latest survey data (sorted by timestamp)
   const latestSurvey =
@@ -104,6 +107,12 @@ const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
       ? "survey"
       : "wits";
 
+  const handleDisconnect = () => {
+    setDisconnecting(true);
+    disconnect();
+    setTimeout(() => setDisconnecting(false), 1000);
+  };
+
   return (
     <div className="w-full bg-gray-950 border-b border-gray-800 px-4 py-1 flex items-center justify-between text-xs">
       <div className="flex items-center space-x-4">
@@ -160,6 +169,19 @@ const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
         </div>
 
         <div className="text-gray-500">{currentTime.toLocaleTimeString()}</div>
+
+        {isConnected && (
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-6 px-2 bg-red-600 hover:bg-red-700 text-white"
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+          >
+            <PlugZap className="h-3 w-3 mr-1" />
+            {disconnecting ? "Disconnecting..." : "Disconnect"}
+          </Button>
+        )}
       </div>
     </div>
   );

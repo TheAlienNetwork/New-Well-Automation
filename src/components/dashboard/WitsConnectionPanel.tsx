@@ -92,7 +92,7 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
     }
   }, []);
 
-  // Update connection status indicators
+  // Update connection status indicators with longer timeout
   useEffect(() => {
     let dataTimeoutTimer: NodeJS.Timeout | null = null;
 
@@ -101,7 +101,7 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
         if (isConnected && !isReceiving) {
           setLastError("Connected but not receiving data. Check data source.");
         }
-      }, 10000);
+      }, 180000); // Significantly increased timeout to 180 seconds
     }
 
     return () => {

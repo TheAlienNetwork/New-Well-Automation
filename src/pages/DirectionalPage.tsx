@@ -1063,6 +1063,19 @@ const DirectionalPage = () => {
                   />
                 </div>
               </div>
+
+              {/* Survey Table */}
+              <div className="mt-6">
+                <SurveyTable
+                  surveys={surveys || []}
+                  onEditSurvey={() => {}}
+                  onDeleteSurvey={() => {}}
+                  onExportSurveys={() => {}}
+                  onSelectSurveys={() => {}}
+                  selectedSurveys={[]}
+                  onEmailSurveys={() => {}}
+                />
+              </div>
             </div>
           </div>
         </div>

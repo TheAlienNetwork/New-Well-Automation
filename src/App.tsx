@@ -15,7 +15,7 @@ import { SurveyProvider } from "./context/SurveyContext";
 
 function App() {
   return (
-    <Suspense fallback={<p>Loading...</p>}>
+    <Suspense fallback={<div>Loading...</div>}>
       <UserProvider>
         <SurveyProvider>
           <WitsProvider>

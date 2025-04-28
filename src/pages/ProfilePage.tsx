@@ -253,7 +253,25 @@ ${profileData.emailSignature}
       <div className="container mx-auto px-4 py-6">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">User Profile</h1>
-          {activeTab === "profile" && <></>}
+          {activeTab === "profile" && (
+            <Button
+              variant="outline"
+              className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+              onClick={() => setIsEditing(!isEditing)}
+            >
+              {isEditing ? (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Cancel
+                </>
+              ) : (
+                <>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Profile
+                </>
+              )}
+            </Button>
+          )}
         </div>
 
         <Tabs

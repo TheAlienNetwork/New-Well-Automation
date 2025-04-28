@@ -148,6 +148,12 @@ export const launchOutlookDraft = async (
   content: { subject: string; htmlBody: string; attachments: Blob[] },
   recipients: string[] = [],
   ccRecipients: string[] = [],
+  fileAttachments: {
+    name: string;
+    path: string;
+    type: string;
+    size: string;
+  }[] = [],
 ): Promise<void> => {
   try {
     // Method 1: Office JS API (best for Outlook desktop)
@@ -157,25 +163,40 @@ export const launchOutlookDraft = async (
         cc: ccRecipients,
         subject: content.subject,
         htmlBody: content.htmlBody,
-        attachments: content.attachments.map((blob, index) => ({
-          type: Office.MailboxEnums.AttachmentType.File,
-          name: `SurveyPlot_${index + 1}.png`,
-          content: URL.createObjectURL(blob),
-        })),
+        attachments: [
+          ...content.attachments.map((blob, index) => ({
+            type: Office.MailboxEnums.AttachmentType.File,
+            name: `SurveyPlot_${index + 1}.png`,
+            content: URL.createObjectURL(blob),
+          })),
+          ...fileAttachments.map((file) => ({
+            type: Office.MailboxEnums.AttachmentType.File,
+            name: file.name,
+            path: file.path,
+          })),
+        ],
       });
       return;
     }
 
-    // Method 2: MS Protocol URL (works when Outlook is default client)
-    const outlookProtocolUrl = `outlook:compose?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&to=${recipients.join(";")}&cc=${ccRecipients.join(";")}`;
-    window.location.href = outlookProtocolUrl;
+    // Method 2: Use Outlook Web App URL with deep linking
+    // This will open Outlook Web App with a pre-populated draft
+    const outlookWebUrl = `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&to=${encodeURIComponent(recipients.join(";"))}`;
+    window.open(outlookWebUrl, "_blank");
 
-    // Fallback after a delay if protocol handler doesn't work
+    // Method 3: MS Protocol URL as fallback (works when Outlook is default client)
+    // Note: Protocol URL doesn't support file attachments directly
     setTimeout(() => {
-      // Method 3: Basic mailto with HTML
+      const outlookProtocolUrl = `outlook:compose?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&to=${recipients.join(";")}&cc=${ccRecipients.join(";")}`;
+      window.location.href = outlookProtocolUrl;
+    }, 1000);
+
+    // Final fallback after a delay if protocol handler doesn't work
+    setTimeout(() => {
+      // Method 4: Basic mailto with HTML
       const mailtoUrl = `mailto:${recipients.join(";")}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&cc=${ccRecipients.join(";")}`;
       window.location.href = mailtoUrl;
-    }, 500);
+    }, 2000);
   } catch (error) {
     console.error("Error launching Outlook draft:", error);
     // Final fallback
@@ -275,30 +296,54 @@ export const createOutlookEmailWithSurveyData = async (
     previewElement?: HTMLElement | null;
     recipients?: string[];
     ccRecipients?: string[];
+    fileAttachments?: {
+      name: string;
+      path: string;
+      type: string;
+      size: string;
+    }[];
   } = {},
 ) => {
-  // Capture preview image if element is provided
-  const imageBlob = options.previewElement
-    ? await captureEmailPreview(options.previewElement)
-    : null;
+  try {
+    // Generate email content
+    const emailContentObj = generateOutlookDraftContent(
+      selectedSurveys,
+      surveys,
+      wellInfo,
+      witsData,
+      options.includeCurveData,
+      options.includeTargetLineStatus,
+      options.targetLineData,
+      options.includeGammaPlot,
+      null,
+    );
 
-  // Generate email content
-  const emailContent = generateOutlookDraftContent(
-    selectedSurveys,
-    surveys,
-    wellInfo,
-    witsData,
-    options.includeCurveData,
-    options.includeTargetLineStatus,
-    options.targetLineData,
-    options.includeGammaPlot,
-    imageBlob,
-  );
+    // Create email subject
+    const subject = `Survey Report - Well ${wellInfo.wellName} - ${wellInfo.rigName}`;
 
-  // Launch Outlook draft
-  await launchOutlookDraft(
-    emailContent,
-    options.recipients || [],
-    options.ccRecipients || [],
-  );
+    // Remove file attachment information from the HTML body
+    let htmlBody = emailContentObj.htmlBody;
+    if (options.fileAttachments && options.fileAttachments.length > 0) {
+      // Remove the attachments section from the HTML body
+      htmlBody = htmlBody.replace(
+        /<div>\s*<h4>Attachments<\/h4>[\s\S]*?<\/div>/g,
+        "",
+      );
+    }
+
+    // Launch Outlook draft with HTML content and file attachments
+    await launchOutlookDraft(
+      {
+        subject,
+        htmlBody,
+        attachments: [], // No image attachments, we're using the HTML directly
+      },
+      options.recipients || [],
+      options.ccRecipients || [],
+      options.fileAttachments || [],
+    );
+  } catch (error) {
+    console.error("Error creating Outlook email with survey data:", error);
+    throw error;
+  }
 };

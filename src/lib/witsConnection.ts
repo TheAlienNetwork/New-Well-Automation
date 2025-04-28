@@ -29,6 +29,7 @@ class WitsConnection {
   private connecting: boolean = false;
   private socket: any = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
   private reconnectAttempts: number = 0;
   private connectionCallbacks: ConnectionCallback[] = [];
   private dataCallbacks: DataCallback[] = [];
@@ -45,11 +46,11 @@ class WitsConnection {
   constructor(options?: WitsConnectionOptions) {
     this.isBrowser = typeof window !== "undefined";
     this.options = {
-      port: this.isBrowser ? 80 : 4000,
+      port: this.isBrowser ? 80 : 5000,
       host: "localhost",
       protocol: this.isBrowser ? "ws" : "tcp",
-      reconnectInterval: 5000,
-      maxReconnectAttempts: 10,
+      reconnectInterval: 10000,
+      maxReconnectAttempts: 100,
       wsEndpoint: "/wits",
       noralisMode: false,
       witsVersion: "0",
@@ -98,16 +99,37 @@ class WitsConnection {
       this.reconnectTimer = null;
     }
 
+    // Clear health check interval
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
     if (this.socket) {
-      if (this.isBrowser) {
-        this.socket.close();
-      } else {
-        if (this.options.protocol === "udp") {
+      try {
+        if (this.isBrowser) {
           this.socket.close();
         } else {
-          this.socket.end();
-          this.socket.destroy();
+          if (this.options.protocol === "udp") {
+            this.socket.close();
+          } else {
+            // Send a clean disconnect message if possible
+            try {
+              if (this.socket.writable) {
+                this.socket.write(
+                  JSON.stringify({ command: "disconnect" }) +
+                    this.options.delimiter,
+                );
+              }
+            } catch (e) {
+              console.warn("Error sending disconnect message", e);
+            }
+            this.socket.end();
+            this.socket.destroy();
+          }
         }
+      } catch (err) {
+        console.warn("Error during socket disconnect:", err);
       }
       this.socket = null;
     }
@@ -115,7 +137,9 @@ class WitsConnection {
     this.connected = false;
     this.connecting = false;
     this.buffer = "";
+    this.reconnectAttempts = 0; // Reset reconnect attempts on manual disconnect
     this.notifyConnectionCallbacks(false);
+    this.notifyErrorCallbacks(null); // Clear any error messages
   }
 
   public isConnected(): boolean {
@@ -188,7 +212,10 @@ class WitsConnection {
 
     const isSecure = window.location.protocol === "https:";
     const wsProtocol = isSecure ? "wss://" : "ws://";
-    let wsUrl = `${wsProtocol}${this.options.host}:${this.options.port}${this.options.wsEndpoint}`;
+    const host = this.options.host || "localhost";
+    const port = this.options.port || 80;
+    const endpoint = this.options.wsEndpoint || "/wits";
+    let wsUrl = `${wsProtocol}${host}:${port}${endpoint}`;
 
     if (this.options.noralisMode) {
       wsUrl += `?protocol=tcp&noralis=true&version=${this.options.witsVersion}`;
@@ -198,7 +225,7 @@ class WitsConnection {
       if (!this.connected) {
         this.handleConnectionError(new Error("WebSocket connection timeout"));
       }
-    }, 10000);
+    }, 20000); // Increased timeout to 20 seconds
 
     this.socket = new WebSocket(wsUrl);
 
@@ -233,7 +260,7 @@ class WitsConnection {
         this.socket?.destroy();
         this.handleConnectionError(new Error("Connection timeout"));
       }
-    }, 15000);
+    }, 60000); // Further increased timeout to 60 seconds
 
     switch (this.options.protocol) {
       case "tcp":
@@ -262,9 +289,10 @@ class WitsConnection {
           this.handleConnectionError(err);
         });
 
-        // TCP optimizations
-        this.socket.setKeepAlive(true, 5000);
-        this.socket.setNoDelay(true);
+        // TCP optimizations with more resilient settings
+        this.socket.setKeepAlive(true, 120000); // Significantly increased keepalive interval
+        this.socket.setNoDelay(true); // Disable Nagle's algorithm for immediate data transmission
+        this.socket.setTimeout(300000); // Significantly increased socket timeout
         break;
 
       case "udp":
@@ -556,22 +584,32 @@ class WitsConnection {
     this.connected = false;
     this.connecting = false;
     this.notifyConnectionCallbacks(false);
-    this.notifyErrorCallbacks(`Connection error: ${error.message}`);
+
+    // Don't show ECONNREFUSED errors to the user, just show a generic message
+    const errorMessage = error.message.includes("ECONNREFUSED")
+      ? "Connection refused - WITS server not available"
+      : `Connection error: ${error.message}`;
+
+    this.notifyErrorCallbacks(errorMessage);
     this.attemptReconnect();
   }
 
   private monitorConnectionHealth(): void {
-    if (this.reconnectTimer) {
-      clearInterval(this.reconnectTimer as unknown as number);
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
     }
 
-    const healthCheck = setInterval(() => {
+    this.healthCheckInterval = setInterval(() => {
       if (!this.connected) {
-        clearInterval(healthCheck);
+        if (this.healthCheckInterval) {
+          clearInterval(this.healthCheckInterval);
+          this.healthCheckInterval = null;
+        }
         return;
       }
 
-      const dataTimeout = this.options.noralisMode ? 60000 : 30000;
+      const dataTimeout = this.options.noralisMode ? 600000 : 300000; // Significantly increased timeout
       if (Date.now() - this.lastDataTime > dataTimeout) {
         this.notifyErrorCallbacks(
           `No data received for ${dataTimeout / 1000} seconds`,
@@ -580,19 +618,26 @@ class WitsConnection {
         this.attemptReconnect();
       }
 
-      // Send keepalive if needed
-      if (this.options.noralisMode && this.socket && !this.isBrowser) {
-        this.socket.write(this.options.delimiter);
-      } else if (this.isBrowser && this.socket?.readyState === WebSocket.OPEN) {
-        this.socket.send(JSON.stringify({ command: "ping" }));
+      // Send keepalive if needed - less frequently to avoid connection resets
+      try {
+        if (this.options.noralisMode && this.socket && !this.isBrowser) {
+          this.socket.write(this.options.delimiter);
+        } else if (
+          this.isBrowser &&
+          this.socket?.readyState === WebSocket.OPEN
+        ) {
+          this.socket.send(JSON.stringify({ command: "ping" }));
+        }
+      } catch (error) {
+        console.warn("Error sending keepalive:", error);
       }
-    }, 10000);
+    }, 120000); // Significantly increased interval to 120 seconds
   }
 
   private attemptReconnect(): void {
     if (this.reconnectTimer || this.connecting || this.connected) return;
 
-    const maxAttempts = this.options.maxReconnectAttempts || 10;
+    const maxAttempts = this.options.maxReconnectAttempts || 100;
     if (this.reconnectAttempts >= maxAttempts) {
       this.notifyErrorCallbacks(
         `Maximum reconnect attempts (${maxAttempts}) reached`,
@@ -601,9 +646,9 @@ class WitsConnection {
     }
 
     this.reconnectAttempts++;
-    const reconnectInterval = this.options.reconnectInterval || 5000;
-    const backoffFactor = Math.min(this.reconnectAttempts, 5);
-    const adjustedInterval = reconnectInterval * (1 + backoffFactor * 0.5);
+    const reconnectInterval = this.options.reconnectInterval || 10000;
+    // Use a fixed interval without backoff to maintain consistent reconnection attempts
+    const adjustedInterval = reconnectInterval;
 
     this.notifyErrorCallbacks(
       `Reconnecting (attempt ${this.reconnectAttempts}/${maxAttempts})...`,

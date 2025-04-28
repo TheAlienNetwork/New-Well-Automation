@@ -60,6 +60,17 @@ export interface WitsMappings {
   drilling: WitsMappingItem[];
   directional: WitsMappingItem[];
   calculated: CalculatedMappingItem[];
+  custom?: WitsMappingItem[];
+}
+
+interface WitsmlConfig {
+  url: string;
+  username: string;
+  password: string;
+  wellUid: string;
+  wellboreUid: string;
+  logUid: string;
+  pollingInterval: number;
 }
 
 interface ConnectionConfigType {
@@ -67,13 +78,20 @@ interface ConnectionConfigType {
   port: number;
   protocol: string;
   autoConnect: boolean;
+  witsmlConfig: WitsmlConfig;
+  connectionType: "wits" | "witsml";
 }
 
 interface WitsContextType {
   isConnected: boolean;
   isReceiving: boolean;
   witsData: WitsDataType;
-  connect: () => void;
+  connect: (
+    host?: string,
+    port?: number,
+    protocol?: string,
+    additionalOptions?: any,
+  ) => void;
   disconnect: () => void;
   lastError: string | null;
   clearError: () => void;
@@ -83,6 +101,7 @@ interface WitsContextType {
   witsMappings: WitsMappings;
   updateWitsMappings: (mappings: WitsMappings) => boolean;
   lastUpdateTime: Date;
+  connectionType?: "wits" | "witsml";
 }
 
 const defaultWitsData: WitsDataType = {
@@ -143,10 +162,20 @@ const defaultWitsMappings: WitsMappings = {
 };
 
 const defaultConnectionConfig: ConnectionConfigType = {
-  ipAddress: "127.0.0.1",
-  port: 4000,
+  ipAddress: "localhost",
+  port: 5000,
   protocol: "TCP",
   autoConnect: false,
+  witsmlConfig: {
+    url: "",
+    username: "",
+    password: "",
+    wellUid: "",
+    wellboreUid: "",
+    logUid: "",
+    pollingInterval: 10000,
+  },
+  connectionType: "wits",
 };
 
 const WitsContext = createContext<WitsContextType | undefined>(undefined);
@@ -297,8 +326,8 @@ export function WitsProvider({ children }: { children: ReactNode }) {
       host: connectHost,
       port: connectPort,
       protocol: connectProtocol,
-      reconnectInterval: 5000,
-      maxReconnectAttempts: 10,
+      reconnectInterval: 30000, // Significantly increased reconnect interval
+      maxReconnectAttempts: 50, // Significantly increased max reconnect attempts
     };
 
     // Add additional options for serial connections
@@ -341,6 +370,7 @@ export function WitsProvider({ children }: { children: ReactNode }) {
         witsMappings,
         updateWitsMappings,
         lastUpdateTime,
+        connectionType: connectionConfig.connectionType,
       }}
     >
       {children}

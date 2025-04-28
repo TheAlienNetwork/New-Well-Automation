@@ -1681,14 +1681,6 @@ const SurveyEmailSettings = ({
               </div>
               <div className="flex flex-col gap-2">
                 <Button
-                  variant="outline"
-                  className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-                  onClick={copyEmailPreviewToClipboard}
-                >
-                  <Copy className="h-4 w-4 mr-2" />
-                  Copy to Clipboard
-                </Button>
-                <Button
                   className="bg-blue-600 hover:bg-blue-700 text-white"
                   onClick={handleSendOutlookEmail}
                 >
