@@ -14,6 +14,7 @@ import {
   useEmailRecipients,
   PredefinedGroup,
 } from "@/hooks/useEmailRecipients";
+import CurveDataWidget from "@/components/dashboard/CurveDataWidget";
 import {
   Mail,
   Plus,
@@ -37,6 +38,7 @@ import {
   Copy,
   UserPlus,
   UserCheck,
+  Camera,
 } from "lucide-react";
 import html2canvas from "html2canvas";
 
@@ -67,8 +69,8 @@ const SurveyEmailSettings = ({
   ],
   onUpdateRecipients = () => {},
   surveys = [],
-  wellName = "Alpha-123",
-  rigName = "Precision Drilling #42",
+  wellName = "",
+  rigName = "",
 }: SurveyEmailSettingsProps) => {
   const { surveys: globalSurveys } = useSurveys();
   const { witsData, isConnected, isReceiving } = useWits();
@@ -104,6 +106,9 @@ const SurveyEmailSettings = ({
   const [includeFullSurveyData, setIncludeFullSurveyData] = useState(false);
   const [includeSurveyAnalytics, setIncludeSurveyAnalytics] = useState(false);
   const [includeTargetLineStatus, setIncludeTargetLineStatus] = useState(false);
+  const [useScreenshotInEmail, setUseScreenshotInEmail] = useState(false);
+  const [emailPreviewScreenshot, setEmailPreviewScreenshot] =
+    useState<Blob | null>(null);
   const [latestSurvey, setLatestSurvey] = useState<any>({});
   const [attachmentFolder, setAttachmentFolder] = useState("");
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
@@ -294,11 +299,73 @@ const SurveyEmailSettings = ({
       });
   };
 
-  const handleSendOutlookEmail = () => {
-    // Import dynamically to avoid circular dependencies
-    import("@/utils/emailUtils")
-      .then(({ generateEmailContent, createMailtoUrl }) => {
-        // Get well info from props or localStorage
+  const handleSendOutlookEmail = async () => {
+    try {
+      // If using screenshot and no screenshot exists yet, capture one
+      if (useScreenshotInEmail && !emailPreviewScreenshot) {
+        await captureEmailPreviewScreenshot();
+      }
+
+      // Import dynamically to avoid circular dependencies
+      const {
+        generateEmailContent,
+        createMailtoUrl,
+        createOutlookEmailWithSurveyData,
+      } = await import("@/utils/emailUtils");
+
+      // Get well info from props or localStorage
+      const wellInfoData = {
+        wellName:
+          wellName || localStorage.getItem("wellName") || "Unknown Well",
+        rigName: rigName || localStorage.getItem("rigName") || "Unknown Rig",
+        sensorOffset: parseFloat(localStorage.getItem("sensorOffset") || "0"),
+      };
+
+      // Use the actual survey data
+      const surveysToUse = globalSurveys.length > 0 ? globalSurveys : surveys;
+      const selectedSurveyIds = [latestSurvey.id].filter(Boolean);
+
+      // Always use the enhanced email creation method
+      await createOutlookEmailWithSurveyData(
+        selectedSurveyIds,
+        surveysToUse,
+        wellInfoData,
+        witsData,
+        {
+          includeCurveData,
+          includeTargetLineStatus,
+          targetLineData,
+          includeGammaPlot,
+          includeSurveyAnalytics,
+          includeFullSurveyData,
+          recipients: emailRecipients,
+          // Only include screenshot if the toggle is on and we have a screenshot
+          emailPreviewImage: useScreenshotInEmail
+            ? emailPreviewScreenshot
+            : null,
+          // Include file attachments if any
+          fileAttachments: attachments.length > 0 ? attachments : [],
+          ccRecipients: [],
+        },
+      );
+
+      toast({
+        title: "Email Created",
+        description: "Email draft created with all selected content",
+      });
+    } catch (error) {
+      console.error("Failed to send email:", error);
+      toast({
+        title: "Email Generation Failed",
+        description: "Failed to generate email content. Please try again.",
+        variant: "destructive",
+      });
+
+      // Fallback to plain text email
+      try {
+        const { generateEmailContent, createMailtoUrl } = await import(
+          "@/utils/emailUtils"
+        );
         const wellInfoData = {
           wellName:
             wellName || localStorage.getItem("wellName") || "Unknown Well",
@@ -306,11 +373,9 @@ const SurveyEmailSettings = ({
           sensorOffset: parseFloat(localStorage.getItem("sensorOffset") || "0"),
         };
 
-        // Use the actual survey data
         const surveysToUse = globalSurveys.length > 0 ? globalSurveys : surveys;
         const selectedSurveyIds = [latestSurvey.id].filter(Boolean);
 
-        // Generate plain text email content
         const emailContent = generateEmailContent(
           selectedSurveyIds,
           surveysToUse,
@@ -320,49 +385,28 @@ const SurveyEmailSettings = ({
           includeTargetLineStatus,
           targetLineData,
           includeGammaPlot,
+          includeSurveyAnalytics,
+          includeFullSurveyData,
         );
 
         const emailSubject = `Survey Report - Well ${wellInfoData.wellName} - ${wellInfoData.rigName}`;
         const emailTo = emailRecipients.join(",");
 
-        try {
-          // Create mailto URL with the generated content
-          const mailtoUrl = createMailtoUrl(
-            emailContent,
-            emailSubject,
-            emailTo,
-          );
-          window.location.href = mailtoUrl;
-        } catch (error) {
-          console.error("Error opening email client:", error);
-          alert(
-            "Could not open email client. Please copy the content and create an email manually.",
-          );
-
-          // Offer to copy content to clipboard as fallback
-          const textarea = document.createElement("textarea");
-          textarea.value = emailContent;
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand("copy");
-          document.body.removeChild(textarea);
-          alert("Email content copied to clipboard");
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to load email utilities:", error);
-        alert("Failed to generate email content. Please try again.");
-      });
+        const mailtoUrl = createMailtoUrl(emailContent, emailSubject, emailTo);
+        window.location.href = mailtoUrl;
+      } catch (fallbackError) {
+        console.error("Fallback email method also failed:", fallbackError);
+      }
+    }
   };
 
-  const copyEmailPreviewToClipboard = async () => {
+  const captureEmailPreviewScreenshot = async () => {
     try {
       if (!emailPreviewRef.current) return;
 
       // Import the utility function dynamically
-      const { captureEmailPreview, copyImageToClipboard } = await import(
-        "@/utils/emailUtils"
-      );
+      const { captureEmailPreview, copyImageToClipboard, blobToBase64 } =
+        await import("@/utils/emailUtils");
 
       // Capture the email preview as an image
       const blob = await captureEmailPreview(emailPreviewRef.current);
@@ -372,17 +416,62 @@ const SurveyEmailSettings = ({
         return;
       }
 
+      // Store the screenshot blob
+      setEmailPreviewScreenshot(blob);
+
+      // Copy to clipboard automatically
+      await copyImageToClipboard(blob);
+
+      // Show success message
+      toast({
+        title: "Screenshot Captured",
+        description: useScreenshotInEmail
+          ? "Screenshot copied to clipboard and will be used in the email draft"
+          : "Screenshot copied to clipboard and ready to use",
+      });
+
+      return blob;
+    } catch (error) {
+      console.error("Error capturing email preview:", error);
+      toast({
+        title: "Screenshot Failed",
+        description: "Failed to capture email preview as image",
+        variant: "destructive",
+      });
+      return null;
+    }
+  };
+
+  const copyEmailPreviewToClipboard = async () => {
+    try {
+      const blob = await captureEmailPreviewScreenshot();
+      if (!blob) return;
+
+      // Import the utility function dynamically
+      const { copyImageToClipboard } = await import("@/utils/emailUtils");
+
       // Copy the image to clipboard
       const success = await copyImageToClipboard(blob);
 
       if (success) {
-        alert("Email preview image copied to clipboard");
+        toast({
+          title: "Copied to Clipboard",
+          description: "Email preview image copied to clipboard",
+        });
       } else {
-        alert("Please use the image that opened in a new window");
+        toast({
+          title: "Manual Copy Required",
+          description: "Please use the image that opened in a new window",
+          variant: "warning",
+        });
       }
     } catch (error) {
-      console.error("Error capturing email preview:", error);
-      alert("Failed to capture email preview as image");
+      console.error("Error copying to clipboard:", error);
+      toast({
+        title: "Copy Failed",
+        description: "Failed to copy email preview to clipboard",
+        variant: "destructive",
+      });
     }
   };
 
@@ -412,10 +501,14 @@ const SurveyEmailSettings = ({
           ? "#fbbf24"
           : "#f87171";
 
+    // Use the wellName and rigName from props
+    const displayWellName = wellName || "Unknown Well";
+    const displayRigName = rigName || "Unknown Rig";
+
     let html = `
       <div>
-        <h3>Survey Report - Well ${wellName}</h3>
-        <p>This is an automated survey report for ${rigName}</p>
+        <h3>Survey Report - Well ${displayWellName}</h3>
+        <p>This is an automated survey report for ${displayRigName}</p>
         <p>Report Generated: ${new Date().toLocaleString()}</p>
       </div>
       <div>
@@ -1141,10 +1234,11 @@ const SurveyEmailSettings = ({
             >
               <div className="mb-4">
                 <h3 className="text-lg font-medium text-gray-300 mb-1">
-                  Survey Report - Well Alpha-123
+                  Survey Report - Well {wellName || "Unknown Well"}
                 </h3>
                 <p className="text-sm text-gray-500">
-                  This is a preview of the email that will be sent
+                  This is a preview of the email that will be sent for{" "}
+                  {rigName || "Unknown Rig"}
                 </p>
               </div>
 
@@ -1185,54 +1279,23 @@ const SurveyEmailSettings = ({
                     <h4 className="text-sm font-medium text-gray-300 mb-2">
                       Curve Data
                     </h4>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="p-2 bg-gray-800/50 rounded-md flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-cyan-900/30 flex items-center justify-center">
-                          <Zap className="h-4 w-4 text-cyan-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Motor Yield</p>
-                          <p className="text-sm font-medium text-cyan-400">
-                            {witsData.motorYield.toFixed(2)}°/100ft
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="p-2 bg-gray-800/50 rounded-md flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-yellow-900/30 flex items-center justify-center">
-                          <Ruler className="h-4 w-4 text-yellow-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Dogleg Needed</p>
-                          <p className="text-sm font-medium text-yellow-400">
-                            {witsData.doglegNeeded.toFixed(2)}°/100ft
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="p-2 bg-gray-800/50 rounded-md flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-green-900/30 flex items-center justify-center">
-                          <RotateCw className="h-4 w-4 text-green-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Slide Seen</p>
-                          <p className="text-sm font-medium text-green-400">
-                            {witsData.slideSeen.toFixed(2)}°
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="p-2 bg-gray-800/50 rounded-md flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-blue-900/30 flex items-center justify-center">
-                          <RotateCw className="h-4 w-4 text-blue-400" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">Slide Ahead</p>
-                          <p className="text-sm font-medium text-blue-400">
-                            {witsData.slideAhead.toFixed(2)}°
-                          </p>
-                        </div>
-                      </div>
+                    <div className="h-[200px]">
+                      <CurveDataWidget
+                        motorYield={witsData.motorYield}
+                        doglegNeeded={witsData.doglegNeeded}
+                        slideSeen={witsData.slideSeen}
+                        slideAhead={witsData.slideAhead}
+                        projectedInc={witsData.projectedInc}
+                        projectedAz={witsData.projectedAz}
+                        isRealtime={isReceiving}
+                        slideDistance={30}
+                        bendAngle={2.0}
+                        bitToBendDistance={5}
+                        targetInc={90}
+                        targetAz={270}
+                        distance={100}
+                        wellInfo={{ wellName, rigName, sensorOffset: 0 }}
+                      />
                     </div>
                   </div>
                 )}
@@ -1680,13 +1743,37 @@ const SurveyEmailSettings = ({
                 </div>
               </div>
               <div className="flex flex-col gap-2">
-                <Button
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={handleSendOutlookEmail}
-                >
-                  <Send className="h-4 w-4 mr-2" />
-                  Send Email
-                </Button>
+                <div className="flex items-center gap-2 mb-2">
+                  <Switch
+                    id="use-screenshot"
+                    checked={useScreenshotInEmail}
+                    onCheckedChange={setUseScreenshotInEmail}
+                    className="data-[state=checked]:bg-blue-600 mr-2"
+                  />
+                  <Label
+                    htmlFor="use-screenshot"
+                    className="text-sm text-gray-300"
+                  >
+                    Use Screenshot in Email
+                  </Label>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
+                    onClick={captureEmailPreviewScreenshot}
+                  >
+                    <Camera className="h-4 w-4 mr-2" />
+                    Capture Screenshot
+                  </Button>
+                  <Button
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    onClick={handleSendOutlookEmail}
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    Send Email
+                  </Button>
+                </div>
               </div>
             </div>
           </TabsContent>

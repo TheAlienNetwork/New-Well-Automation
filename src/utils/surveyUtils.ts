@@ -253,6 +253,57 @@ export const isSurveyHeaderLine = (line: string): boolean => {
 };
 
 /**
+ * Detect specific header and data rows in a CSV file
+ * This function helps with files that have a known structure
+ * like headers at row 68 and data starting at row 70
+ */
+export const detectSpecificFileFormat = (
+  content: string,
+): { headerRowIndex: number; dataStartRow: number } | null => {
+  const lines = content.split("\n");
+
+  // Check if the file has enough lines for the expected format
+  if (lines.length < 71) {
+    // Need at least 71 lines to have data at row 70
+    return null;
+  }
+
+  // Check if line 68 (index 67) looks like a header row
+  const potentialHeaderRow = lines[67];
+  if (!potentialHeaderRow) return null;
+
+  // Check if the potential header row contains comma-separated values
+  // and doesn't look like data (e.g., mostly numbers)
+  const headerParts = potentialHeaderRow.split(",");
+  if (headerParts.length < 3) return null;
+
+  // Check if the header row contains text that looks like column names
+  // and not just numbers
+  const hasTextHeaders = headerParts.some((part) => {
+    const trimmed = part.trim();
+    // Headers typically contain text and not just numbers
+    return trimmed.length > 0 && isNaN(Number(trimmed));
+  });
+
+  if (hasTextHeaders) {
+    // Check if row 70 (index 69) has data that matches the header structure
+    const potentialDataRow = lines[69];
+    if (!potentialDataRow) return null;
+
+    const dataParts = potentialDataRow.split(",");
+    // Data row should have roughly the same number of columns as the header
+    if (Math.abs(dataParts.length - headerParts.length) <= 1) {
+      return {
+        headerRowIndex: 67, // 0-based index for row 68
+        dataStartRow: 69, // 0-based index for row 70
+      };
+    }
+  }
+
+  return null;
+};
+
+/**
  * Parses CSV content into survey data
  */
 export const parseCSVSurveys = (
@@ -305,12 +356,20 @@ export const parseCSVSurveys = (
   const surveys: SurveyData[] = [];
 
   // Start processing from the row after the header row
-  // If the header row contains data (keywords and headers in same row), start from the next row
+  // If specific data start row is provided, use that
+  // Otherwise, if the header row contains data (keywords and headers in same row), start from the next row
   // Otherwise, if it's a pure header row, start from the row after
-  const dataStartRow = isReportFormat ? startRow + 1 : startRow + 1;
-  console.log(`CSV: Starting data processing from row ${dataStartRow}`);
+  const effectiveDataStartRow =
+    dataStartRow !== undefined
+      ? dataStartRow
+      : isReportFormat
+        ? startRow + 1
+        : startRow + 1;
+  console.log(
+    `CSV: Starting data processing from row ${effectiveDataStartRow}`,
+  );
 
-  for (let i = dataStartRow; i < lines.length; i++) {
+  for (let i = effectiveDataStartRow; i < lines.length; i++) {
     const line = lines[i];
     // Skip separator lines or empty lines
     if (line.includes("====") || line.trim().length === 0) continue;

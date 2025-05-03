@@ -21,9 +21,19 @@ import {
 } from "lucide-react";
 import { SurveyData } from "./SurveyPopup";
 import * as surveyUtils from "@/utils/surveyUtils";
+import * as XLSX from "xlsx";
+import {
+  parseDelimitedFile,
+  parseSurveyExcel,
+} from "@/utils/surveyImportUtils";
 
 interface SurveyImportProps {
   onImportSurveys: (surveys: SurveyData[]) => void;
+}
+
+interface DetectedHeader {
+  original: string;
+  mapped: string;
 }
 
 const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
@@ -35,6 +45,7 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
   const [importedSurveys, setImportedSurveys] = useState<SurveyData[]>([]);
   const [selectedSurveys, setSelectedSurveys] = useState<string[]>([]);
   const [importMessage, setImportMessage] = useState("");
+  const [detectedHeaders, setDetectedHeaders] = useState<DetectedHeader[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -43,6 +54,7 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
       setSelectedFile(file);
       setImportStatus("idle");
       setImportMessage("");
+      setDetectedHeaders([]);
     }
   };
 
@@ -60,6 +72,7 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
       setSelectedFile(file);
       setImportStatus("idle");
       setImportMessage("");
+      setDetectedHeaders([]);
     }
   };
 
@@ -69,70 +82,158 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
     setImportStatus("processing");
     setImportMessage("Processing file...");
 
-    // Simulate file processing
-    setTimeout(() => {
-      // Check file extension
-      const fileExt = selectedFile.name.split(".").pop()?.toLowerCase();
-      if (fileExt !== "xlsx" && fileExt !== "xls" && fileExt !== "csv") {
-        setImportStatus("error");
-        setImportMessage(
-          "Invalid file format. Please upload an Excel or CSV file.",
-        );
-        return;
-      }
+    // Process the file based on its extension
+    const fileExt = selectedFile.name.split(".").pop()?.toLowerCase();
+    if (
+      fileExt !== "xlsx" &&
+      fileExt !== "xls" &&
+      fileExt !== "csv" &&
+      fileExt !== "txt"
+    ) {
+      setImportStatus("error");
+      setImportMessage(
+        "Invalid file format. Please upload an Excel, CSV, or TXT file.",
+      );
+      return;
+    }
 
-      // Parse the file to extract survey data
-      // This is a placeholder for actual file parsing logic
-      // In a production environment, this would use proper file parsing libraries
-      const parsedSurveys: SurveyData[] = [];
+    const reader = new FileReader();
 
+    reader.onload = (e) => {
       try {
-        // For CSV files
-        if (fileExt === "csv") {
-          // In production, this would be replaced with actual file reading and parsing
-          // using FileReader API and CSV parsing libraries
-          setImportMessage("Processing CSV file...");
+        let parsedSurveys: any[] = [];
+        let headers: DetectedHeader[] = [];
 
-          // Placeholder for actual file parsing logic
-          // This would be replaced with real CSV parsing in production
+        if (fileExt === "csv" || fileExt === "txt") {
+          // Parse CSV or TXT file
+          const content = e.target?.result as string;
+
+          // Check for specific file format with headers at row 68 and data at row 70
+          const specificFormat = detectSpecificFileFormat(content);
+
+          if (specificFormat) {
+            console.log(
+              `Detected specific file format: header at row ${specificFormat.headerRowIndex + 1}, data starts at row ${specificFormat.dataStartRow + 1}`,
+            );
+            // Use surveyUtils directly for the specific format
+            const wellInfoDefault = {
+              wellName: "Unknown Well",
+              rigName: "Unknown Rig",
+              sensorOffset: 0,
+            };
+            parsedSurveys = surveyUtils.parseCSVSurveys(
+              content,
+              wellInfoDefault,
+              undefined,
+              specificFormat.headerRowIndex,
+              specificFormat.dataStartRow,
+            );
+          } else {
+            // Use the standard parser for other formats
+            parsedSurveys = parseDelimitedFile(content);
+          }
+
+          // Extract detected headers
+          if (parsedSurveys.length > 0) {
+            const firstSurvey = parsedSurveys[0];
+            headers = [
+              { original: "Bit Depth", mapped: "bitDepth" },
+              { original: "Inclination", mapped: "inclination" },
+              { original: "Azimuth", mapped: "azimuth" },
+            ];
+
+            if (firstSurvey.tvd !== null)
+              headers.push({ original: "TVD", mapped: "tvd" });
+            if (firstSurvey.northSouth !== null)
+              headers.push({ original: "NS", mapped: "northSouth" });
+            if (firstSurvey.eastWest !== null)
+              headers.push({ original: "EW", mapped: "eastWest" });
+            if (firstSurvey.gamma !== null)
+              headers.push({ original: "Gamma", mapped: "gamma" });
+          }
+        } else if (fileExt === "xlsx" || fileExt === "xls") {
+          // Parse Excel file
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const excelData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+          parsedSurveys = parseSurveyExcel(excelData as any[][]);
+
+          // Extract detected headers
+          if (parsedSurveys.length > 0) {
+            const firstSurvey = parsedSurveys[0];
+            headers = [
+              { original: "Bit Depth", mapped: "bitDepth" },
+              { original: "Inclination", mapped: "inclination" },
+              { original: "Azimuth", mapped: "azimuth" },
+            ];
+
+            if (firstSurvey.tvd !== null)
+              headers.push({ original: "TVD", mapped: "tvd" });
+            if (firstSurvey.northSouth !== null)
+              headers.push({ original: "NS", mapped: "northSouth" });
+            if (firstSurvey.eastWest !== null)
+              headers.push({ original: "EW", mapped: "eastWest" });
+            if (firstSurvey.gamma !== null)
+              headers.push({ original: "Gamma", mapped: "gamma" });
+          }
         }
-        // For Excel files
-        else if (fileExt === "xlsx" || fileExt === "xls") {
-          setImportMessage("Processing Excel file...");
 
-          // Placeholder for actual Excel file parsing logic
-          // This would be replaced with real Excel parsing in production
-        }
+        // Convert to SurveyData format
+        const surveyData: SurveyData[] = parsedSurveys.map((survey, index) => ({
+          id: `imported-${Date.now()}-${index}`,
+          timestamp: survey.timestamp || new Date().toISOString(),
+          bitDepth: survey.bitDepth || 0,
+          inclination: survey.inclination || 0,
+          azimuth: survey.azimuth || 0,
+          toolFace: 0, // Default value
+          bTotal: 0, // Default value
+          aTotal: 0, // Default value
+          dip: 0, // Default value
+          toolTemp: 0, // Default value
+          qualityCheck: surveyUtils.determineQualityCheck(
+            survey.inclination || 0,
+            survey.azimuth || 0,
+          ),
+        }));
 
-        // If no surveys were parsed, show an error
-        if (parsedSurveys.length === 0) {
+        if (surveyData.length === 0) {
           setImportStatus("error");
           setImportMessage(
             "No valid survey data found in the file. Please check the file format.",
           );
           return;
         }
+
+        setDetectedHeaders(headers);
+        setImportedSurveys(surveyData);
+        setSelectedSurveys(surveyData.map((s) => s.id));
+        setImportStatus("success");
+        setImportMessage(
+          `Successfully processed ${surveyData.length} surveys from ${selectedFile.name}`,
+        );
+        setActiveTab("preview");
       } catch (error) {
         console.error("Error parsing file:", error);
         setImportStatus("error");
-        setImportMessage("Error parsing file. Please check the file format.");
-        return;
+        setImportMessage(
+          `Error parsing file: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
+    };
 
-      // Get the detected headers from the import process
-      const detectedHeaders = surveyUtils.getLastDetectedHeaders();
-      if (detectedHeaders) {
-        console.log("Using detected headers:", detectedHeaders);
-      }
+    reader.onerror = () => {
+      setImportStatus("error");
+      setImportMessage("Error reading file. Please try again.");
+    };
 
-      setImportedSurveys(parsedSurveys);
-      setSelectedSurveys(parsedSurveys.map((s) => s.id));
-      setImportStatus("success");
-      setImportMessage(
-        `Successfully processed ${parsedSurveys.length} surveys from ${selectedFile.name}`,
-      );
-      setActiveTab("preview");
-    }, 1500);
+    if (fileExt === "csv" || fileExt === "txt") {
+      reader.readAsText(selectedFile);
+    } else {
+      reader.readAsArrayBuffer(selectedFile);
+    }
   };
 
   const handleSelectAll = (checked: boolean) => {
@@ -164,6 +265,7 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
     setImportMessage("");
     setImportedSurveys([]);
     setSelectedSurveys([]);
+    setDetectedHeaders([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -249,14 +351,14 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
                 ref={fileInputRef}
                 className="hidden"
                 onChange={handleFileChange}
-                accept=".xlsx,.xls,.csv"
+                accept=".xlsx,.xls,.csv,.txt"
               />
               <Upload className="h-12 w-12 text-gray-500 mx-auto mb-4" />
               <h3 className="text-gray-300 font-medium mb-2">
                 Drag & Drop or Click to Upload
               </h3>
               <p className="text-gray-500 text-sm mb-2">
-                Supported formats: XLSX, XLS, CSV
+                Supported formats: XLSX, XLS, CSV, TXT
               </p>
               {selectedFile && (
                 <div className="mt-4 p-2 bg-gray-800 rounded-md inline-flex items-center gap-2">
@@ -277,6 +379,20 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
                   </Button>
                 </div>
               )}
+            </div>
+
+            <div className="bg-blue-900/20 border border-blue-800 rounded-md p-3 flex items-start gap-2">
+              <Info className="h-5 w-5 mt-0.5 text-blue-400" />
+              <div>
+                <p className="text-blue-300 font-medium">
+                  Dynamic Header Detection
+                </p>
+                <p className="text-blue-200 text-sm">
+                  The system will automatically detect headers like MD, SD, INC,
+                  AZI, TVD, etc. Headers are detected regardless of case or
+                  spacing.
+                </p>
+              </div>
             </div>
 
             {importMessage && (
@@ -318,6 +434,25 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
           <TabsContent value="preview" className="space-y-4">
             {importedSurveys.length > 0 && (
               <>
+                {detectedHeaders.length > 0 && (
+                  <div className="mb-4 p-3 bg-gray-800/50 border border-gray-700 rounded-md">
+                    <h4 className="text-sm font-medium text-gray-300 mb-2">
+                      Detected Headers:
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {detectedHeaders.map((header) => (
+                        <Badge
+                          key={header.mapped}
+                          variant="outline"
+                          className="bg-cyan-900/30 text-cyan-400 border-cyan-800"
+                        >
+                          {header.original} → {header.mapped}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Checkbox

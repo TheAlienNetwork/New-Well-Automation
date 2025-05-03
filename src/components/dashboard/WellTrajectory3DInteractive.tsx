@@ -9,21 +9,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Layers,
   Download,
-  Maximize2,
   RotateCw,
   ZoomIn,
   ZoomOut,
-  MoveHorizontal,
-  MoveVertical,
   ArrowUp,
   ArrowDown,
-  RefreshCw,
-  X,
+  Move,
+  Box,
+  Square,
+  Grid as Grid2,
 } from "lucide-react";
-import { project3DPoint, processSurveyData } from "@/utils/3dUtils";
 import { useSurveys } from "@/context/SurveyContext";
 
 interface SurveyPoint {
@@ -36,7 +35,6 @@ interface SurveyPoint {
   gamma?: number;
   vibration?: number;
   toolTemp?: number;
-  timestamp?: string;
 }
 
 interface OffsetWell {
@@ -56,46 +54,137 @@ const WellTrajectory3DInteractive = ({
   offsetWells = [],
   onExport = () => {},
 }: WellTrajectory3DInteractiveProps) => {
-  // Refs for canvas and container
+  const [viewMode, setViewMode] = useState<"3d" | "2d">("3d");
+  const [pan2D, setPan2D] = useState({ x: 0, y: 0 });
+  const [scale2D, setScale2D] = useState(1.0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // State management
   const [rotation, setRotation] = useState({ x: 0.5, y: 0.3 });
   const [zoom, setZoom] = useState(1.0);
   const [isAutoRotating, setIsAutoRotating] = useState(false);
   const [currentSurveyIndex, setCurrentSurveyIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [animationSpeed, setAnimationSpeed] = useState(1);
 
-  // Get surveys from context if not provided via props
   const { surveys: contextSurveys } = useSurveys();
 
-  // Process and sort surveys
+  const processSurveyData = useCallback((surveys: SurveyPoint[]) => {
+    if (surveys.length === 0) return [];
+
+    const processed: SurveyPoint[] = [{ ...surveys[0], tvd: 0, ns: 0, ew: 0 }];
+
+    for (let i = 1; i < surveys.length; i++) {
+      const prev = processed[i - 1];
+      const curr = surveys[i];
+
+      const deltaMD = curr.md - prev.md;
+      if (deltaMD <= 0) continue;
+
+      const prevIncRad = (prev.inc * Math.PI) / 180;
+      const currIncRad = (curr.inc * Math.PI) / 180;
+      const prevAzRad = (prev.az * Math.PI) / 180;
+      const currAzRad = (curr.az * Math.PI) / 180;
+
+      const dl = Math.acos(
+        Math.cos(currIncRad - prevIncRad) -
+          Math.sin(prevIncRad) *
+            Math.sin(currIncRad) *
+            (1 - Math.cos(currAzRad - prevAzRad)),
+      );
+
+      const rf = dl !== 0 ? Math.tan(dl / 2) / (dl / 2) : 1;
+
+      const deltaTVD =
+        (deltaMD / 2) * (Math.cos(prevIncRad) + Math.cos(currIncRad)) * rf;
+
+      const deltaNS =
+        (deltaMD / 2) *
+        (Math.sin(prevIncRad) * Math.cos(prevAzRad) +
+          Math.sin(currIncRad) * Math.cos(currAzRad)) *
+        rf;
+
+      const deltaEW =
+        (deltaMD / 2) *
+        (Math.sin(prevIncRad) * Math.sin(prevAzRad) +
+          Math.sin(currIncRad) * Math.sin(currAzRad)) *
+        rf;
+
+      processed.push({
+        ...curr,
+        tvd: prev.tvd + deltaTVD,
+        ns: prev.ns + deltaNS,
+        ew: prev.ew + deltaEW,
+      });
+    }
+
+    return processed;
+  }, []);
+
   const surveys = useMemo(() => {
     const rawSurveys =
       propSurveys && propSurveys.length > 0
         ? propSurveys
-        : Array.isArray(contextSurveys)
-          ? contextSurveys.map((survey) => ({
-              md: survey.bitDepth || 0,
-              inc: survey.inclination || 0,
-              az: survey.azimuth || 0,
-              tvd: 0, // Will be calculated by processSurveyData
-              ns: 0, // Will be calculated by processSurveyData
-              ew: 0, // Will be calculated by processSurveyData
-              gamma: survey.gamma || 50,
-              vibration: survey.vibration || 0,
-              toolTemp: survey.toolTemp || 0,
-              timestamp: survey.timestamp,
-            }))
-          : [];
+        : contextSurveys?.map((s) => ({
+            md: s.bitDepth || 0,
+            inc: s.inclination || 0,
+            az: s.azimuth || 0,
+            tvd: 0,
+            ns: 0,
+            ew: 0,
+            gamma: s.gamma || 50,
+            vibration: s.vibration || 0,
+            toolTemp: s.toolTemp || 0,
+          })) || [];
 
-    return processSurveyData(rawSurveys).sort((a, b) => a.md - b.md);
-  }, [propSurveys, contextSurveys]);
+    if (rawSurveys.length > 0 && rawSurveys[0].md !== 0) {
+      rawSurveys.unshift({
+        md: 0,
+        inc: 0,
+        az: 0,
+        tvd: 0,
+        ns: 0,
+        ew: 0,
+        gamma: 0,
+        vibration: 0,
+        toolTemp: 0,
+      });
+    }
 
-  // Event handlers
+    return processSurveyData(rawSurveys);
+  }, [propSurveys, contextSurveys, processSurveyData]);
+
+  const project3DPoint = (
+    x: number,
+    y: number,
+    z: number,
+    centerX: number,
+    centerY: number,
+    scale: number,
+    rotation: { x: number; y: number },
+  ) => {
+    const cosX = Math.cos(rotation.x);
+    const sinX = Math.sin(rotation.x);
+    const cosY = Math.cos(rotation.y);
+    const sinY = Math.sin(rotation.y);
+
+    // Modified to ensure trajectory goes downward
+    const x1 = x * cosY - z * sinY;
+    const z1 = x * sinY + z * cosY;
+
+    // Flip the y-axis to make the trajectory go downward
+    // y is TVD (True Vertical Depth), so positive y should go down
+    const y1 = y * cosX - z1 * sinX;
+    const z2 = y * sinX + z1 * cosX;
+
+    const factor = scale / (scale + z2);
+    return {
+      x: centerX + x1 * factor * scale,
+      // Adjust y-coordinate to make trajectory go downward
+      y: centerY + y1 * factor * scale * 1.5, // Increased scale factor for better visualization
+    };
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
     setDragStart({ x: e.clientX, y: e.clientY });
@@ -106,43 +195,62 @@ const WellTrajectory3DInteractive = ({
     (e: React.MouseEvent) => {
       if (!isDragging) return;
 
-      const deltaX = (e.clientX - dragStart.x) * 0.01;
-      const deltaY = (e.clientY - dragStart.y) * 0.01;
+      const deltaX = e.clientX - dragStart.x;
+      const deltaY = e.clientY - dragStart.y;
 
-      setRotation((prev) => ({
-        x: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.x + deltaY)),
-        y: prev.y + deltaX,
-      }));
+      if (viewMode === "2d") {
+        // In 2D mode, pan the view
+        setPan2D((prev) => ({
+          x: prev.x + deltaX * 0.5,
+          y: prev.y + deltaY * 0.5,
+        }));
+      } else {
+        // In 3D mode, rotate the view
+        const rotDeltaX = deltaX * 0.01;
+        const rotDeltaY = deltaY * 0.01;
+
+        setRotation((prev) => ({
+          x: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.x + rotDeltaY)),
+          y: prev.y + rotDeltaX,
+        }));
+      }
 
       setDragStart({ x: e.clientX, y: e.clientY });
     },
-    [isDragging, dragStart],
+    [isDragging, dragStart, viewMode],
   );
 
   const handleMouseUp = () => setIsDragging(false);
   const handleMouseLeave = () => setIsDragging(false);
-  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.1, 3.0));
-  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.1, 0.5));
+  const handleZoomIn = () => {
+    if (viewMode === "2d") {
+      setScale2D((prev) => Math.min(prev + 0.1, 3.0));
+    } else {
+      setZoom((prev) => Math.min(prev + 0.1, 3.0));
+    }
+  };
 
-  // Keyboard navigation
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+  const handleZoomOut = () => {
+    if (viewMode === "2d") {
+      setScale2D((prev) => Math.max(prev - 0.1, 0.5));
+    } else {
+      setZoom((prev) => Math.max(prev - 0.1, 0.5));
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowUp") {
         setCurrentSurveyIndex((prev) => Math.max(prev - 1, 0));
       } else if (e.key === "ArrowDown") {
         setCurrentSurveyIndex((prev) => Math.min(prev + 1, surveys.length - 1));
       }
-    },
-    [surveys.length],
-  );
+    };
 
-  // Set up event listeners
-  useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+  }, [surveys.length]);
 
-  // Handle canvas resizing
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
       if (containerRef.current && canvasRef.current) {
@@ -158,132 +266,479 @@ const WellTrajectory3DInteractive = ({
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Auto-rotation effect
   useEffect(() => {
     if (!isAutoRotating) return;
 
     const timer = setTimeout(() => {
       setRotation((prev) => ({
-        x: prev.x + 0.005 * animationSpeed,
-        y: prev.y + 0.002 * animationSpeed,
+        x: prev.x + 0.005,
+        y: prev.y + 0.002,
       }));
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [isAutoRotating, rotation, animationSpeed]);
+  }, [isAutoRotating, rotation]);
 
-  // Main drawing function
-  const drawScene = useCallback(() => {
+  // Draw oil rig at the surface
+  const drawOilRig = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    // Save context
+    ctx.save();
+
+    // Rig base
+    ctx.fillStyle = "#334455";
+    ctx.fillRect(x - 30, y - 20, 60, 20);
+
+    // Rig tower
+    ctx.beginPath();
+    ctx.moveTo(x - 20, y - 20);
+    ctx.lineTo(x - 15, y - 100);
+    ctx.lineTo(x + 15, y - 100);
+    ctx.lineTo(x + 20, y - 20);
+    ctx.closePath();
+    ctx.fillStyle = "#445566";
+    ctx.fill();
+
+    // Rig top
+    ctx.fillStyle = "#556677";
+    ctx.fillRect(x - 25, y - 110, 50, 10);
+
+    // Futuristic glow effect
+    ctx.shadowColor = "#00aaff";
+    ctx.shadowBlur = 15;
+    ctx.strokeStyle = "#00ccff";
+    ctx.lineWidth = 1;
+
+    // Glow lines
+    ctx.beginPath();
+    ctx.moveTo(x - 15, y - 100);
+    ctx.lineTo(x + 15, y - 100);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x - 20, y - 20);
+    ctx.lineTo(x + 20, y - 20);
+    ctx.stroke();
+
+    // Reset shadow
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  };
+
+  // Draw 2D view of the well trajectory
+  const draw2DScene = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Clear canvas with gradient background
-    const bgGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    bgGradient.addColorStop(0, "#0a1525");
-    bgGradient.addColorStop(0.3, "#111827");
-    bgGradient.addColorStop(1, "#1a1a20");
-    ctx.fillStyle = bgGradient;
+    // Clear canvas with a dark background
+    ctx.fillStyle = "#0a1525";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Apply 2D pan and zoom
+    const centerX = canvas.width / 2 + pan2D.x;
+    const centerY = canvas.height / 3; // Position higher to show more downward trajectory
+    const scale2DFactor = scale2D * 0.8;
+
+    // Draw grid for 2D view
+    ctx.strokeStyle = "#1a2a3a";
+    ctx.lineWidth = 0.5;
+
+    // Vertical grid lines
+    for (let x = -5000; x <= 5000; x += 500) {
+      const screenX = centerX + x * scale2DFactor;
+      ctx.beginPath();
+      ctx.moveTo(screenX, 0);
+      ctx.lineTo(screenX, canvas.height);
+      ctx.stroke();
+
+      // Add depth markers
+      if (x % 1000 === 0) {
+        ctx.fillStyle = "#4a5a6a";
+        ctx.font = "10px monospace";
+        ctx.fillText(`${x}ft`, screenX + 5, 15);
+      }
+    }
+
+    // Horizontal grid lines (depth)
+    for (let y = 0; y <= 10000; y += 500) {
+      const screenY = centerY + y * scale2DFactor;
+      ctx.beginPath();
+      ctx.moveTo(0, screenY);
+      ctx.lineTo(canvas.width, screenY);
+      ctx.stroke();
+
+      // Add depth markers
+      if (y % 1000 === 0) {
+        ctx.fillStyle = "#4a5a6a";
+        ctx.font = "10px monospace";
+        ctx.fillText(`${y}ft`, 5, screenY - 5);
+      }
+    }
+
+    // Draw offset wells in 2D
+    offsetWells.forEach((well) => {
+      if (well.surveys.length < 2) return;
+
+      ctx.strokeStyle = well.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      // Start at surface
+      ctx.moveTo(centerX, centerY);
+
+      for (let i = 0; i < well.surveys.length; i++) {
+        const x = centerX + (well.surveys[i].ew * scale2DFactor) / 100;
+        const y = centerY + (well.surveys[i].tvd * scale2DFactor) / 100;
+        ctx.lineTo(x, y);
+      }
+
+      ctx.stroke();
+    });
+
+    // Draw main well trajectory in 2D
+    if (surveys.length > 1) {
+      const visibleSurveys = surveys.slice(0, currentSurveyIndex + 1);
+
+      // Draw well path with glow effect
+      ctx.strokeStyle = "#00aaff";
+      ctx.lineWidth = 3;
+      ctx.shadowColor = "#00aaff";
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+
+      // Start at surface
+      ctx.moveTo(centerX, centerY);
+
+      for (let i = 0; i < visibleSurveys.length; i++) {
+        const x = centerX + (visibleSurveys[i].ew * scale2DFactor) / 100;
+        const y = centerY + (visibleSurveys[i].tvd * scale2DFactor) / 100;
+        ctx.lineTo(x, y);
+      }
+
+      ctx.stroke();
+      ctx.shadowBlur = 0; // Reset shadow
+
+      // Draw current survey point
+      if (currentSurveyIndex < surveys.length) {
+        const x =
+          centerX + (surveys[currentSurveyIndex].ew * scale2DFactor) / 100;
+        const y =
+          centerY + (surveys[currentSurveyIndex].tvd * scale2DFactor) / 100;
+
+        // Glow effect for current point
+        ctx.fillStyle = "#00ffaa";
+        ctx.shadowColor = "#00ffaa";
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(x, y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Display current survey info
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "12px monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(
+          `MD: ${surveys[currentSurveyIndex].md.toFixed(1)} ft`,
+          10,
+          20,
+        );
+        ctx.fillText(
+          `Inc: ${surveys[currentSurveyIndex].inc.toFixed(2)}°`,
+          10,
+          40,
+        );
+        ctx.fillText(
+          `TVD: ${surveys[currentSurveyIndex].tvd.toFixed(1)} ft`,
+          10,
+          60,
+        );
+      }
+    }
+
+    // Draw oil rig at surface
+    drawOilRig(ctx, centerX, centerY);
+  }, [surveys, offsetWells, currentSurveyIndex, pan2D, scale2D]);
+
+  const drawScene = useCallback(() => {
+    // If in 2D mode, use the 2D drawing function
+    if (viewMode === "2d") {
+      draw2DScene();
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.fillStyle = "#0a1525";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const centerX = canvas.width / 2;
-    const centerY = canvas.height / 3;
-    const gridSize = Math.min(canvas.width, canvas.height) * 0.6 * zoom;
+    const centerY = canvas.height / 3; // Position higher to show more downward trajectory
+    const scale = Math.min(canvas.width, canvas.height) * 0.2 * zoom;
 
-    // Draw grid
-    drawGrid(ctx, canvas.width, canvas.height, rotation, zoom);
+    ctx.strokeStyle = "#2a4a6a";
+    ctx.lineWidth = 1;
 
-    // Draw oil rig first so well path can connect to it
-    drawOilRig(ctx, centerX, centerY, gridSize, rotation);
-
-    // Get visible surveys up to current depth
-    const currentDepth = surveys[currentSurveyIndex]?.md || 0;
-    const visibleSurveys = surveys.filter((s) => s.md <= currentDepth);
-
-    // Draw offset wells
-    offsetWells.forEach((well) => {
-      drawWellPath(
-        ctx,
+    const drawAxis = (
+      x1: number,
+      y1: number,
+      z1: number,
+      x2: number,
+      y2: number,
+      z2: number,
+      color: string,
+      label: string,
+    ) => {
+      const start = project3DPoint(
+        x1,
+        y1,
+        z1,
         centerX,
         centerY,
-        gridSize,
-        well.surveys,
-        rotation,
-        well.color,
-        1,
-        zoom,
-      );
-    });
-
-    // Draw main well path (only if we have data)
-    if (visibleSurveys.length > 0) {
-      drawWellPath(
-        ctx,
-        centerX,
-        centerY,
-        gridSize,
-        visibleSurveys,
-        rotation,
-        "#00aaff",
-        2,
-        zoom,
-      );
-    }
-
-    // Draw current survey point info
-    if (surveys[currentSurveyIndex]) {
-      const currentSurvey = surveys[currentSurveyIndex];
-      const point = project3DPoint(
-        currentSurvey.ew / 100,
-        -currentSurvey.tvd / 100,
-        currentSurvey.ns / 100,
-        centerX,
-        centerY,
-        gridSize,
+        scale,
         rotation,
       );
+      const end = project3DPoint(x2, y2, z2, centerX, centerY, scale, rotation);
 
-      // Draw highlighted survey point
-      ctx.fillStyle = "#00ffaa";
+      ctx.strokeStyle = color;
       ctx.beginPath();
-      ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+
+      const angle = Math.atan2(end.y - start.y, end.x - start.x);
+      ctx.beginPath();
+      ctx.moveTo(end.x, end.y);
+      ctx.lineTo(
+        end.x - 10 * Math.cos(angle - Math.PI / 6),
+        end.y - 10 * Math.sin(angle - Math.PI / 6),
+      );
+      ctx.lineTo(
+        end.x - 10 * Math.cos(angle + Math.PI / 6),
+        end.y - 10 * Math.sin(angle + Math.PI / 6),
+      );
+      ctx.closePath();
+      ctx.fillStyle = color;
       ctx.fill();
 
-      // Draw survey information
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "12px monospace";
-      ctx.fillText(`MD: ${currentSurvey.md.toFixed(1)} ft`, 10, 20);
-      ctx.fillText(`Inc: ${currentSurvey.inc.toFixed(2)}°`, 10, 40);
-      ctx.fillText(`Az: ${currentSurvey.az.toFixed(2)}°`, 10, 60);
-      ctx.fillText(`TVD: ${currentSurvey.tvd.toFixed(1)} ft`, 10, 80);
-      ctx.fillText(`NS: ${currentSurvey.ns.toFixed(1)} ft`, 10, 100);
-      ctx.fillText(`EW: ${currentSurvey.ew.toFixed(1)} ft`, 10, 120);
+      ctx.fillStyle = color;
+      ctx.font = "12px Arial";
+      ctx.fillText(label, end.x + 10, end.y + 5);
+    };
+
+    drawAxis(0, 0, 0, 10, 0, 0, "#ff5555", "E/W");
+    drawAxis(0, 0, 0, 0, 10, 0, "#55ff55", "TVD");
+    drawAxis(0, 0, 0, 0, 0, 10, "#5555ff", "N/S");
+
+    // Calculate surface point for reference
+    const surfacePoint = project3DPoint(
+      0,
+      0,
+      0,
+      centerX,
+      centerY,
+      scale,
+      rotation,
+    );
+
+    // Draw oil rig at surface (0,0,0)
+    drawOilRig(ctx, surfacePoint.x, surfacePoint.y);
+
+    // Draw futuristic grid on the ground
+    const gridSize = 20;
+    const gridStep = 2;
+    ctx.strokeStyle = "rgba(30, 100, 150, 0.3)";
+    ctx.lineWidth = 0.5;
+
+    for (let i = -gridSize; i <= gridSize; i += gridStep) {
+      // Draw grid lines along X axis
+      const start1 = project3DPoint(
+        i,
+        0,
+        -gridSize,
+        centerX,
+        centerY,
+        scale,
+        rotation,
+      );
+      const end1 = project3DPoint(
+        i,
+        0,
+        gridSize,
+        centerX,
+        centerY,
+        scale,
+        rotation,
+      );
+
+      ctx.beginPath();
+      ctx.moveTo(start1.x, start1.y);
+      ctx.lineTo(end1.x, end1.y);
+      ctx.stroke();
+
+      // Draw grid lines along Z axis
+      const start2 = project3DPoint(
+        -gridSize,
+        0,
+        i,
+        centerX,
+        centerY,
+        scale,
+        rotation,
+      );
+      const end2 = project3DPoint(
+        gridSize,
+        0,
+        i,
+        centerX,
+        centerY,
+        scale,
+        rotation,
+      );
+
+      ctx.beginPath();
+      ctx.moveTo(start2.x, start2.y);
+      ctx.lineTo(end2.x, end2.y);
+      ctx.stroke();
+    }
+
+    offsetWells.forEach((well) => {
+      if (well.surveys.length < 2) return;
+
+      ctx.strokeStyle = well.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      const firstPoint = project3DPoint(
+        well.surveys[0].ew / 100,
+        -well.surveys[0].tvd / 100,
+        well.surveys[0].ns / 100,
+        centerX,
+        centerY,
+        scale,
+        rotation,
+      );
+      ctx.moveTo(firstPoint.x, firstPoint.y);
+
+      for (let i = 1; i < well.surveys.length; i++) {
+        const point = project3DPoint(
+          well.surveys[i].ew / 100,
+          -well.surveys[i].tvd / 100,
+          well.surveys[i].ns / 100,
+          centerX,
+          centerY,
+          scale,
+          rotation,
+        );
+        ctx.lineTo(point.x, point.y);
+      }
+
+      ctx.stroke();
+    });
+
+    if (surveys.length > 1) {
+      const visibleSurveys = surveys.slice(0, currentSurveyIndex + 1);
+
+      ctx.strokeStyle = "#00aaff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+
+      // Draw from surface (0,0,0) first
+      ctx.moveTo(surfacePoint.x, surfacePoint.y);
+
+      // Then continue with trajectory
+      for (let i = 0; i < visibleSurveys.length; i++) {
+        const point = project3DPoint(
+          visibleSurveys[i].ew / 100,
+          visibleSurveys[i].tvd / 100, // Remove negative sign to make trajectory go downward
+          visibleSurveys[i].ns / 100,
+          centerX,
+          centerY,
+          scale,
+          rotation,
+        );
+        ctx.lineTo(point.x, point.y);
+      }
+
+      ctx.stroke();
+
+      if (currentSurveyIndex < surveys.length) {
+        const currentPoint = project3DPoint(
+          surveys[currentSurveyIndex].ew / 100,
+          surveys[currentSurveyIndex].tvd / 100, // Remove negative sign to make trajectory go downward
+          surveys[currentSurveyIndex].ns / 100,
+          centerX,
+          centerY,
+          scale,
+          rotation,
+        );
+
+        ctx.fillStyle = "#00ffaa";
+        ctx.beginPath();
+        ctx.arc(currentPoint.x, currentPoint.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "12px monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(
+          `MD: ${surveys[currentSurveyIndex].md.toFixed(1)} ft`,
+          10,
+          20,
+        );
+        ctx.fillText(
+          `Inc: ${surveys[currentSurveyIndex].inc.toFixed(2)}°`,
+          10,
+          40,
+        );
+        ctx.fillText(
+          `Az: ${surveys[currentSurveyIndex].az.toFixed(2)}°`,
+          10,
+          60,
+        );
+        ctx.fillText(
+          `TVD: ${surveys[currentSurveyIndex].tvd.toFixed(1)} ft`,
+          10,
+          80,
+        );
+        ctx.fillText(
+          `NS: ${surveys[currentSurveyIndex].ns.toFixed(1)} ft`,
+          10,
+          100,
+        );
+        ctx.fillText(
+          `EW: ${surveys[currentSurveyIndex].ew.toFixed(1)} ft`,
+          10,
+          120,
+        );
+      }
     } else if (surveys.length === 0) {
-      // Show message when no data is available
       ctx.fillStyle = "#ffffff";
-      ctx.font = "16px monospace";
+      ctx.font = "16px Arial";
       ctx.textAlign = "center";
       ctx.fillText("No survey data available", centerX, centerY - 20);
-      ctx.font = "14px monospace";
       ctx.fillText(
         "Add surveys to visualize well trajectory",
         centerX,
         centerY + 20,
       );
-      ctx.textAlign = "left";
     }
   }, [
     surveys,
     offsetWells,
     rotation,
     zoom,
-    isAutoRotating,
     currentSurveyIndex,
+    viewMode,
+    draw2DScene,
   ]);
 
-  // Animation loop
   useEffect(() => {
     let animationFrameId: number;
 
@@ -297,856 +752,75 @@ const WellTrajectory3DInteractive = ({
     return () => cancelAnimationFrame(animationFrameId);
   }, [drawScene]);
 
-  // Drawing helper functions
-  const drawGrid = (
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number,
-    rotation: { x: number; y: number },
-    zoom: number,
-  ) => {
-    const centerX = width / 2;
-    const centerY = height / 3;
-    const gridSize = Math.min(width, height) * 0.6 * zoom;
-
-    // Draw surface grid
-    ctx.strokeStyle = "#2a4a6a";
-    ctx.lineWidth = 1;
-
-    // Horizontal grid lines (X-Z plane)
-    for (let z = -10; z <= 10; z += 2) {
-      const startPoint = project3DPoint(
-        -10,
-        0,
-        z,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-      const endPoint = project3DPoint(
-        10,
-        0,
-        z,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-
-      ctx.beginPath();
-      ctx.moveTo(startPoint.x, startPoint.y);
-      ctx.lineTo(endPoint.x, endPoint.y);
-      ctx.stroke();
-    }
-
-    // Vertical grid lines (X-Z plane)
-    for (let x = -10; x <= 10; x += 2) {
-      const startPoint = project3DPoint(
-        x,
-        0,
-        -10,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-      const endPoint = project3DPoint(
-        x,
-        0,
-        10,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-
-      ctx.beginPath();
-      ctx.moveTo(startPoint.x, startPoint.y);
-      ctx.lineTo(endPoint.x, endPoint.y);
-      ctx.stroke();
-    }
-  };
-
-  const drawOilRig = (
-    ctx: CanvasRenderingContext2D,
-    centerX: number,
-    centerY: number,
-    gridSize: number,
-    rotation: { x: number; y: number },
-  ) => {
-    const scaleFactor = gridSize / 400;
-    const rigWidth = 60 * scaleFactor;
-    const rigHeight = 30 * scaleFactor;
-    const derrickHeight = 90 * scaleFactor;
-
-    // Position rig at wellhead (0,0,0)
-    const rigBasePoint = project3DPoint(
-      0,
-      0,
-      0,
-      centerX,
-      centerY,
-      gridSize,
-      rotation,
-    );
-
-    // Draw rig base
-    ctx.fillStyle = "#444444";
-    ctx.strokeStyle = "#333333";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.rect(
-      rigBasePoint.x - rigWidth / 2,
-      rigBasePoint.y - rigHeight / 2,
-      rigWidth,
-      rigHeight,
-    );
-    ctx.fill();
-    ctx.stroke();
-
-    // Draw derrick
-    ctx.beginPath();
-    // Left leg
-    ctx.moveTo(rigBasePoint.x - rigWidth / 3, rigBasePoint.y - rigHeight / 2);
-    ctx.lineTo(rigBasePoint.x - rigWidth / 4, rigBasePoint.y - derrickHeight);
-    // Right leg
-    ctx.moveTo(rigBasePoint.x + rigWidth / 3, rigBasePoint.y - rigHeight / 2);
-    ctx.lineTo(rigBasePoint.x + rigWidth / 4, rigBasePoint.y - derrickHeight);
-    // Top
-    ctx.moveTo(rigBasePoint.x - rigWidth / 4, rigBasePoint.y - derrickHeight);
-    ctx.lineTo(rigBasePoint.x + rigWidth / 4, rigBasePoint.y - derrickHeight);
-    // Cross supports
-    for (let i = 1; i <= 4; i++) {
-      const y = rigBasePoint.y - rigHeight / 2 - i * (derrickHeight / 5);
-      ctx.moveTo(
-        rigBasePoint.x - rigWidth / 3 + i * (rigWidth / 30),
-        rigBasePoint.y - rigHeight / 2,
-      );
-      ctx.lineTo(rigBasePoint.x + rigWidth / 3 - i * (rigWidth / 30), y);
-      ctx.moveTo(
-        rigBasePoint.x + rigWidth / 3 - i * (rigWidth / 30),
-        rigBasePoint.y - rigHeight / 2,
-      );
-      ctx.lineTo(rigBasePoint.x - rigWidth / 3 + i * (rigWidth / 30), y);
-    }
-    ctx.strokeStyle = "#666666";
-    ctx.lineWidth = 2 * scaleFactor;
-    ctx.stroke();
-
-    // Draw crown block
-    ctx.fillStyle = "#666666";
-    ctx.beginPath();
-    ctx.rect(
-      rigBasePoint.x - rigWidth / 4,
-      rigBasePoint.y - derrickHeight - 5 * scaleFactor,
-      rigWidth / 2,
-      5 * scaleFactor,
-    );
-    ctx.fill();
-
-    // Draw traveling block
-    ctx.fillStyle = "#777777";
-    ctx.beginPath();
-    ctx.rect(
-      rigBasePoint.x - rigWidth / 6,
-      rigBasePoint.y - derrickHeight * 0.78,
-      rigWidth / 3,
-      rigHeight / 3,
-    );
-    ctx.fill();
-    ctx.stroke();
-
-    // Draw drill line from top of derrick to traveling block
-    ctx.beginPath();
-    ctx.moveTo(rigBasePoint.x, rigBasePoint.y - derrickHeight);
-    ctx.lineTo(rigBasePoint.x, rigBasePoint.y - derrickHeight * 0.78);
-    ctx.strokeStyle = "#888888";
-    ctx.lineWidth = 1.5 * scaleFactor;
-    ctx.stroke();
-
-    // Draw drill string from rig floor to current survey point
-    if (surveys.length > 0 && currentSurveyIndex < surveys.length) {
-      const currentSurvey = surveys[currentSurveyIndex];
-      const drillPipeEndPoint = project3DPoint(
-        currentSurvey.ew / 100,
-        -currentSurvey.tvd / 100,
-        currentSurvey.ns / 100,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-
-      // Create gradient for drill pipe
-      const pipeGradient = ctx.createLinearGradient(
-        rigBasePoint.x,
-        rigBasePoint.y,
-        drillPipeEndPoint.x,
-        drillPipeEndPoint.y,
-      );
-      pipeGradient.addColorStop(0, "#cccccc");
-      pipeGradient.addColorStop(0.3, "#aaaaaa");
-      pipeGradient.addColorStop(1, "#00aaff");
-
-      // Draw the pipe with gradient
-      ctx.beginPath();
-      ctx.moveTo(rigBasePoint.x, rigBasePoint.y);
-      ctx.lineTo(drillPipeEndPoint.x, drillPipeEndPoint.y);
-      ctx.strokeStyle = pipeGradient;
-      ctx.lineWidth = 8 * scaleFactor;
-      ctx.lineCap = "round";
-      ctx.stroke();
-
-      // Add glow effect
-      ctx.shadowColor = "#00aaff80";
-      ctx.shadowBlur = 10 * scaleFactor;
-      ctx.lineWidth = 6 * scaleFactor;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-  };
-
-  const drawWellPath = (
-    ctx: CanvasRenderingContext2D,
-    centerX: number,
-    centerY: number,
-    gridSize: number,
-    pathData: SurveyPoint[],
-    rotation: { x: number; y: number },
-    color: string,
-    lineWidth: number,
-    zoomFactor: number,
-  ) => {
-    if (pathData.length < 2) return;
-
-    // Draw gamma heatmap first
-    drawGammaHeatmap(ctx, centerX, centerY, gridSize, pathData, rotation);
-
-    // Draw drill string segments
-    for (let i = 1; i < pathData.length; i++) {
-      const prevPoint = pathData[i - 1];
-      const currentPoint = pathData[i];
-
-      const x1 = prevPoint.ew / 100;
-      const y1 = -prevPoint.tvd / 100;
-      const z1 = prevPoint.ns / 100;
-
-      const x2 = currentPoint.ew / 100;
-      const y2 = -currentPoint.tvd / 100;
-      const z2 = currentPoint.ns / 100;
-
-      const projectedPoint1 = project3DPoint(
-        x1,
-        y1,
-        z1,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-      const projectedPoint2 = project3DPoint(
-        x2,
-        y2,
-        z2,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-
-      // Modern color scheme with depth-based gradient
-      const depthRatio = Math.min(1, currentPoint.tvd / 10000);
-      const depthColor =
-        i === pathData.length - 1
-          ? "#00eeff"
-          : `rgba(${0 + Math.round(depthRatio * 50)}, ${170 - Math.round(depthRatio * 100)}, ${255 - Math.round(depthRatio * 100)}, 0.9)`;
-
-      // Draw pipe segment
-      ctx.save();
-      const gradient = ctx.createLinearGradient(
-        projectedPoint1.x,
-        projectedPoint1.y,
-        projectedPoint2.x,
-        projectedPoint2.y,
-      );
-      gradient.addColorStop(0, color);
-      gradient.addColorStop(1, depthColor);
-
-      ctx.strokeStyle = gradient;
-      ctx.lineWidth = lineWidth * 3.5;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(projectedPoint1.x, projectedPoint1.y);
-      ctx.lineTo(projectedPoint2.x, projectedPoint2.y);
-      ctx.stroke();
-
-      // Add outer glow
-      ctx.strokeStyle = depthColor;
-      ctx.lineWidth = lineWidth * 4.5;
-      ctx.globalAlpha = 0.3;
-      ctx.shadowColor = depthColor;
-      ctx.shadowBlur = 8;
-      ctx.stroke();
-
-      // Add inner highlight
-      ctx.strokeStyle = "rgba(255,255,255,0.4)";
-      ctx.lineWidth = lineWidth * 1.5;
-      ctx.globalAlpha = 0.5;
-      ctx.shadowBlur = 0;
-      ctx.beginPath();
-      ctx.moveTo(projectedPoint1.x, projectedPoint1.y);
-      ctx.lineTo(projectedPoint2.x, projectedPoint2.y);
-      ctx.stroke();
-      ctx.restore();
-
-      // Draw connections every 3 points
-      if (i % 3 === 0) {
-        ctx.save();
-        const connGradient = ctx.createRadialGradient(
-          projectedPoint2.x,
-          projectedPoint2.y,
-          0,
-          projectedPoint2.x,
-          projectedPoint2.y,
-          lineWidth * 3,
-        );
-        connGradient.addColorStop(0, "#ffffff");
-        connGradient.addColorStop(0.3, "#cccccc");
-        connGradient.addColorStop(1, "#888888");
-
-        ctx.fillStyle = connGradient;
-        ctx.strokeStyle = "#666666";
-        ctx.lineWidth = 1;
-        ctx.shadowColor = "rgba(0,200,255,0.6)";
-        ctx.shadowBlur = 5;
-        ctx.beginPath();
-        ctx.arc(
-          projectedPoint2.x,
-          projectedPoint2.y,
-          lineWidth * 2.5,
-          0,
-          Math.PI * 2,
-        );
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      }
-
-      // Draw survey markers every 10 points
-      if (i % 10 === 0) {
-        ctx.save();
-        const surveyGradient = ctx.createRadialGradient(
-          projectedPoint2.x,
-          projectedPoint2.y,
-          0,
-          projectedPoint2.x,
-          projectedPoint2.y,
-          8,
-        );
-        surveyGradient.addColorStop(0, "#00eeff");
-        surveyGradient.addColorStop(0.5, "#0099ff80");
-        surveyGradient.addColorStop(1, "#0066ff00");
-
-        ctx.fillStyle = surveyGradient;
-        ctx.beginPath();
-        ctx.arc(projectedPoint2.x, projectedPoint2.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "#00aaff";
-        ctx.beginPath();
-        ctx.arc(projectedPoint2.x, projectedPoint2.y, 3, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = "#000000";
-        ctx.shadowBlur = 4;
-        ctx.font = "bold 11px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText(
-          `${currentPoint.md.toFixed(0)}'`,
-          projectedPoint2.x,
-          projectedPoint2.y - 12,
-        );
-        ctx.font = "9px monospace";
-        ctx.fillText(
-          `${currentPoint.inc.toFixed(1)}° / ${currentPoint.az.toFixed(0)}°`,
-          projectedPoint2.x,
-          projectedPoint2.y - 24,
-        );
-        ctx.restore();
-      }
-    }
-
-    // Draw drill bit at the end
-    if (pathData.length > 0) {
-      const lastPoint = pathData[pathData.length - 1];
-      const projectedBit = project3DPoint(
-        lastPoint.ew / 100,
-        -lastPoint.tvd / 100,
-        lastPoint.ns / 100,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-
-      ctx.save();
-      const bitGradient = ctx.createRadialGradient(
-        projectedBit.x,
-        projectedBit.y,
-        0,
-        projectedBit.x,
-        projectedBit.y,
-        18,
-      );
-      bitGradient.addColorStop(0, "#00ffff");
-      bitGradient.addColorStop(0.4, "#00aaff");
-      bitGradient.addColorStop(0.7, "#0066ffaa");
-      bitGradient.addColorStop(1, "#0044ff00");
-
-      ctx.fillStyle = bitGradient;
-      ctx.beginPath();
-      ctx.arc(projectedBit.x, projectedBit.y, 18, 0, Math.PI * 2);
-      ctx.fill();
-
-      const metalGradient = ctx.createRadialGradient(
-        projectedBit.x - 2,
-        projectedBit.y - 2,
-        0,
-        projectedBit.x,
-        projectedBit.y,
-        8,
-      );
-      metalGradient.addColorStop(0, "#ffffff");
-      metalGradient.addColorStop(0.3, "#e0e0e0");
-      metalGradient.addColorStop(0.7, "#b0b0b0");
-      metalGradient.addColorStop(1, "#808080");
-
-      ctx.fillStyle = metalGradient;
-      ctx.strokeStyle = "#666666";
-      ctx.lineWidth = 1.5;
-      ctx.shadowColor = "#00aaff";
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(projectedBit.x, projectedBit.y, 8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = "#00ccff";
-      ctx.shadowColor = "#00ffff";
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(projectedBit.x, projectedBit.y, 4, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Add pulse effect
-      for (let i = 1; i <= 3; i++) {
-        ctx.globalAlpha = 0.3 - i * 0.1;
-        ctx.beginPath();
-        ctx.arc(projectedBit.x, projectedBit.y, 8 + i * 4, 0, Math.PI * 2);
-        ctx.strokeStyle = "#00eeff";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-
-      ctx.restore();
-    }
-  };
-
-  const drawGammaHeatmap = (
-    ctx: CanvasRenderingContext2D,
-    centerX: number,
-    centerY: number,
-    gridSize: number,
-    pathData: SurveyPoint[],
-    rotation: { x: number; y: number },
-  ) => {
-    // Create paths for different gamma ranges
-    const lowGammaPoints: {
-      x: number;
-      y: number;
-      tvd: number;
-      gamma: number;
-    }[] = [];
-    const mediumGammaPoints: {
-      x: number;
-      y: number;
-      tvd: number;
-      gamma: number;
-    }[] = [];
-    const highGammaPoints: {
-      x: number;
-      y: number;
-      tvd: number;
-      gamma: number;
-    }[] = [];
-
-    // Process path data points
-    pathData.forEach((point) => {
-      const projectedPoint = project3DPoint(
-        point.ew / 100,
-        -point.tvd / 100,
-        point.ns / 100,
-        centerX,
-        centerY,
-        gridSize,
-        rotation,
-      );
-
-      // Store original TVD and gamma value with the projected point
-      const enhancedPoint = {
-        ...projectedPoint,
-        tvd: point.tvd,
-        gamma: point.gamma || 50,
-      };
-
-      if (point.gamma < 40) {
-        lowGammaPoints.push(enhancedPoint);
-      } else if (point.gamma < 70) {
-        mediumGammaPoints.push(enhancedPoint);
-      } else {
-        highGammaPoints.push(enhancedPoint);
-      }
-    });
-
-    // Draw intense gamma hotspots with radial gradients
-    const drawGammaHotspots = () => {
-      // Combine all points for processing
-      const allPoints = [
-        ...lowGammaPoints,
-        ...mediumGammaPoints,
-        ...highGammaPoints,
-      ];
-
-      // Sort by TVD to ensure proper rendering order (deepest first)
-      allPoints.sort((a, b) => b.tvd - a.tvd);
-
-      // Draw radial gradients at each point
-      allPoints.forEach((point) => {
-        // Size based on gamma value - larger for more dramatic effect
-        const size = 30 + point.gamma / 5;
-
-        // Color based on gamma range - more vibrant
-        let color;
-        if (point.gamma < 40) {
-          color = "#00ff88"; // Low gamma - green
-        } else if (point.gamma < 70) {
-          color = "#ffaa00"; // Medium gamma - orange
-        } else {
-          color = "#ff0088"; // High gamma - pink
-        }
-
-        // Create radial gradient
-        const gradient = ctx.createRadialGradient(
-          point.x,
-          point.y,
-          0,
-          point.x,
-          point.y,
-          size,
-        );
-
-        gradient.addColorStop(0, color + "cc"); // More opaque center
-        gradient.addColorStop(0.5, color + "66"); // Semi-transparent middle
-        gradient.addColorStop(1, color + "00"); // Transparent edge
-
-        // Draw the gradient
-        ctx.save();
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, size, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Add glow effect
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 1;
-        ctx.globalAlpha = 0.7;
-        ctx.fill();
-        ctx.restore();
-      });
-    };
-
-    // Draw gamma flow paths
-    const drawGammaFlowPaths = (
-      points: { x: number; y: number; tvd: number; gamma: number }[],
-      color: string,
-    ) => {
-      if (points.length < 2) return;
-
-      // Draw flowing paths that extend from the wellbore
-      const flowPathCount = Math.min(points.length, 15); // Limit number of flow paths for performance
-      const stepSize = Math.floor(points.length / flowPathCount);
-
-      for (let i = 0; i < points.length; i += stepSize) {
-        if (i >= points.length) break;
-
-        const point = points[i];
-        const flowLength = 50 + point.gamma / 2; // Length based on gamma intensity
-        const flowAngle = (i * 0.7) % (Math.PI * 2); // Vary angle for visual interest
-
-        // Calculate flow endpoint
-        const endX = point.x + Math.cos(flowAngle) * flowLength;
-        const endY = point.y + Math.sin(flowAngle) * flowLength;
-
-        // Create gradient for flow path
-        const gradient = ctx.createLinearGradient(point.x, point.y, endX, endY);
-        gradient.addColorStop(0, color + "cc"); // More opaque at wellbore
-        gradient.addColorStop(1, color + "00"); // Transparent at end
-
-        // Draw flow path
-        ctx.save();
-        ctx.strokeStyle = gradient;
-        ctx.lineWidth = 2 + point.gamma / 30; // Width based on gamma intensity
-        ctx.beginPath();
-        ctx.moveTo(point.x, point.y);
-
-        // Create a curved flow path
-        const controlX =
-          point.x + Math.cos(flowAngle + 0.2) * (flowLength * 0.5);
-        const controlY =
-          point.y + Math.sin(flowAngle + 0.2) * (flowLength * 0.5);
-        ctx.quadraticCurveTo(controlX, controlY, endX, endY);
-
-        ctx.stroke();
-
-        // Add glow effect
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 1;
-        ctx.globalAlpha = 0.6;
-        ctx.stroke();
-        ctx.restore();
-      }
-    };
-
-    // Draw traditional path-based gamma areas with enhanced transparency
-    const drawGammaArea = (
-      points: { x: number; y: number; tvd: number; gamma: number }[],
-      color: string,
-    ) => {
-      if (points.length < 2) return;
-
-      const areaWidth = 60; // Wider area for more dramatic effect
-
-      ctx.save();
-      ctx.globalAlpha = 0.3; // More transparent for layered effect
-      ctx.fillStyle = color;
-
-      // Create a path that follows the wellbore with width
-      ctx.beginPath();
-
-      // First side of the path
-      for (let i = 0; i < points.length; i++) {
-        const angle =
-          i === 0
-            ? Math.PI / 2
-            : Math.atan2(
-                points[i].y - points[i - 1].y,
-                points[i].x - points[i - 1].x,
-              ) +
-              Math.PI / 2;
-
-        const offsetX = Math.cos(angle) * areaWidth;
-        const offsetY = Math.sin(angle) * areaWidth;
-
-        if (i === 0) {
-          ctx.moveTo(points[i].x + offsetX, points[i].y + offsetY);
-        } else {
-          ctx.lineTo(points[i].x + offsetX, points[i].y + offsetY);
-        }
-      }
-
-      // Return path (other side)
-      for (let i = points.length - 1; i >= 0; i--) {
-        const angle =
-          i === points.length - 1
-            ? Math.PI / 2
-            : Math.atan2(
-                points[i].y - points[i + 1].y,
-                points[i].x - points[i + 1].x,
-              ) +
-              Math.PI / 2;
-
-        const offsetX = Math.cos(angle) * -areaWidth;
-        const offsetY = Math.sin(angle) * -areaWidth;
-
-        ctx.lineTo(points[i].x + offsetX, points[i].y + offsetY);
-      }
-
-      ctx.closePath();
-      ctx.fill();
-
-      // Add glow effect
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 1; // Increased blur for more dramatic effect
-      ctx.fill();
-
-      ctx.restore();
-    };
-
-    // Draw all visualization types for enhanced effect
-    // First the areas
-    drawGammaArea(lowGammaPoints, "#00ff88"); // Low gamma - green
-    drawGammaArea(mediumGammaPoints, "#ffaa00"); // Medium gamma - orange
-    drawGammaArea(highGammaPoints, "#ff0088"); // High gamma - pink
-
-    // Then the flow paths
-    drawGammaFlowPaths(lowGammaPoints, "#00ff88");
-    drawGammaFlowPaths(mediumGammaPoints, "#ffaa00");
-    drawGammaFlowPaths(highGammaPoints, "#ff0088");
-
-    // Finally the hotspots
-    drawGammaHotspots();
-  };
-
-  // Handle export
-  const handleExport = () => {
-    if (canvasRef.current) {
-      const link = document.createElement("a");
-      link.download = "well-trajectory.png";
-      link.href = canvasRef.current.toDataURL("image/png");
-      link.click();
-    }
-    onExport();
-  };
-
-  // Gamma Legend component
-  const GammaLegend = () => (
-    <div className="absolute top-4 left-4 bg-gray-900/90 backdrop-blur-sm p-3 rounded-lg border border-gray-800 shadow-lg text-xs">
-      <div className="flex flex-col gap-2">
-        <div className="text-gray-200 font-medium mb-1 border-b border-gray-800 pb-1 flex items-center">
-          <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
-          <span className="tracking-wider uppercase">Gamma Ray</span>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <div className="flex flex-col items-center bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-            <div className="w-4 h-4 rounded-full bg-green-500 mb-1 shadow-glow-green"></div>
-            <span className="text-gray-300 text-[10px]">Low</span>
-            <span className="text-green-400 text-[9px] font-mono">
-              &lt;40 API
-            </span>
-          </div>
-          <div className="flex flex-col items-center bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-            <div className="w-4 h-4 rounded-full bg-orange-500 mb-1 shadow-glow-orange"></div>
-            <span className="text-gray-300 text-[10px]">Medium</span>
-            <span className="text-orange-400 text-[9px] font-mono">
-              40-70 API
-            </span>
-          </div>
-          <div className="flex flex-col items-center bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-            <div className="w-4 h-4 rounded-full bg-pink-500 mb-1 shadow-glow-pink"></div>
-            <span className="text-gray-300 text-[10px]">High</span>
-            <span className="text-pink-400 text-[9px] font-mono">
-              &gt;70 API
-            </span>
-          </div>
-        </div>
-
-        <div className="text-gray-200 font-medium mt-2 mb-1 border-b border-gray-800 pb-1 flex items-center">
-          <div className="w-2 h-2 rounded-full bg-yellow-500 mr-2"></div>
-          <span className="tracking-wider uppercase">Vibration</span>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <div className="flex flex-col items-center bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-            <div className="w-4 h-4 rounded-full bg-green-500 mb-1"></div>
-            <span className="text-gray-300 text-[10px]">Normal</span>
-            <span className="text-green-400 text-[9px] font-mono">&lt;30%</span>
-          </div>
-          <div className="flex flex-col items-center bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-            <div className="w-4 h-4 rounded-full bg-yellow-500 mb-1 shadow-glow-yellow"></div>
-            <span className="text-gray-300 text-[10px]">Moderate</span>
-            <span className="text-yellow-400 text-[9px] font-mono">30-60%</span>
-          </div>
-          <div className="flex flex-col items-center bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-            <div className="w-4 h-4 rounded-full bg-red-500 mb-1 shadow-glow-red"></div>
-            <span className="text-gray-300 text-[10px]">Severe</span>
-            <span className="text-red-400 text-[9px] font-mono">&gt;60%</span>
-          </div>
-        </div>
-
-        <div className="text-gray-200 font-medium mt-3 mb-1 border-b border-gray-800 pb-1 flex items-center">
-          <div className="w-2 h-2 rounded-full bg-cyan-500 mr-2"></div>
-          <span className="tracking-wider uppercase">Bit Depth</span>
-        </div>
-        <div className="bg-gray-800/80 rounded-md p-2 border border-cyan-900/50 text-center">
-          <div className="text-lg text-cyan-300 font-mono font-bold tracking-wider">
-            {surveys[currentSurveyIndex]?.md?.toFixed(1) || "N/A"} ft
-          </div>
-          <div className="text-[10px] text-gray-400">
-            Current Survey: {currentSurveyIndex + 1} of {surveys.length}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
-    <Card className="w-full h-full bg-gradient-to-b from-gray-900 to-gray-950 border-gray-800 shadow-2xl overflow-hidden rounded-xl">
-      <CardHeader className="p-4 pb-2 border-b border-gray-800 bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900">
+    <Card className="w-full h-full bg-gray-900 border-gray-800 overflow-hidden">
+      <CardHeader className="p-4 border-b border-gray-800 bg-gray-800/90 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="bg-cyan-900/50 p-1.5 rounded-md">
-              <Layers className="h-5 w-5 text-cyan-400" />
-            </div>
-            <CardTitle className="text-xl font-medium text-gray-100 tracking-wide">
-              3D Wellbore Visualization
+            <Layers className="h-5 w-5 text-cyan-400" />
+            <CardTitle className="text-xl font-medium text-gray-100">
+              Wellbore Visualization
             </CardTitle>
-            <Badge
-              variant="outline"
-              className="ml-2 bg-cyan-950/50 text-cyan-300 border-cyan-700 px-3 py-0.5 text-xs font-medium tracking-wider shadow-glow-cyan"
-            >
-              INTERACTIVE
-            </Badge>
           </div>
           <div className="flex items-center gap-2">
+            <Tabs
+              value={viewMode}
+              onValueChange={(value) => setViewMode(value as "3d" | "2d")}
+              className="mr-4"
+            >
+              <TabsList className="bg-gray-800/80 backdrop-blur-sm border border-gray-700">
+                <TabsTrigger
+                  value="3d"
+                  className="data-[state=active]:bg-cyan-900/50 data-[state=active]:text-cyan-100"
+                >
+                  <Box className="h-4 w-4 mr-1" /> 3D View
+                </TabsTrigger>
+                <TabsTrigger
+                  value="2d"
+                  className="data-[state=active]:bg-cyan-900/50 data-[state=active]:text-cyan-100"
+                >
+                  <Grid2 className="h-4 w-4 mr-1" /> 2D View
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            {viewMode === "3d" && (
+              <>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className={`h-9 w-9 ${isAutoRotating ? "bg-cyan-900/50 border-cyan-700 text-cyan-300" : "bg-gray-800/80 backdrop-blur-sm border-gray-700"} hover:bg-cyan-900/30 transition-colors`}
+                  onClick={() => setIsAutoRotating(!isAutoRotating)}
+                >
+                  <RotateCw className="h-4 w-4" />
+                </Button>
+              </>
+            )}
             <Button
               variant="outline"
               size="icon"
-              className={`h-9 w-9 ${isAutoRotating ? "bg-cyan-900/50 border-cyan-700 text-cyan-400" : "bg-gray-800/80 border-gray-700 hover:bg-gray-700/80"} rounded-md transition-all duration-200 shadow-md`}
-              onClick={() => setIsAutoRotating(!isAutoRotating)}
-              aria-label={
-                isAutoRotating ? "Stop auto-rotation" : "Start auto-rotation"
-              }
-            >
-              <RotateCw
-                className={`h-4 w-4 ${isAutoRotating ? "text-cyan-300" : "text-gray-400"}`}
-              />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className={`h-9 ${isAutoRotating ? "bg-cyan-900/50 border-cyan-700 text-cyan-400" : "bg-gray-800/80 border-gray-700 hover:bg-gray-700/80"} rounded-md transition-all duration-200 shadow-md`}
-              onClick={() => setIsAutoRotating(!isAutoRotating)}
-            >
-              {isAutoRotating ? "Auto: ON" : "Auto: OFF"}
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 bg-gray-800/80 border-gray-700 hover:bg-gray-700/80 rounded-md transition-all duration-200 shadow-md"
+              className="h-9 w-9 bg-gray-800/80 backdrop-blur-sm border-gray-700 hover:bg-cyan-900/30 transition-colors"
               onClick={handleZoomIn}
-              aria-label="Zoom in"
             >
-              <ZoomIn className="h-4 w-4 text-gray-300" />
+              <ZoomIn className="h-4 w-4" />
             </Button>
             <Button
               variant="outline"
               size="icon"
-              className="h-9 w-9 bg-gray-800/80 border-gray-700 hover:bg-gray-700/80 rounded-md transition-all duration-200 shadow-md"
+              className="h-9 w-9 bg-gray-800/80 backdrop-blur-sm border-gray-700 hover:bg-cyan-900/30 transition-colors"
               onClick={handleZoomOut}
-              aria-label="Zoom out"
             >
-              <ZoomOut className="h-4 w-4 text-gray-300" />
+              <ZoomOut className="h-4 w-4" />
             </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 bg-gray-800/80 border-gray-700 hover:bg-gray-700/80 rounded-md transition-all duration-200 shadow-md"
-              onClick={handleExport}
-              aria-label="Export image"
-            >
-              <Download className="h-4 w-4 text-gray-300" />
-            </Button>
+            {viewMode === "2d" && (
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 bg-gray-800/80 backdrop-blur-sm border-gray-700 hover:bg-cyan-900/30 transition-colors"
+                onClick={() => setPan2D({ x: 0, y: 0 })}
+              >
+                <Move className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -1162,88 +836,64 @@ const WellTrajectory3DInteractive = ({
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}
-          style={{ height: "100%" }}
         >
-          <canvas
-            ref={canvasRef}
-            className="w-full h-full"
-            style={{ width: "100%", height: "100%" }}
-            aria-label="3D well trajectory visualization"
-          />
+          <div className="absolute inset-0 bg-gradient-to-b from-blue-900/10 to-cyan-900/5 pointer-events-none"></div>
+          <canvas ref={canvasRef} className="w-full h-full" />
 
-          {/* Survey navigation controls */}
-          <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+          {/* Futuristic HUD elements */}
+          <div className="absolute top-4 left-4 bg-gray-900/70 backdrop-blur-sm border border-cyan-800/30 rounded-md p-3 text-xs font-mono text-cyan-400 shadow-lg shadow-cyan-900/20">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></div>
+              <span className="text-cyan-300">WELLBORE TELEMETRY</span>
+            </div>
+            {surveys.length > 0 && currentSurveyIndex < surveys.length && (
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">MD:</span>
+                  <span>{surveys[currentSurveyIndex].md.toFixed(1)} ft</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">INC:</span>
+                  <span>{surveys[currentSurveyIndex].inc.toFixed(2)}°</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">AZ:</span>
+                  <span>{surveys[currentSurveyIndex].az.toFixed(2)}°</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">TVD:</span>
+                  <span>{surveys[currentSurveyIndex].tvd.toFixed(1)} ft</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
             <Button
               variant="outline"
               size="icon"
-              className="h-10 w-10 bg-gray-800/90 border-cyan-900/50 hover:bg-cyan-900/30 hover:border-cyan-800 rounded-md shadow-lg transition-all duration-200"
+              className="h-10 w-10 bg-gray-800/80 backdrop-blur-sm border-cyan-700/50 shadow-lg shadow-cyan-900/20 hover:bg-cyan-900/30 transition-colors"
               onClick={() =>
                 setCurrentSurveyIndex((prev) => Math.max(prev - 1, 0))
               }
               disabled={surveys.length === 0}
-              aria-label="Previous survey point"
             >
-              <ArrowUp className="h-5 w-5 text-cyan-300" />
+              <ArrowUp className="h-5 w-5" />
             </Button>
             <Button
               variant="outline"
               size="icon"
-              className="h-10 w-10 bg-gray-800/90 border-cyan-900/50 hover:bg-cyan-900/30 hover:border-cyan-800 rounded-md shadow-lg transition-all duration-200"
+              className="h-10 w-10 bg-gray-800/80 backdrop-blur-sm border-cyan-700/50 shadow-lg shadow-cyan-900/20 hover:bg-cyan-900/30 transition-colors"
               onClick={() =>
                 setCurrentSurveyIndex((prev) =>
                   Math.min(prev + 1, surveys.length - 1),
                 )
               }
               disabled={surveys.length === 0}
-              aria-label="Next survey point"
             >
-              <ArrowDown className="h-5 w-5 text-cyan-300" />
+              <ArrowDown className="h-5 w-5" />
             </Button>
           </div>
-
-          {/* Instructions overlay */}
-          <div className="absolute bottom-4 left-4 bg-gray-900/90 backdrop-blur-sm p-3 rounded-lg border border-gray-800 shadow-lg text-xs">
-            <div className="flex flex-col gap-2">
-              <div className="text-gray-200 font-medium mb-1 border-b border-gray-800 pb-1 flex items-center">
-                <span className="tracking-wider uppercase text-cyan-400">
-                  Controls
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex items-center gap-2 bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-                  <div className="bg-gray-700 rounded p-0.5 text-[9px] font-mono text-white">
-                    Mouse
-                  </div>
-                  <span className="text-gray-300 text-[10px]">Rotate View</span>
-                </div>
-                <div className="flex items-center gap-2 bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-                  <div className="bg-gray-700 rounded p-0.5 text-[9px] font-mono text-white">
-                    Scroll
-                  </div>
-                  <span className="text-gray-300 text-[10px]">Zoom In/Out</span>
-                </div>
-                <div className="flex items-center gap-2 bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-                  <div className="bg-gray-700 rounded p-0.5 text-[9px] font-mono text-white">
-                    ↑/↓
-                  </div>
-                  <span className="text-gray-300 text-[10px]">
-                    Navigate Surveys
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 bg-gray-800/50 rounded-md p-1.5 border border-gray-700">
-                  <div className="bg-cyan-900/80 rounded p-0.5 text-[9px] font-mono text-cyan-300">
-                    Auto
-                  </div>
-                  <span className="text-gray-300 text-[10px]">
-                    {isAutoRotating ? "Rotating On" : "Rotation Off"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Gamma and depth legend */}
-          <GammaLegend />
         </div>
       </CardContent>
     </Card>

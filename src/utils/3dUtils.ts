@@ -28,9 +28,10 @@ export const project3DPoint = (
 
   // Project to 2D with enhanced depth perception
   // Vertical scale factor adjusted for better visualization of inclination changes
+  // Increased vertical scale factor to make downward trajectory more pronounced
   return {
     x: centerX + rotatedX * scale,
-    y: centerY + rotatedY * scale * 1.25, // Enhanced vertical scale for better depth perception
+    y: centerY + rotatedY * scale * 2.0, // Further enhanced vertical scale for better depth perception
   };
 };
 

@@ -5,6 +5,7 @@ import RosebudCompass from "@/components/dashboard/RosebudCompass";
 import CurveDataWidget from "@/components/dashboard/CurveDataWidget";
 import WellTrajectory3DInteractive from "@/components/dashboard/WellTrajectory3DInteractive";
 import AIAnalytics from "@/components/dashboard/AIAnalytics";
+import SurveyTable from "@/components/dashboard/SurveyTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

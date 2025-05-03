@@ -4,7 +4,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Tooltip,
@@ -18,24 +17,10 @@ import {
   Settings,
   BarChart3,
   Zap,
-  Filter,
   Wrench,
-  ChevronDown,
-  Info,
   RefreshCw,
-  FileText,
-  Download,
-  Lightbulb,
-  Gauge,
-  Thermometer,
-  Layers,
-  ArrowUpDown,
-  RotateCw,
   Vibrate,
   CheckCircle,
-  XCircle,
-  Clock,
-  Calendar,
   Maximize2,
   X,
 } from "lucide-react";
@@ -46,15 +31,15 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
-  Legend,
   ResponsiveContainer,
   AreaChart,
   Area,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
 import { useWits } from "@/context/WitsContext";
+import DecodeQualityAssessment from "./ai/DecodeQualityAssessment";
+import ShockVibeAssessment from "./ai/ShockVibeAssessment";
+import { useHistoricalData } from "@/hooks/useHistoricalData";
+import { usePieChartData } from "@/hooks/usePieChartData";
 
 interface AIAnalyticsProps {
   predictions?: {
@@ -263,110 +248,9 @@ const AIAnalytics = ({
     return "text-red-500";
   };
 
-  // Generate historical data for visualization based on real data
-  const generateHistoricalData = (dataType: string) => {
-    const data = [];
-    const now = new Date();
-
-    // Create 24 data points for the last 24 hours
-    for (let i = 0; i < 24; i++) {
-      const timePoint = new Date(now.getTime() - (24 - i) * 60 * 60 * 1000);
-
-      let value = 0;
-      switch (dataType) {
-        case "vibration":
-          // Base value on current vibration with some historical variation
-          value = witsData.vibration.lateral * (0.7 + Math.sin(i / 3) * 0.3);
-          break;
-        case "temperature":
-          // Base value on current temperature with gradual increase
-          value = witsData.temperature * (0.9 + (i / 24) * 0.2);
-          break;
-        case "battery":
-          // Battery gradually decreases over time
-          value = 90 - (i / 24) * 15 - Math.random() * 3;
-          break;
-        default:
-          value = 50;
-      }
-
-      data.push({
-        time: timePoint.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        value: value,
-        date: timePoint.toLocaleDateString([], {
-          month: "short",
-          day: "numeric",
-        }),
-      });
-    }
-
-    return data;
-  };
-
-  // Generate data for pie charts based on real data
-  const generatePieData = (dataType: string) => {
-    if (dataType === "failures") {
-      return [
-        {
-          name: "Battery",
-          value: predictions.toolFailure.components[0].risk,
-          color: "#ef4444",
-        },
-        {
-          name: "Pulser",
-          value: predictions.toolFailure.components[1].risk,
-          color: "#f59e0b",
-        },
-        {
-          name: "Directional",
-          value: predictions.toolFailure.components[2].risk,
-          color: "#10b981",
-        },
-        {
-          name: "Sensors",
-          value: Math.max(5, predictions.toolFailure.risk / 10),
-          color: "#0ea5e9",
-        },
-        {
-          name: "Other",
-          value: Math.max(5, predictions.toolFailure.risk / 5),
-          color: "#8b5cf6",
-        },
-      ];
-    } else if (dataType === "vibration") {
-      return [
-        {
-          name: "Lateral",
-          value: predictions.shockAndVibe.lateral,
-          color: "#ef4444",
-        },
-        {
-          name: "Axial",
-          value: predictions.shockAndVibe.axial,
-          color: "#f59e0b",
-        },
-        {
-          name: "Torsional",
-          value: predictions.shockAndVibe.torsional,
-          color: "#10b981",
-        },
-        {
-          name: "Other",
-          value: Math.max(
-            5,
-            (predictions.shockAndVibe.lateral +
-              predictions.shockAndVibe.axial) /
-              10,
-          ),
-          color: "#8b5cf6",
-        },
-      ];
-    }
-    return [];
-  };
+  // Import the custom hooks for generating data
+  const { generateHistoricalData } = useHistoricalData();
+  const pieData = usePieChartData(predictions);
 
   return (
     <Card className="w-full h-full bg-gray-950 border-gray-800 shadow-lg overflow-hidden flex flex-col">
@@ -844,346 +728,29 @@ const AIAnalytics = ({
             </TabsContent>
 
             {/* Decode Quality Tab */}
-            <TabsContent
-              value="decode-quality"
-              className="flex-grow p-4 space-y-4 overflow-auto bg-gradient-to-b from-gray-950 to-gray-900"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-medium text-gray-300">
-                    Signal Quality
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    Current decode performance
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`text-2xl font-bold ${getQualityColor(predictions.decodeQuality.quality)}`}
-                  >
-                    {predictions.decodeQuality.quality}%
-                  </span>
-                  <div className="w-16 h-16 relative flex items-center justify-center">
-                    <svg className="w-full h-full" viewBox="0 0 36 36">
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke="#1e293b"
-                        strokeWidth="3"
-                      />
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke={
-                          predictions.decodeQuality.quality > 80
-                            ? "#10b981"
-                            : predictions.decodeQuality.quality > 50
-                              ? "#f59e0b"
-                              : "#ef4444"
-                        }
-                        strokeWidth="3"
-                        strokeDasharray={`${predictions.decodeQuality.quality}, 100`}
-                        style={{
-                          filter: `drop-shadow(0 0 4px ${predictions.decodeQuality.quality > 80 ? "#10b98180" : predictions.decodeQuality.quality > 50 ? "#f59e0b80" : "#ef444480"})`,
-                        }}
-                      />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <h4 className="text-sm font-medium text-gray-400">
-                    Noise Level
-                  </h4>
-                  <span className="text-sm text-gray-300">
-                    {predictions.decodeQuality.noiseLevel}%
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-gray-500">
-                      Filter Strength
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      {filterStrength}%
-                    </span>
-                  </div>
-                  <Slider
-                    value={[filterStrength]}
-                    onValueChange={(values) => setFilterStrength(values[0])}
-                    max={100}
-                    step={1}
-                    className="cursor-pointer"
-                  />
-                  <div className="flex justify-between text-xs text-gray-500">
-                    <span>Minimal</span>
-                    <span>Aggressive</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-gray-800">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="text-sm font-medium text-gray-400">
-                    Recommendations
-                  </h4>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2 text-xs border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300"
-                  >
-                    <Filter className="h-3 w-3 mr-1" />
-                    Apply Filters
-                  </Button>
-                </div>
-                <ul className="space-y-2">
-                  {predictions.decodeQuality.recommendations.map(
-                    (recommendation, index) => (
-                      <li key={index} className="flex items-start gap-2">
-                        <Zap className="h-4 w-4 text-cyan-400 mt-0.5" />
-                        <span className="text-sm text-gray-300">
-                          {recommendation}
-                        </span>
-                      </li>
-                    ),
-                  )}
-                </ul>
-              </div>
-
-              <div className="pt-2 border-t border-gray-800">
-                <h4 className="text-sm font-medium text-gray-400 mb-2">
-                  Signal Quality Trend
-                </h4>
-                <div className="h-[120px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={[
-                        {
-                          time: "00:00",
-                          quality: Math.max(
-                            50,
-                            predictions.decodeQuality.quality * 0.9,
-                          ),
-                        },
-                        {
-                          time: "01:00",
-                          quality: Math.max(
-                            50,
-                            predictions.decodeQuality.quality * 0.95,
-                          ),
-                        },
-                        {
-                          time: "02:00",
-                          quality: Math.max(
-                            50,
-                            predictions.decodeQuality.quality * 0.85,
-                          ),
-                        },
-                        {
-                          time: "03:00",
-                          quality: Math.max(
-                            50,
-                            predictions.decodeQuality.quality * 0.8,
-                          ),
-                        },
-                        {
-                          time: "04:00",
-                          quality: Math.max(
-                            50,
-                            predictions.decodeQuality.quality,
-                          ),
-                        },
-                      ]}
-                      margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                      <XAxis dataKey="time" stroke="#64748b" />
-                      <YAxis stroke="#64748b" domain={[50, 100]} />
-                      <RechartsTooltip
-                        contentStyle={{
-                          backgroundColor: "#0f172a",
-                          borderColor: "#1e293b",
-                          color: "#e2e8f0",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="quality"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+            <TabsContent value="decode-quality">
+              <DecodeQualityAssessment
+                quality={predictions.decodeQuality.quality}
+                noiseLevel={predictions.decodeQuality.noiseLevel}
+                recommendations={predictions.decodeQuality.recommendations}
+                filterStrength={filterStrength}
+                setFilterStrength={setFilterStrength}
+                getQualityColor={getQualityColor}
+              />
             </TabsContent>
 
             {/* Shock & Vibe Tab */}
-            <TabsContent
-              value="shock-vibe"
-              className="flex-grow p-4 space-y-4 overflow-auto bg-gradient-to-b from-gray-950 to-gray-900"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-medium text-gray-300">
-                    Shock & Vibration Analysis
-                  </h3>
-                  <p className="text-sm text-gray-500">
-                    Real-time vibration monitoring and analysis
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`text-2xl font-bold ${getRiskColor(predictions.shockAndVibe.severity)}`}
-                  >
-                    {predictions.shockAndVibe.severity}%
-                  </span>
-                  <div className="w-16 h-16 relative flex items-center justify-center">
-                    <svg className="w-full h-full" viewBox="0 0 36 36">
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke="#1e293b"
-                        strokeWidth="3"
-                      />
-                      <path
-                        d="M18 2.0845
-                          a 15.9155 15.9155 0 0 1 0 31.831
-                          a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke={
-                          predictions.shockAndVibe.severity < 20
-                            ? "#10b981"
-                            : predictions.shockAndVibe.severity < 50
-                              ? "#f59e0b"
-                              : "#ef4444"
-                        }
-                        strokeWidth="3"
-                        strokeDasharray={`${predictions.shockAndVibe.severity}, 100`}
-                        style={{
-                          filter: `drop-shadow(0 0 4px ${predictions.shockAndVibe.severity < 20 ? "#10b98180" : predictions.shockAndVibe.severity < 50 ? "#f59e0b80" : "#ef444480"})`,
-                        }}
-                      />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <h4 className="text-sm font-medium text-gray-400">
-                  Vibration Components
-                </h4>
-                <div className="space-y-2">
-                  <div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-300">Axial</span>
-                      <span
-                        className={`text-sm font-medium ${getRiskColor(predictions.shockAndVibe.axial)}`}
-                      >
-                        {predictions.shockAndVibe.axial}%
-                      </span>
-                    </div>
-                    <Progress
-                      value={predictions.shockAndVibe.axial}
-                      max={100}
-                      className="h-2 bg-gray-800"
-                      indicatorClassName={`${getRiskBgColor(predictions.shockAndVibe.axial)}`}
-                    />
-                  </div>
-                  <div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-300">Lateral</span>
-                      <span
-                        className={`text-sm font-medium ${getRiskColor(predictions.shockAndVibe.lateral)}`}
-                      >
-                        {predictions.shockAndVibe.lateral}%
-                      </span>
-                    </div>
-                    <Progress
-                      value={predictions.shockAndVibe.lateral}
-                      max={100}
-                      className="h-2 bg-gray-800"
-                      indicatorClassName={`${getRiskBgColor(predictions.shockAndVibe.lateral)}`}
-                    />
-                  </div>
-                  <div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-gray-300">Torsional</span>
-                      <span
-                        className={`text-sm font-medium ${getRiskColor(predictions.shockAndVibe.torsional)}`}
-                      >
-                        {predictions.shockAndVibe.torsional}%
-                      </span>
-                    </div>
-                    <Progress
-                      value={predictions.shockAndVibe.torsional}
-                      max={100}
-                      className="h-2 bg-gray-800"
-                      indicatorClassName={`${getRiskBgColor(predictions.shockAndVibe.torsional)}`}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t border-gray-800">
-                <h4 className="text-sm font-medium text-gray-400 mb-2">
-                  Recommended Actions
-                </h4>
-                <ul className="space-y-2">
-                  {predictions.shockAndVibe.recommendations.map(
-                    (recommendation, index) => (
-                      <li key={index} className="flex items-start gap-2">
-                        <Zap className="h-4 w-4 text-cyan-400 mt-0.5" />
-                        <span className="text-sm text-gray-300">
-                          {recommendation}
-                        </span>
-                      </li>
-                    ),
-                  )}
-                </ul>
-              </div>
-
-              <div className="pt-2 border-t border-gray-800">
-                <h4 className="text-sm font-medium text-gray-400 mb-2">
-                  Vibration Trend
-                </h4>
-                <div className="h-[120px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={generateHistoricalData("vibration")}
-                      margin={{ top: 5, right: 5, left: 5, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                      <XAxis dataKey="time" stroke="#64748b" />
-                      <YAxis stroke="#64748b" />
-                      <RechartsTooltip
-                        contentStyle={{
-                          backgroundColor: "#0f172a",
-                          borderColor: "#1e293b",
-                          color: "#e2e8f0",
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="value"
-                        stroke="#ef4444"
-                        strokeWidth={2}
-                        dot={false}
-                        activeDot={{ r: 4 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+            <TabsContent value="shock-vibe">
+              <ShockVibeAssessment
+                severity={predictions.shockAndVibe.severity}
+                axial={predictions.shockAndVibe.axial}
+                lateral={predictions.shockAndVibe.lateral}
+                torsional={predictions.shockAndVibe.torsional}
+                recommendations={predictions.shockAndVibe.recommendations}
+                getRiskColor={getRiskColor}
+                getRiskBgColor={getRiskBgColor}
+                historicalData={generateHistoricalData("vibration")}
+              />
             </TabsContent>
           </Tabs>
         ) : isConnected && isReceiving && showFullReport ? (
