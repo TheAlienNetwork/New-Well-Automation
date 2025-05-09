@@ -20,6 +20,8 @@ import {
   calculateSlideAhead,
   calculateProjectedInclination,
   calculateProjectedAzimuth,
+  calculateBuildRate,
+  calculateTurnRate,
 } from "@/utils/directionalCalculations";
 
 interface DirectionalMetricsPanelProps {
@@ -76,14 +78,24 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
         // Validate the survey data before setting it
         const latestSurvey = sortedSurveys[0];
         if (latestSurvey && typeof latestSurvey === "object") {
-          console.log("Setting latest survey:", latestSurvey);
+          console.log("DirectionalMetricsPanel: New latest survey detected", {
+            id: latestSurvey.id,
+            timestamp: latestSurvey.timestamp,
+            inclination: latestSurvey.inclination,
+            azimuth: latestSurvey.azimuth,
+          });
           setLatestSurvey(latestSurvey);
         } else {
-          console.warn("Latest survey is invalid:", latestSurvey);
+          console.warn(
+            "DirectionalMetricsPanel: No valid survey found in sorted surveys",
+            latestSurvey,
+          );
           setLatestSurvey(null);
         }
       } else {
-        console.log("No surveys available or surveys is not an array");
+        console.log(
+          "DirectionalMetricsPanel: No surveys available or surveys is not an array",
+        );
         setLatestSurvey(null);
       }
     } catch (error) {
@@ -107,21 +119,30 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
         !isNaN(surveyValue) &&
         isFinite(surveyValue)
       ) {
+        console.log(
+          `DirectionalMetricsPanel: Using survey ${label}: ${surveyValue}`,
+        );
         return surveyValue;
       } else if (
         typeof witsValue === "number" &&
         !isNaN(witsValue) &&
         isFinite(witsValue)
       ) {
+        console.log(
+          `DirectionalMetricsPanel: Using WITS ${label}: ${witsValue}`,
+        );
         return witsValue;
       } else {
         console.warn(
-          `Invalid ${label} values - survey: ${surveyValue}, wits: ${witsValue}. Using default 0.`,
+          `DirectionalMetricsPanel: Invalid ${label} values - survey: ${surveyValue}, wits: ${witsValue}. Using default 0.`,
         );
         return 0;
       }
     } catch (error) {
-      console.error(`Error getting ${label} value:`, error);
+      console.error(
+        `DirectionalMetricsPanel: Error getting ${label} value:`,
+        error,
+      );
       return 0;
     }
   };
@@ -136,6 +157,24 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
     witsData?.azimuth,
     "azimuth",
   );
+
+  // Log the source of the data for debugging - matching CurveDataWidget logging
+  console.log("DirectionalMetricsPanel calculation using:", {
+    incSource:
+      typeof latestSurvey?.inclination === "number" &&
+      !isNaN(latestSurvey.inclination) &&
+      isFinite(latestSurvey.inclination)
+        ? "survey"
+        : "wits",
+    azSource:
+      typeof latestSurvey?.azimuth === "number" &&
+      !isNaN(latestSurvey.azimuth) &&
+      isFinite(latestSurvey.azimuth)
+        ? "survey"
+        : "wits",
+    currentInc,
+    currentAz,
+  });
 
   // Calculate values with error handling
   const safeCalculate = (
@@ -160,26 +199,205 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
     }
   };
 
-  const motorYield = safeCalculate(
-    calculateMotorYield,
-    [slideDistance, bendAngle, bitToBendDistance],
-    0,
-    "motorYield",
-  );
+  // Determine if the tool is rotating based on rotary RPM
+  // If rotary RPM is above a threshold (e.g., 5 RPM), consider it rotating
+  const rotationThreshold = 5; // RPM threshold for rotation - standardized with CurveDataWidget
+  const isRotating =
+    typeof witsData?.rotaryRpm === "number"
+      ? witsData.rotaryRpm > rotationThreshold
+      : false;
+
+  console.log("DirectionalMetricsPanel - Rotation status:", {
+    rotaryRpm: witsData?.rotaryRpm,
+    rotationThreshold,
+    isRotating,
+    source: "DirectionalMetricsPanel calculation",
+  });
+
+  // Get previous survey for calculations if available
+  const getPreviousSurvey = () => {
+    try {
+      if (surveys && Array.isArray(surveys) && surveys.length > 1) {
+        // Sort surveys by timestamp (newest first)
+        const sortedSurveys = [...surveys].sort((a, b) => {
+          try {
+            return (
+              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+          } catch (dateError) {
+            console.error("Error sorting survey timestamps:", dateError);
+            return 0;
+          }
+        });
+
+        // Return the second survey (previous to latest)
+        return sortedSurveys[1];
+      }
+      return null;
+    } catch (error) {
+      console.error("Error getting previous survey:", error);
+      return null;
+    }
+  };
+
+  const previousSurvey = getPreviousSurvey();
+
+  // Calculate motor yield using survey data if available
+  let motorYield = 0;
+  if (previousSurvey && latestSurvey) {
+    const prevInc = previousSurvey.inclination;
+    const currentInclination = latestSurvey.inclination;
+    const prevDepth = previousSurvey.measuredDepth || previousSurvey.bitDepth;
+    const currentDepth = latestSurvey.measuredDepth || latestSurvey.bitDepth;
+
+    if (
+      typeof prevInc === "number" &&
+      typeof currentInclination === "number" &&
+      typeof prevDepth === "number" &&
+      typeof currentDepth === "number"
+    ) {
+      const bitToBitDistance = Math.abs(currentDepth - prevDepth);
+      motorYield = safeCalculate(
+        calculateMotorYield,
+        [currentInclination, prevInc, bitToBitDistance],
+        0,
+        "motorYield from surveys",
+      );
+
+      console.log(
+        "DirectionalMetricsPanel - Motor yield calculation from surveys:",
+        {
+          currentInclination,
+          prevInc,
+          bitToBitDistance,
+          result: motorYield,
+        },
+      );
+    } else {
+      // Fallback to legacy calculation
+      motorYield = safeCalculate(
+        calculateMotorYield,
+        [
+          undefined,
+          undefined,
+          undefined,
+          slideDistance,
+          bendAngle,
+          bitToBendDistance,
+        ],
+        0,
+        "motorYield legacy",
+      );
+
+      console.log("DirectionalMetricsPanel - Motor yield legacy calculation:", {
+        slideDistance,
+        bendAngle,
+        bitToBendDistance,
+        result: motorYield,
+      });
+    }
+  } else {
+    // Fallback to legacy calculation
+    motorYield = safeCalculate(
+      calculateMotorYield,
+      [
+        undefined,
+        undefined,
+        undefined,
+        slideDistance,
+        bendAngle,
+        bitToBendDistance,
+      ],
+      0,
+      "motorYield legacy",
+    );
+
+    console.log("DirectionalMetricsPanel - Motor yield legacy calculation:", {
+      slideDistance,
+      bendAngle,
+      bitToBendDistance,
+      result: motorYield,
+    });
+  }
+
+  // Calculate build and turn rates if we have survey data
+  let buildRate = 2.5; // Default value
+  let turnRate = 1.8; // Default value
+
+  if (previousSurvey && latestSurvey) {
+    const prevInc = previousSurvey.inclination;
+    const currentInclination = latestSurvey.inclination;
+    const prevAz = previousSurvey.azimuth;
+    const currentAzimuth = latestSurvey.azimuth;
+    const prevDepth = previousSurvey.measuredDepth || previousSurvey.bitDepth;
+    const currentDepth = latestSurvey.measuredDepth || latestSurvey.bitDepth;
+
+    if (
+      typeof prevInc === "number" &&
+      typeof currentInclination === "number" &&
+      typeof prevAz === "number" &&
+      typeof currentAzimuth === "number" &&
+      typeof prevDepth === "number" &&
+      typeof currentDepth === "number"
+    ) {
+      buildRate = safeCalculate(
+        calculateBuildRate,
+        [prevInc, currentInclination, prevDepth, currentDepth],
+        2.5,
+        "buildRate",
+      );
+
+      turnRate = safeCalculate(
+        calculateTurnRate,
+        [prevAz, currentAzimuth, prevDepth, currentDepth],
+        1.8,
+        "turnRate",
+      );
+
+      console.log(
+        "DirectionalMetricsPanel - Build and turn rate calculations:",
+        {
+          prevInc,
+          currentInclination,
+          prevAz,
+          currentAzimuth,
+          prevDepth,
+          currentDepth,
+          buildRate,
+          turnRate,
+        },
+      );
+    }
+  }
 
   const slideSeen = safeCalculate(
     calculateSlideSeen,
-    [motorYield, slideDistance],
+    [motorYield, slideDistance, isRotating],
     0,
     "slideSeen",
   );
 
+  console.log("DirectionalMetricsPanel - Slide seen calculation:", {
+    motorYield,
+    slideDistance,
+    isRotating,
+    result: slideSeen,
+  });
+
   const slideAhead = safeCalculate(
     calculateSlideAhead,
-    [motorYield, slideDistance, bitToBendDistance],
+    [motorYield, slideDistance, bitToBendDistance, isRotating],
     0,
     "slideAhead",
   );
+
+  console.log("DirectionalMetricsPanel - Slide ahead calculation:", {
+    motorYield,
+    slideDistance,
+    bitToBendDistance,
+    isRotating,
+    result: slideAhead,
+  });
 
   const projectedInc = safeCalculate(
     calculateProjectedInclination,
@@ -188,6 +406,13 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
     "projectedInc",
   );
 
+  console.log("DirectionalMetricsPanel - Projected inclination calculation:", {
+    currentInc,
+    buildRate,
+    distance: targetDistance,
+    result: projectedInc,
+  });
+
   const projectedAz = safeCalculate(
     calculateProjectedAzimuth,
     [currentAz, turnRate, targetDistance],
@@ -195,12 +420,40 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
     "projectedAz",
   );
 
+  console.log("DirectionalMetricsPanel - Projected azimuth calculation:", {
+    currentAz,
+    turnRate,
+    distance: targetDistance,
+    result: projectedAz,
+  });
+
   const doglegNeeded = safeCalculate(
     calculateDoglegNeeded,
     [currentInc, currentAz, targetInc, targetAz, targetDistance],
     0,
     "doglegNeeded",
   );
+
+  console.log("DirectionalMetricsPanel - Dogleg needed calculation:", {
+    currentInc,
+    currentAz,
+    targetInc,
+    targetAz,
+    distance: targetDistance,
+    result: doglegNeeded,
+  });
+
+  // Log the calculated values for debugging
+  console.log("DirectionalMetricsPanel - Calculated values:", {
+    motorYield,
+    slideSeen,
+    slideAhead,
+    projectedInc,
+    projectedAz,
+    doglegNeeded,
+    isRotating,
+    rotaryRpm: witsData?.rotaryRpm,
+  });
 
   // Calculate dogleg severity (DLS) based on actual survey data if available
   // Enhanced with comprehensive error handling and data validation

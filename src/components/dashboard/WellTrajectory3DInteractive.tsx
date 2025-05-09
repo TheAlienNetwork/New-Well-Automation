@@ -47,12 +47,21 @@ interface WellTrajectory3DInteractiveProps {
   surveys?: SurveyPoint[];
   offsetWells?: OffsetWell[];
   onExport?: () => void;
+  manualCurveData?: {
+    slideSeen?: number | null;
+    slideAhead?: number | null;
+    motorYield?: number | null;
+    doglegNeeded?: number | null;
+    projectedInc?: number | null;
+    projectedAz?: number | null;
+  };
 }
 
 const WellTrajectory3DInteractive = ({
   surveys: propSurveys,
   offsetWells = [],
   onExport = () => {},
+  manualCurveData = {},
 }: WellTrajectory3DInteractiveProps) => {
   const [viewMode, setViewMode] = useState<"3d" | "2d">("3d");
   const [pan2D, setPan2D] = useState({ x: 0, y: 0 });
@@ -846,26 +855,86 @@ const WellTrajectory3DInteractive = ({
               <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></div>
               <span className="text-cyan-300">WELLBORE TELEMETRY</span>
             </div>
-            {surveys.length > 0 && currentSurveyIndex < surveys.length && (
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-gray-400">MD:</span>
-                  <span>{surveys[currentSurveyIndex].md.toFixed(1)} ft</span>
+            {surveys.length > 0 &&
+              currentSurveyIndex < surveys.length &&
+              surveys[currentSurveyIndex] && (
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">MD:</span>
+                    <span>{surveys[currentSurveyIndex].md.toFixed(1)} ft</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">INC:</span>
+                    <span>
+                      {(manualCurveData.projectedInc !== null &&
+                      manualCurveData.projectedInc !== undefined
+                        ? manualCurveData.projectedInc
+                        : surveys[currentSurveyIndex]?.inc || 0
+                      ).toFixed(2)}
+                      °
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">AZ:</span>
+                    <span>
+                      {(manualCurveData.projectedAz !== null &&
+                      manualCurveData.projectedAz !== undefined
+                        ? manualCurveData.projectedAz
+                        : surveys[currentSurveyIndex]?.az || 0
+                      ).toFixed(2)}
+                      °
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">TVD:</span>
+                    <span>{surveys[currentSurveyIndex].tvd.toFixed(1)} ft</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Motor Yield:</span>
+                    <span>
+                      {(manualCurveData.motorYield !== null &&
+                      manualCurveData.motorYield !== undefined
+                        ? manualCurveData.motorYield
+                        : 2.5
+                      ).toFixed(2)}
+                      °/100ft
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Dogleg Needed:</span>
+                    <span>
+                      {(manualCurveData.doglegNeeded !== null &&
+                      manualCurveData.doglegNeeded !== undefined
+                        ? manualCurveData.doglegNeeded
+                        : 3.0
+                      ).toFixed(2)}
+                      °/100ft
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Slide Seen:</span>
+                    <span>
+                      {(manualCurveData.slideSeen !== null &&
+                      manualCurveData.slideSeen !== undefined
+                        ? manualCurveData.slideSeen
+                        : 0.0
+                      ).toFixed(2)}
+                      °
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Slide Ahead:</span>
+                    <span>
+                      {(manualCurveData.slideAhead !== null &&
+                      manualCurveData.slideAhead !== undefined
+                        ? manualCurveData.slideAhead
+                        : 0.0
+                      ).toFixed(2)}
+                      °
+                    </span>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">INC:</span>
-                  <span>{surveys[currentSurveyIndex].inc.toFixed(2)}°</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">AZ:</span>
-                  <span>{surveys[currentSurveyIndex].az.toFixed(2)}°</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-400">TVD:</span>
-                  <span>{surveys[currentSurveyIndex].tvd.toFixed(1)} ft</span>
-                </div>
-              </div>
-            )}
+              )}
           </div>
 
           <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">

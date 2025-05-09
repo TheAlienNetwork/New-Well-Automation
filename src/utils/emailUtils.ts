@@ -147,10 +147,52 @@ export const generateEmailContent = (
 };
 
 /**
- * Helper function to generate the well information section of the email
+ * Generates Outlook draft content (HTML format)
  */
-const generateWellInfoSection = (wellInfo: WellInfo): string => {
-  return `
+export const generateOutlookDraftContent = async (
+  selectedSurveys: string[],
+  surveys: SurveyData[],
+  wellInfo: WellInfo,
+  witsData: WitsData,
+  includeCurveData: boolean = false,
+  includeTargetLineStatus: boolean = false,
+  targetLineData?: { aboveBelow: number; leftRight: number } | null,
+  includeGammaPlot: boolean = false,
+  imageBlob?: Blob | null,
+  includeSurveyAnalytics: boolean = false,
+  includeFullSurveyData: boolean = false,
+): Promise<{
+  subject: string;
+  htmlBody: string;
+  attachments: Blob[];
+  imageBase64?: string;
+}> => {
+  // Filter selected surveys
+  const selectedSurveyData =
+    selectedSurveys.length > 0
+      ? surveys.filter((survey) => selectedSurveys.includes(survey.id))
+      : surveys.length > 0
+        ? [surveys[0]]
+        : [];
+
+  // Get the latest survey
+  const latestSurvey =
+    selectedSurveyData.length > 0 ? selectedSurveyData[0] : null;
+
+  if (!latestSurvey) {
+    return {
+      subject: `MWD Survey Report - ${wellInfo.wellName || "Unknown Well"} - ${new Date().toLocaleDateString()}`,
+      htmlBody:
+        "<p>No survey data available. Please select at least one survey.</p>",
+      attachments: [],
+    };
+  }
+
+  // Create enhanced HTML content directly
+  let htmlContent = ``;
+
+  // Well Information Section
+  htmlContent += `
     <div style="margin-bottom: 20px; padding: 15px; background-color: #f0f4f8; border-radius: 8px; border-left: 5px solid #2c5282;">
       <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Well Information</h2>
       <table style="width: 100%; border-collapse: collapse;">
@@ -169,15 +211,9 @@ const generateWellInfoSection = (wellInfo: WellInfo): string => {
       </table>
     </div>
   `;
-};
 
-/**
- * Helper function to generate the survey summary section of the email
- */
-const generateSurveySummarySection = (
-  selectedSurveyData: SurveyData[],
-): string => {
-  return `
+  // Survey Summary Section
+  htmlContent += `
     <div style="margin-bottom: 20px; padding: 15px; background-color: #f0f4f8; border-radius: 8px; border-left: 5px solid #2c5282;">
       <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Survey Summary</h2>
       <table style="width: 100%; border-collapse: collapse;">
@@ -192,15 +228,9 @@ const generateSurveySummarySection = (
       </table>
     </div>
   `;
-};
 
-/**
- * Helper function to generate the detailed survey data section of the email
- */
-const generateDetailedSurveySection = (
-  selectedSurveyData: SurveyData[],
-): string => {
-  let content = `
+  // Detailed Survey Data Section
+  htmlContent += `
     <div style="margin-bottom: 20px;">
       <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Detailed Survey Data</h2>
   `;
@@ -225,7 +255,7 @@ const generateDetailedSurveySection = (
       }
     }
 
-    content += `
+    htmlContent += `
       <div style="margin-bottom: 15px; padding: 15px; background-color: #f8fafc; border-radius: 8px; border-left: 4px solid #3182ce;">
         <h3 style="color: #3182ce; margin-top: 0; margin-bottom: 10px; font-size: 16px;">SURVEY #${index + 1} - ${timestamp}</h3>
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
@@ -267,144 +297,11 @@ const generateDetailedSurveySection = (
     `;
   });
 
-  content += `</div>`;
-  return content;
-};
+  htmlContent += `</div>`;
 
-/**
- * Helper function to generate the screenshot section of the email
- */
-const generateScreenshotSection = (imageBlob?: Blob | null): string => {
-  if (!imageBlob) return "";
-
-  return `
-    <div style="margin: 30px 0;">
-      <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Survey Visualization</h2>
-      <div style="text-align: center;">
-        <img src="cid:surveyPlot" alt="Survey Plot" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-      </div>
-    </div>
-  `;
-};
-
-/**
- * Convert a Blob to a base64 encoded string
- */
-export const blobToBase64 = (blob: Blob): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64String = reader.result as string;
-      resolve(base64String);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-};
-
-/**
- * Helper function to generate the attachments section of the email
- */
-const generateAttachmentsSection = (
-  attachments?: { name: string; size: string; type: string; path: string }[],
-): string => {
-  if (!attachments || attachments.length === 0) return "";
-
-  let content = `
-    <div style="margin-bottom: 20px; padding: 15px; background-color: #f0f4f8; border-radius: 8px; border-left: 5px solid #2c5282;">
-      <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Attachments (${attachments.length})</h2>
-      <ul style="margin: 0; padding-left: 20px;">
-  `;
-
-  attachments.forEach((file) => {
-    content += `
-      <li style="margin-bottom: 5px;">
-        <span style="color: #2d3748; font-weight: 500;">${file.name}</span>
-        <span style="color: #718096; font-size: 13px;"> (${file.size}, ${file.type})</span>
-      </li>
-    `;
-  });
-
-  content += `
-      </ul>
-    </div>
-  `;
-
-  return content;
-};
-
-/**
- * Generates Outlook draft content (HTML format)
- */
-export const generateOutlookDraftContent = async (
-  selectedSurveys: string[],
-  surveys: SurveyData[],
-  wellInfo: WellInfo,
-  witsData: WitsData,
-  includeCurveData: boolean = false,
-  includeTargetLineStatus: boolean = false,
-  targetLineData?: { aboveBelow: number; leftRight: number } | null,
-  includeGammaPlot: boolean = false,
-  imageBlob?: Blob | null,
-  includeSurveyAnalytics: boolean = false,
-  includeFullSurveyData: boolean = false,
-  fileAttachments?: {
-    name: string;
-    size: string;
-    type: string;
-    path: string;
-  }[],
-): Promise<{
-  subject: string;
-  htmlBody: string;
-  attachments: Blob[];
-  imageBase64?: string;
-}> => {
-  // Filter selected surveys
-  const selectedSurveyData =
-    selectedSurveys.length > 0
-      ? surveys.filter((survey) => selectedSurveys.includes(survey.id))
-      : surveys.length > 0
-        ? [surveys[0]]
-        : [];
-
-  // Get the latest survey
-  const latestSurvey =
-    selectedSurveyData.length > 0 ? selectedSurveyData[0] : null;
-
-  if (!latestSurvey) {
-    return {
-      subject: `MWD Survey Report - ${wellInfo.wellName || "Unknown Well"} - ${new Date().toLocaleDateString()}`,
-      htmlBody:
-        "<p>No survey data available. Please select at least one survey.</p>",
-      attachments: [],
-    };
-  }
-
-  // Create enhanced HTML content using helper functions
-  let htmlContent = ``;
-
-  // Well Information Section
-  htmlContent += generateWellInfoSection(wellInfo);
-
-  // Survey Summary Section
-  htmlContent += generateSurveySummarySection(selectedSurveyData);
-
-  // Detailed Survey Data Section
-  htmlContent += generateDetailedSurveySection(selectedSurveyData);
-
-  // Helper functions for generating different sections of the email
-
-  /**
-   * Helper function to generate the curve data section of the email
-   */
-  const generateCurveDataSection = (
-    witsData: WitsData,
-    includeCurveData: boolean,
-  ): string => {
-    if (!includeCurveData || !witsData) return "";
-
-    return `
+  // Add curve data if requested
+  if (includeCurveData && witsData) {
+    htmlContent += `
       <div style="margin-bottom: 20px;">
         <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Curve Data</h2>
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
@@ -435,20 +332,10 @@ export const generateOutlookDraftContent = async (
         </div>
       </div>
     `;
-  };
+  }
 
-  /**
-   * Helper function to generate the target line status section of the email
-   */
-  const generateTargetLineStatusSection = (
-    targetLineData:
-      | { aboveBelow: number; leftRight: number }
-      | null
-      | undefined,
-    includeTargetLineStatus: boolean,
-  ): string => {
-    if (!includeTargetLineStatus || !targetLineData) return "";
-
+  // Add target line status if requested
+  if (includeTargetLineStatus && targetLineData) {
     const aboveBelowText = targetLineData.aboveBelow > 0 ? "Below" : "Above";
     const aboveBelowColor =
       targetLineData.aboveBelow > 0 ? "#c53030" : "#2f855a";
@@ -457,7 +344,7 @@ export const generateOutlookDraftContent = async (
         targetLineData.leftRight * targetLineData.leftRight,
     ).toFixed(1);
 
-    return `
+    htmlContent += `
       <div style="margin-bottom: 20px;">
         <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Target Line Status</h2>
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
@@ -476,18 +363,11 @@ export const generateOutlookDraftContent = async (
         </div>
       </div>
     `;
-  };
+  }
 
-  /**
-   * Helper function to generate the gamma plot section of the email
-   */
-  const generateGammaPlotSection = (
-    latestSurvey: SurveyData,
-    includeGammaPlot: boolean,
-  ): string => {
-    if (!includeGammaPlot) return "";
-
-    return `
+  // Add gamma plot if requested
+  if (includeGammaPlot) {
+    htmlContent += `
       <div style="margin-bottom: 20px;">
         <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Gamma Ray Plot</h2>
         <div style="padding: 15px; background-color: #2d3748; border-radius: 8px; color: #e2e8f0;">
@@ -533,18 +413,11 @@ export const generateOutlookDraftContent = async (
         </div>
       </div>
     `;
-  };
+  }
 
-  /**
-   * Helper function to generate the survey analytics section of the email
-   */
-  const generateSurveyAnalyticsSection = (
-    latestSurvey: SurveyData,
-    includeSurveyAnalytics: boolean,
-  ): string => {
-    if (!includeSurveyAnalytics) return "";
-
-    return `
+  // Add survey analytics if requested
+  if (includeSurveyAnalytics) {
+    htmlContent += `
       <div style="margin-bottom: 20px;">
         <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Survey Analytics</h2>
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
@@ -571,18 +444,11 @@ export const generateOutlookDraftContent = async (
         </div>
       </div>
     `;
-  };
+  }
 
-  /**
-   * Helper function to generate the full survey data section of the email
-   */
-  const generateFullSurveyDataSection = (
-    selectedSurveyData: SurveyData[],
-    includeFullSurveyData: boolean,
-  ): string => {
-    if (!includeFullSurveyData) return "";
-
-    let content = `
+  // Add full survey data if requested
+  if (includeFullSurveyData) {
+    htmlContent += `
       <div style="margin-bottom: 20px;">
         <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Complete Survey Data</h2>
         <div style="overflow-x: auto;">
@@ -602,7 +468,7 @@ export const generateOutlookDraftContent = async (
     `;
 
     selectedSurveyData.forEach((survey) => {
-      content += `
+      htmlContent += `
         <tr>
           <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.bitDepth || 0).toFixed(2)}</td>
           <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.inclination || 0).toFixed(2)}</td>
@@ -615,40 +481,24 @@ export const generateOutlookDraftContent = async (
       `;
     });
 
-    content += `
+    htmlContent += `
             </tbody>
           </table>
         </div>
       </div>
     `;
-
-    return content;
-  };
-
-  /**
-   * Helper function to generate the notes section of the email
-   */
-  const generateNotesSection = (): string => {
-    return `
-      <div style="margin-top: 30px; padding: 15px; background-color: #f7fafc; border-radius: 8px; border-left: 5px solid #4299e1;">
-        <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Notes</h2>
-        <p style="margin: 0; color: #4a5568; line-height: 1.5;">
-          This report was generated automatically by the MWD Surface Software.<br>
-          Please contact the directional driller for any questions or concerns.
-        </p>
-      </div>
-    `;
-  };
-
-  // Convert image blob to base64 if available
-  let imageBase64: string | undefined;
-  if (imageBlob) {
-    try {
-      imageBase64 = await blobToBase64(imageBlob);
-    } catch (error) {
-      console.error("Error converting image to base64:", error);
-    }
   }
+
+  // Add notes section
+  htmlContent += `
+    <div style="margin-top: 30px; padding: 15px; background-color: #f7fafc; border-radius: 8px; border-left: 5px solid #4299e1;">
+      <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Notes</h2>
+      <p style="margin: 0; color: #4a5568; line-height: 1.5;">
+        This report was generated automatically by the MWD Surface Software.<br>
+        Please contact the directional driller for any questions or concerns.
+      </p>
+    </div>
+  `;
 
   // Wrap everything in HTML structure
   const htmlBody = `
@@ -675,12 +525,12 @@ export const generateOutlookDraftContent = async (
         ${htmlContent}
 
         ${
-          imageBase64
+          imageBlob
             ? `
         <div style="margin: 30px 0;">
           <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Survey Visualization</h2>
           <div style="text-align: center;">
-            <img src="${imageBase64}" alt="Survey Plot" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+            <img src="cid:surveyPlot" alt="Survey Plot" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
           </div>
         </div>
         `
@@ -714,7 +564,6 @@ export const generateOutlookDraftContent = async (
     subject,
     htmlBody,
     attachments,
-    imageBase64,
   };
 };
 
@@ -796,25 +645,50 @@ export const createMailtoUrl = (
 
 /**
  * Captures email preview as an image using html2canvas
- * (Unchanged from original implementation)
  */
 export const captureEmailPreview = async (
   element: HTMLElement,
 ): Promise<Blob | null> => {
-  if (!element) return null;
+  if (!element) {
+    console.error("No element provided to captureEmailPreview");
+    return null;
+  }
 
   try {
+    console.log("Starting html2canvas capture");
     const canvas = await html2canvas(element, {
       backgroundColor: "#1a1a1a",
-      scale: 2,
-      logging: false,
+      scale: 1.5, // Reduced scale for better performance and smaller file size
+      logging: true, // Enable logging for debugging
       useCORS: true,
+      allowTaint: true, // Allow tainted canvas for better compatibility
+      foreignObjectRendering: false, // Disable foreignObject rendering for better compatibility
+    });
+
+    console.log("Canvas created with dimensions", {
+      width: canvas.width,
+      height: canvas.height,
     });
 
     return new Promise((resolve) => {
-      canvas.toBlob((blob) => {
-        resolve(blob);
-      }, "image/png");
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            console.error("Failed to create blob from canvas");
+            resolve(null);
+            return;
+          }
+
+          console.log("Blob created from canvas", {
+            size: `${Math.round(blob.size / 1024)}KB`,
+            type: blob.type,
+          });
+
+          resolve(blob);
+        },
+        "image/png",
+        0.85,
+      ); // Use 0.85 quality for better compression
     });
   } catch (error) {
     console.error("Error capturing email preview:", error);
@@ -858,6 +732,24 @@ export const copyImageToClipboard = async (blob: Blob): Promise<boolean> => {
 };
 
 /**
+ * Convert Blob to base64 string
+ */
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Failed to convert blob to base64"));
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+/**
  * New function to handle the complete Outlook email creation flow
  */
 export const createOutlookEmailWithSurveyData = async (
@@ -882,10 +774,26 @@ export const createOutlookEmailWithSurveyData = async (
       size: string;
     }[];
     emailPreviewImage?: Blob | null;
+    embedScreenshot?: boolean;
   } = {},
 ) => {
   try {
-    // Generate email content with base64 encoded image
+    // Process screenshot if available and embedding is requested
+    let imageBase64: string | null = null;
+    if (options.emailPreviewImage && options.embedScreenshot) {
+      try {
+        console.log("Converting screenshot to base64");
+        imageBase64 = await blobToBase64(options.emailPreviewImage);
+        console.log("Screenshot converted to base64", {
+          length: imageBase64.length,
+          preview: imageBase64.substring(0, 50) + "...",
+        });
+      } catch (imgError) {
+        console.error("Failed to convert screenshot to base64:", imgError);
+      }
+    }
+
+    // Generate email content
     const emailContentObj = await generateOutlookDraftContent(
       selectedSurveys,
       surveys,
@@ -898,23 +806,47 @@ export const createOutlookEmailWithSurveyData = async (
       options.emailPreviewImage,
       options.includeSurveyAnalytics,
       options.includeFullSurveyData,
-      options.fileAttachments, // Pass file attachments to include in the email body
     );
 
-    // Create email subject
-    const subject = `Survey Report - Well ${wellInfo.wellName} - ${wellInfo.rigName}`;
+    // Create email subject with fallback values if wellInfo properties are undefined
+    const subject = `Survey Report - Well ${wellInfo.wellName || "Unknown"} - ${wellInfo.rigName || "Unknown"}`;
 
-    // Prepare attachments - only add if we're not using base64 embedded image
+    // Prepare the HTML body with embedded image if available
+    let htmlBody = emailContentObj.htmlBody;
+
+    // If we have a base64 image and embedding is requested, insert it directly into the HTML
+    if (imageBase64 && options.embedScreenshot) {
+      // Find the closing body tag and insert the image before it
+      const imageHtml = `
+        <div style="margin: 30px 0;">
+          <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Survey Visualization</h2>
+          <div style="text-align: center;">
+            <img src="${imageBase64}" alt="Survey Plot" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+          </div>
+        </div>
+      `;
+
+      // Insert before the footer div or body closing tag
+      htmlBody = htmlBody.replace(
+        /<div class="footer"/,
+        `${imageHtml}<div class="footer"`,
+      );
+
+      console.log("Added embedded screenshot to email HTML");
+    }
+
+    // Prepare attachments - only add as attachment if we're not embedding
     const attachments = [];
-    if (options.emailPreviewImage && !emailContentObj.imageBase64) {
+    if (options.emailPreviewImage && !imageBase64) {
       attachments.push(options.emailPreviewImage);
+      console.log("Adding screenshot as attachment instead of embedding");
     }
 
     // Launch Outlook draft with HTML content and file attachments
     await launchOutlookDraft(
       {
         subject,
-        htmlBody: emailContentObj.htmlBody,
+        htmlBody: htmlBody,
         attachments: attachments,
       },
       options.recipients || [],
@@ -923,6 +855,45 @@ export const createOutlookEmailWithSurveyData = async (
     );
   } catch (error) {
     console.error("Error creating Outlook email with survey data:", error);
-    throw error;
+
+    // Fallback method if the main approach fails
+    try {
+      // Create a simplified plain text version as fallback
+      const { generateEmailContent } = await import("@/utils/emailUtils");
+      const plainTextContent = generateEmailContent(
+        selectedSurveys,
+        surveys,
+        wellInfo,
+        witsData,
+        options.includeCurveData,
+        options.includeTargetLineStatus,
+        options.targetLineData,
+        options.includeGammaPlot,
+        options.includeSurveyAnalytics,
+        options.includeFullSurveyData,
+      );
+
+      const subject = `Survey Report - Well ${wellInfo.wellName || "Unknown"} - ${wellInfo.rigName || "Unknown"}`;
+      const recipients = options.recipients || [];
+
+      // Use simple mailto as last resort
+      const mailtoUrl = `mailto:${encodeURIComponent(recipients.join(";"))}?subject=${encodeURIComponent(subject)}`;
+      window.location.href = mailtoUrl;
+
+      // Copy content to clipboard as backup
+      try {
+        await navigator.clipboard.writeText(plainTextContent);
+        alert(
+          "Email content copied to clipboard as fallback. You can paste it into your email client.",
+        );
+      } catch (clipboardError) {
+        console.error("Failed to copy to clipboard:", clipboardError);
+      }
+    } catch (fallbackError) {
+      console.error("Fallback email method also failed:", fallbackError);
+      alert(
+        "Could not open email client. Please try again or use the manual export option.",
+      );
+    }
   }
 };

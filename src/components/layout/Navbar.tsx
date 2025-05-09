@@ -15,6 +15,7 @@ import {
   Wifi,
   Brain,
   User,
+  Database,
 } from "lucide-react";
 
 const Navbar = () => {
@@ -55,6 +56,11 @@ const Navbar = () => {
       path: "/witsconfig",
       label: "WITS Config",
       icon: <Wifi className="h-5 w-5" />,
+    },
+    {
+      path: "/database",
+      label: "Database Management",
+      icon: <Database className="h-5 w-5" />,
     },
     {
       path: "/oppsupport",

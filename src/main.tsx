@@ -5,6 +5,9 @@ import "./index.css";
 import { BrowserRouter } from "react-router-dom";
 
 import { TempoDevtools } from "tempo-devtools";
+import { UserProvider } from "./context/UserContext";
+import { SurveyProvider } from "./context/SurveyContext";
+
 TempoDevtools.init();
 
 const basename = import.meta.env.BASE_URL;

@@ -6,6 +6,7 @@ import CurveDataWidget from "@/components/dashboard/CurveDataWidget";
 import WellTrajectory3DInteractive from "@/components/dashboard/WellTrajectory3DInteractive";
 import AIAnalytics from "@/components/dashboard/AIAnalytics";
 import SurveyTable from "@/components/dashboard/SurveyTable";
+import NudgeProjectionControls from "@/components/dashboard/NudgeProjectionControls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -117,6 +118,30 @@ const DirectionalPage = () => {
   const [targetLineUpdated, setTargetLineUpdated] = useState(false);
   const [aboveBelow, setAboveBelow] = useState(0);
   const [leftRight, setLeftRight] = useState(0);
+
+  // State for manual curve data values
+  const [manualSlideSeen, setManualSlideSeen] = useState<number | null>(null);
+  const [manualSlideAhead, setManualSlideAhead] = useState<number | null>(null);
+  const [manualMotorYield, setManualMotorYield] = useState<number | null>(null);
+  const [manualDoglegNeeded, setManualDoglegNeeded] = useState<number | null>(
+    null,
+  );
+  const [manualProjectedInc, setManualProjectedInc] = useState<number | null>(
+    null,
+  );
+  const [manualProjectedAz, setManualProjectedAz] = useState<number | null>(
+    null,
+  );
+
+  // Create a single object with all manual curve data values for easier passing to components
+  const manualCurveData = {
+    slideSeen: manualSlideSeen,
+    slideAhead: manualSlideAhead,
+    motorYield: manualMotorYield,
+    doglegNeeded: manualDoglegNeeded,
+    projectedInc: manualProjectedInc,
+    projectedAz: manualProjectedAz,
+  };
 
   // Default empty arrays for trajectory data
   const [offsetWells, setOffsetWells] = useState([
@@ -817,49 +842,70 @@ const DirectionalPage = () => {
                 <div className="h-[250px]">
                   <CurveDataWidget
                     motorYield={
-                      latestSurvey &&
-                      typeof latestSurvey.inclination === "number"
-                        ? calculateMotorYield(30, 2.0, 5)
-                        : getParameterValue(witsData.motorYield)
+                      manualMotorYield !== null
+                        ? manualMotorYield
+                        : latestSurvey &&
+                            typeof latestSurvey.inclination === "number"
+                          ? calculateMotorYield(30, 2.0, 5)
+                          : getParameterValue(witsData.motorYield)
                     }
-                    doglegNeeded={calculateDoglegNeeded()}
+                    doglegNeeded={
+                      manualDoglegNeeded !== null
+                        ? manualDoglegNeeded
+                        : calculateDoglegNeeded()
+                    }
                     slideSeen={
-                      latestSurvey &&
-                      typeof latestSurvey.inclination === "number"
-                        ? calculateSlideSeen(
-                            calculateMotorYield(30, 2.0, 5),
-                            30,
-                          )
-                        : getParameterValue(witsData.slideSeen)
+                      manualSlideSeen !== null
+                        ? manualSlideSeen
+                        : latestSurvey &&
+                            typeof latestSurvey.inclination === "number"
+                          ? calculateSlideSeen(
+                              calculateMotorYield(30, 2.0, 5),
+                              30,
+                              typeof witsData?.rotaryRpm === "number"
+                                ? witsData.rotaryRpm > 5
+                                : false,
+                            )
+                          : getParameterValue(witsData.slideSeen)
                     }
                     slideAhead={
-                      latestSurvey &&
-                      typeof latestSurvey.inclination === "number"
-                        ? calculateSlideAhead(
-                            calculateMotorYield(30, 2.0, 5),
-                            30,
-                            5,
-                          )
-                        : getParameterValue(witsData.slideAhead)
+                      manualSlideAhead !== null
+                        ? manualSlideAhead
+                        : latestSurvey &&
+                            typeof latestSurvey.inclination === "number"
+                          ? calculateSlideAhead(
+                              calculateMotorYield(30, 2.0, 5),
+                              30,
+                              5,
+                              typeof witsData?.rotaryRpm === "number"
+                                ? witsData.rotaryRpm > 5
+                                : false,
+                            )
+                          : getParameterValue(witsData.slideAhead)
                     }
                     projectedInc={
-                      latestSurvey &&
-                      typeof latestSurvey.inclination === "number"
-                        ? calculateProjectedInclination(
-                            latestSurvey.inclination,
-                            2.5,
-                            100,
-                          )
-                        : targetInclination
+                      manualProjectedInc !== null
+                        ? manualProjectedInc
+                        : latestSurvey &&
+                            typeof latestSurvey.inclination === "number"
+                          ? calculateProjectedInclination(
+                              latestSurvey.inclination,
+                              2.5,
+                              100,
+                            )
+                          : targetInclination
                     }
                     projectedAz={
-                      latestSurvey && typeof latestSurvey.azimuth === "number"
-                        ? calculateProjectedAzimuth(
-                            latestSurvey.azimuth,
-                            1.8,
-                            100,
-                          )
-                        : targetAzimuth
+                      manualProjectedAz !== null
+                        ? manualProjectedAz
+                        : latestSurvey &&
+                            typeof latestSurvey.azimuth === "number"
+                          ? calculateProjectedAzimuth(
+                              latestSurvey.azimuth,
+                              1.8,
+                              100,
+                            )
+                          : targetAzimuth
                     }
                     isRealtime={isConnected && isReceiving}
                     slideDistance={30}
@@ -868,7 +914,84 @@ const DirectionalPage = () => {
                     targetInc={targetInclination}
                     targetAz={targetAzimuth}
                     distance={100}
+                    onSlideSeenChange={(value) => setManualSlideSeen(value)}
+                    onSlideAheadChange={(value) => setManualSlideAhead(value)}
+                    onMotorYieldChange={(value) => setManualMotorYield(value)}
+                    onDoglegNeededChange={(value) =>
+                      setManualDoglegNeeded(value)
+                    }
+                    onProjectedIncChange={(value) =>
+                      setManualProjectedInc(value)
+                    }
+                    onProjectedAzChange={(value) => setManualProjectedAz(value)}
                   />
+                  {/* Add debug logging to help identify data discrepancies */}
+                  {console.log("DirectionalPage - CurveDataWidget props:", {
+                    motorYield:
+                      latestSurvey &&
+                      typeof latestSurvey.inclination === "number"
+                        ? calculateMotorYield(30, 2.0, 5)
+                        : getParameterValue(witsData.motorYield),
+                    doglegNeeded: calculateDoglegNeeded(),
+                    slideSeen:
+                      manualSlideSeen !== null
+                        ? manualSlideSeen
+                        : latestSurvey &&
+                            typeof latestSurvey.inclination === "number"
+                          ? calculateSlideSeen(
+                              calculateMotorYield(30, 2.0, 5),
+                              30,
+                              typeof witsData?.rotaryRpm === "number"
+                                ? witsData.rotaryRpm > 5
+                                : false,
+                            )
+                          : getParameterValue(witsData.slideSeen),
+                    slideAhead:
+                      manualSlideAhead !== null
+                        ? manualSlideAhead
+                        : latestSurvey &&
+                            typeof latestSurvey.inclination === "number"
+                          ? calculateSlideAhead(
+                              calculateMotorYield(30, 2.0, 5),
+                              30,
+                              5,
+                              typeof witsData?.rotaryRpm === "number"
+                                ? witsData.rotaryRpm > 5
+                                : false,
+                            )
+                          : getParameterValue(witsData.slideAhead),
+                    projectedInc:
+                      latestSurvey &&
+                      typeof latestSurvey.inclination === "number"
+                        ? calculateProjectedInclination(
+                            latestSurvey.inclination,
+                            2.5,
+                            100,
+                          )
+                        : targetInclination,
+                    projectedAz:
+                      latestSurvey && typeof latestSurvey.azimuth === "number"
+                        ? calculateProjectedAzimuth(
+                            latestSurvey.azimuth,
+                            1.8,
+                            100,
+                          )
+                        : targetAzimuth,
+                    isRealtime: isConnected && isReceiving,
+                    rotaryRpm: witsData?.rotaryRpm,
+                    isRotating:
+                      typeof witsData?.rotaryRpm === "number"
+                        ? witsData.rotaryRpm > 5
+                        : false,
+                    latestSurveyData: latestSurvey
+                      ? {
+                          inclination: latestSurvey.inclination,
+                          azimuth: latestSurvey.azimuth,
+                        }
+                      : null,
+                    manualSlideSeen,
+                    manualSlideAhead,
+                  })}
                 </div>
 
                 {/* Directional Metrics */}
@@ -986,56 +1109,28 @@ const DirectionalPage = () => {
                 </Card>
 
                 {/* Nudge Projection */}
-                <Card className="bg-gray-900 border-gray-800 shadow-lg overflow-hidden">
-                  <CardHeader className="p-3 pb-0 flex flex-row items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Activity className="h-4 w-4 text-purple-400" />
-                      <CardTitle className="text-sm font-medium text-gray-300">
-                        Nudge Projection
-                      </CardTitle>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-3">
-                    <div className="space-y-3">
-                      <div className="p-2 bg-gray-800/50 rounded-md">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-gray-500">
-                            Current Inc/Az
-                          </span>
-                          <span className="text-sm font-medium text-gray-300">
-                            {getParameterValue(witsData.inclination).toFixed(1)}
-                            ° / {getParameterValue(witsData.azimuth).toFixed(1)}
-                            °
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-2 bg-gray-800/50 rounded-md">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-gray-500">
-                            Target Inc/Az
-                          </span>
-                          <span className="text-sm font-medium text-gray-300">
-                            {targetInclination.toFixed(1)}° /{" "}
-                            {targetAzimuth.toFixed(1)}°
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-2 bg-purple-900/20 border border-purple-800 rounded-md">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs text-gray-400">
-                            Recommended Nudge
-                          </span>
-                          <span className="text-sm font-medium text-purple-400">
-                            +{getParameterValue(2.5).toFixed(1)}° / +
-                            {getParameterValue(2.7).toFixed(1)}°
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                <NudgeProjectionControls
+                  currentInclination={
+                    latestSurvey && typeof latestSurvey.inclination === "number"
+                      ? latestSurvey.inclination
+                      : getParameterValue(witsData.inclination)
+                  }
+                  currentAzimuth={
+                    latestSurvey && typeof latestSurvey.azimuth === "number"
+                      ? latestSurvey.azimuth
+                      : getParameterValue(witsData.azimuth)
+                  }
+                  witsData={{
+                    toolFace: getParameterValue(witsData.toolFace),
+                    motorYield: getParameterValue(witsData.motorYield),
+                    slideDistance: getParameterValue(
+                      witsData.slideDistance || 30,
+                    ),
+                    projectedInc: getParameterValue(witsData.projectedInc),
+                    projectedAz: getParameterValue(witsData.projectedAz),
+                  }}
+                  isWitsConnected={isConnected && isReceiving}
+                />
               </div>
 
               {/* Middle Column */}
@@ -1050,6 +1145,7 @@ const DirectionalPage = () => {
                       targetVS={targetVS}
                       targetAzimuth={targetAzimuth}
                       showTargetLine={targetLineUpdated}
+                      manualCurveData={manualCurveData}
                     />
                   </ErrorBoundary>
                 </div>
@@ -1061,6 +1157,7 @@ const DirectionalPage = () => {
                     isReceiving={isReceiving}
                     witsData={witsData}
                     surveys={surveys}
+                    manualCurveData={manualCurveData}
                   />
                 </div>
               </div>

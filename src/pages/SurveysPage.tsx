@@ -75,9 +75,9 @@ const SurveysPage = () => {
 
   // Well information state - moved to the top to ensure it's initialized before use
   const [wellInfo, setWellInfo] = useState({
-    wellName: "",
-    rigName: "",
-    sensorOffset: 0,
+    wellName: localStorage.getItem("wellName") || "",
+    rigName: localStorage.getItem("rigName") || "",
+    sensorOffset: Number(localStorage.getItem("sensorOffset")) || 0,
   });
 
   // Get the latest survey for calculations
@@ -934,6 +934,78 @@ const SurveysPage = () => {
                       distance={100}
                       wellInfo={wellInfo}
                     />
+                    {/* Add debug logging to help identify data discrepancies */}
+                    {console.log("SurveysPage - CurveDataWidget props:", {
+                      motorYield:
+                        latestSurvey &&
+                        typeof latestSurvey.inclination === "number"
+                          ? calculateMotorYield(30, 2.0, 5)
+                          : 0,
+                      doglegNeeded:
+                        latestSurvey &&
+                        typeof latestSurvey.inclination === "number" &&
+                        typeof latestSurvey.azimuth === "number"
+                          ? calculateDoglegNeeded(
+                              latestSurvey.inclination,
+                              latestSurvey.azimuth,
+                              35,
+                              275,
+                              100,
+                            )
+                          : 3.2,
+                      slideSeen:
+                        latestSurvey &&
+                        typeof latestSurvey.inclination === "number"
+                          ? calculateSlideSeen(
+                              calculateMotorYield(30, 2.0, 5),
+                              30,
+                              typeof witsData?.rotaryRpm === "number"
+                                ? witsData.rotaryRpm > 5
+                                : false,
+                            )
+                          : 0,
+                      slideAhead:
+                        latestSurvey &&
+                        typeof latestSurvey.inclination === "number"
+                          ? calculateSlideAhead(
+                              calculateMotorYield(30, 2.0, 5),
+                              30,
+                              5,
+                              typeof witsData?.rotaryRpm === "number"
+                                ? witsData.rotaryRpm > 5
+                                : false,
+                            )
+                          : 0,
+                      projectedInc:
+                        latestSurvey &&
+                        typeof latestSurvey.inclination === "number"
+                          ? calculateProjectedInclination(
+                              latestSurvey.inclination,
+                              2.5,
+                              100,
+                            )
+                          : 0,
+                      projectedAz:
+                        latestSurvey && typeof latestSurvey.azimuth === "number"
+                          ? calculateProjectedAzimuth(
+                              latestSurvey.azimuth,
+                              1.8,
+                              100,
+                            )
+                          : 0,
+                      isRealtime: isReceiving || false,
+                      rotaryRpm: witsData?.rotaryRpm,
+                      isRotating:
+                        typeof witsData?.rotaryRpm === "number"
+                          ? witsData.rotaryRpm > 5
+                          : false,
+                      latestSurveyData: latestSurvey
+                        ? {
+                            inclination: latestSurvey.inclination,
+                            azimuth: latestSurvey.azimuth,
+                          }
+                        : null,
+                    })}
                   </div>
                 </div>
               </div>

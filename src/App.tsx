@@ -8,18 +8,25 @@ import WitsConfigPage from "./pages/WitsConfigPage";
 import DrillingParametersPage from "./pages/DrillingParametersPage";
 import OppSupportPage from "./pages/OppSupportPage";
 import ProfilePage from "./pages/ProfilePage";
+import DatabaseManagementPage from "./pages/DatabaseManagementPage";
 import routes from "tempo-routes";
 import { WitsProvider } from "./context/WitsContext";
 import { UserProvider } from "./context/UserContext";
 import { SurveyProvider } from "./context/SurveyContext";
 
 function App() {
+  // Store the result of useRoutes in a variable instead of using it directly in JSX
+  const tempoRoutes =
+    import.meta.env.VITE_TEMPO === "true" ? useRoutes(routes) : null;
+
   return (
     <Suspense fallback={<div>Loading...</div>}>
       <UserProvider>
         <SurveyProvider>
           <WitsProvider>
             <>
+              {/* Render tempo routes first */}
+              {tempoRoutes}
               <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/surveys" element={<SurveysPage />} />
@@ -32,11 +39,11 @@ function App() {
                 />
                 <Route path="/oppsupport" element={<OppSupportPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
+                <Route path="/database" element={<DatabaseManagementPage />} />
                 {import.meta.env.VITE_TEMPO === "true" && (
                   <Route path="/tempobook/*" />
                 )}
               </Routes>
-              {import.meta.env.VITE_TEMPO === "true" && useRoutes(routes)}
             </>
           </WitsProvider>
         </SurveyProvider>

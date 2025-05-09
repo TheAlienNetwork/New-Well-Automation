@@ -1,281 +1,164 @@
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/types/supabase";
+import { supabase } from "./supabase";
+import type { Tables, TablesInsert } from "@/types/supabase";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Get a well by ID
+export async function getWell(wellId: string) {
+  try {
+    const { data, error } = await supabase
+      .from("wells")
+      .select("*")
+      .eq("id", wellId)
+      .single();
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Missing Supabase environment variables");
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error("Error fetching well:", error);
+    return null;
+  }
 }
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+// Create a new well
+export async function createWell(wellData: Partial<Tables["wells"]["Insert"]>) {
+  try {
+    const { data, error } = await supabase
+      .from("wells")
+      .insert([wellData])
+      .select()
+      .single();
 
-// WITS Connections
-export const getWitsConnections = async () => {
-  const { data, error } = await supabase
-    .from("wits_connections")
-    .select("*")
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("Error fetching WITS connections:", error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const getWitsConnection = async (id: string) => {
-  const { data, error } = await supabase
-    .from("wits_connections")
-    .select("*, wits_channel_mappings(*)")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    console.error(`Error fetching WITS connection ${id}:`, error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const createWitsConnection = async (connection: any) => {
-  const { data, error } = await supabase
-    .from("wits_connections")
-    .insert(connection)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating WITS connection:", error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const updateWitsConnection = async (id: string, updates: any) => {
-  const { data, error } = await supabase
-    .from("wits_connections")
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error(`Error updating WITS connection ${id}:`, error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const deleteWitsConnection = async (id: string) => {
-  const { error } = await supabase
-    .from("wits_connections")
-    .delete()
-    .eq("id", id);
-
-  if (error) {
-    console.error(`Error deleting WITS connection ${id}:`, error);
-    throw error;
-  }
-
-  return true;
-};
-
-// WITS Channel Mappings
-export const createWitsChannelMapping = async (mapping: any) => {
-  const { data, error } = await supabase
-    .from("wits_channel_mappings")
-    .insert(mapping)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating WITS channel mapping:", error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const updateWitsChannelMapping = async (id: string, updates: any) => {
-  const { data, error } = await supabase
-    .from("wits_channel_mappings")
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error(`Error updating WITS channel mapping ${id}:`, error);
-    throw error;
-  }
-
-  return data;
-};
-
-// Surveys
-export const getSurveys = async (wellId?: string, limit = 100) => {
-  let query = supabase
-    .from("surveys")
-    .select("*")
-    .order("timestamp", { ascending: false })
-    .limit(limit);
-
-  if (wellId) {
-    query = query.eq("well_id", wellId);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    console.error("Error fetching surveys:", error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const createSurvey = async (survey: any) => {
-  const { data, error } = await supabase
-    .from("surveys")
-    .insert(survey)
-    .select()
-    .single();
-
-  if (error) {
-    console.error("Error creating survey:", error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const createSurveyBatch = async (surveys: any[]) => {
-  const { data, error } = await supabase
-    .from("surveys")
-    .insert(surveys)
-    .select();
-
-  if (error) {
-    console.error("Error creating survey batch:", error);
-    throw error;
-  }
-
-  return data;
-};
-
-// Wells
-export const getWells = async () => {
-  const { data, error } = await supabase
-    .from("wells")
-    .select("*")
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("Error fetching wells:", error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const getWell = async (id: string) => {
-  const { data, error } = await supabase
-    .from("wells")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    console.error(`Error fetching well ${id}:`, error);
-    throw error;
-  }
-
-  return data;
-};
-
-export const createWell = async (well: any) => {
-  const { data, error } = await supabase
-    .from("wells")
-    .insert(well)
-    .select()
-    .single();
-
-  if (error) {
+    if (error) throw error;
+    return data;
+  } catch (error) {
     console.error("Error creating well:", error);
     throw error;
   }
+}
 
-  return data;
-};
+// Update a well by ID
+export async function updateWell(
+  wellId: string,
+  wellData: Partial<Tables["wells"]["Update"]>,
+) {
+  try {
+    const { data, error } = await supabase
+      .from("wells")
+      .update(wellData)
+      .eq("id", wellId)
+      .select()
+      .single();
 
-export const updateWell = async (id: string, updates: any) => {
-  const { data, error } = await supabase
-    .from("wells")
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error(`Error updating well ${id}:`, error);
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error("Error updating well:", error);
     throw error;
   }
+}
 
-  return data;
-};
+// Get active wells
+export async function getActiveWells() {
+  try {
+    const { data, error } = await supabase
+      .from("wells")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
 
-// WITS Logs
-export const createWitsLog = async (log: any) => {
-  const { data, error } = await supabase
-    .from("wits_logs")
-    .insert(log)
-    .select()
-    .single();
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error("Error fetching active wells:", error);
+    return [];
+  }
+}
 
-  if (error) {
-    console.error("Error creating WITS log:", error);
+// Get databases with optional filtering
+export async function getDatabases(options?: {
+  userId?: string;
+  isActive?: boolean;
+}) {
+  try {
+    let query = supabase.from("wits_databases").select("*");
+
+    // Remove userId filtering as it might be preventing databases from showing
+    // if (options?.userId) {
+    //   query = query.eq("user_id", options.userId);
+    // }
+
+    if (options?.isActive !== undefined) {
+      query = query.eq("is_active", options.isActive);
+    }
+
+    const { data, error } = await query.order("created_at", {
+      ascending: false,
+    });
+
+    if (error) throw error;
+    console.log("Fetched databases raw result:", data);
+    return data;
+  } catch (error) {
+    console.error("Error fetching databases:", error);
+    return [];
+  }
+}
+
+// Create a new database
+export async function createDatabase(
+  databaseData: Partial<Tables["wits_databases"]["Insert"]>,
+) {
+  try {
+    console.log("Creating database with data:", databaseData);
+    const { data, error } = await supabase
+      .from("wits_databases")
+      .insert([databaseData])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Supabase error creating database:", error);
+      throw error;
+    }
+
+    console.log("Database created successfully:", data);
+    return data;
+  } catch (error) {
+    console.error("Error creating database:", error);
     throw error;
   }
+}
 
-  return data;
-};
+// Delete a database by ID
+export async function deleteDatabase(databaseId: string) {
+  try {
+    const { error } = await supabase
+      .from("wits_databases")
+      .delete()
+      .eq("id", databaseId);
 
-export const getWitsLogs = async (
-  connectionId: string,
-  limit = 100,
-  logType?: string,
-) => {
-  let query = supabase
-    .from("wits_logs")
-    .select("*")
-    .eq("connection_id", connectionId)
-    .order("timestamp", { ascending: false })
-    .limit(limit);
-
-  if (logType) {
-    query = query.eq("log_type", logType);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    console.error("Error fetching WITS logs:", error);
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error("Error deleting database:", error);
     throw error;
   }
+}
 
-  return data;
-};
+// Update database statistics
+export async function updateDatabaseStats(
+  databaseId: string,
+  stats: Partial<Tables["wits_databases"]["Update"]>,
+) {
+  try {
+    const { error } = await supabase
+      .from("wits_databases")
+      .update(stats)
+      .eq("id", databaseId);
+
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error("Error updating database stats:", error);
+    return false;
+  }
+}

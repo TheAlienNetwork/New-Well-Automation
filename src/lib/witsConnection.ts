@@ -20,8 +20,21 @@ interface WitsConnectionOptions {
   maxReconnectAttempts?: number;
   wsEndpoint?: string;
   noralisMode?: boolean;
-  witsVersion?: "0" | "1"; // WITS Level 0 or 1
+  witsLevel?: "0" | "1"; // WITS Level 0 or 1
   delimiter?: string; // Custom record delimiter
+  wellId?: string;
+  wellName?: string;
+  rigName?: string;
+  sensorOffset?: number;
+  // WebSocket specific options
+  heartbeatInterval?: number; // Interval between ping messages in ms
+  maxMissedPongs?: number; // Maximum number of missed pongs before reconnect
+  connectionTimeout?: number; // Connection timeout in ms
+  binaryType?: "blob" | "arraybuffer"; // WebSocket binary type
+  // WebSocket-to-TCP proxy options
+  proxyMode?: boolean; // Whether to use WebSocket-to-TCP proxy
+  tcpHost?: string; // TCP host to connect to via proxy
+  tcpPort?: number; // TCP port to connect to via proxy
 }
 
 class WitsConnection {
@@ -53,7 +66,7 @@ class WitsConnection {
       maxReconnectAttempts: 100,
       wsEndpoint: "/wits",
       noralisMode: false,
-      witsVersion: "0",
+      witsLevel: "0",
       delimiter: this.isBrowser ? "\n" : "\r\n",
       ...options,
     };
@@ -77,8 +90,12 @@ class WitsConnection {
     this.notifyErrorCallbacks(
       this.options.noralisMode
         ? "Connecting to Noralis MWD..."
-        : "Connecting to WITS server...",
+        : `Connecting to WITS server at ${this.options.host}:${this.options.port} via ${this.options.protocol}...`,
     );
+
+    // Reset connection state
+    this.buffer = "";
+    this.lastDataTime = Date.now();
 
     try {
       if (this.isBrowser) {
@@ -86,7 +103,12 @@ class WitsConnection {
       } else {
         this.connectDirect();
       }
+
+      console.log(
+        `Connection attempt initiated to ${this.options.host}:${this.options.port} via ${this.options.protocol}`,
+      );
     } catch (error) {
+      console.error("Error initiating connection:", error);
       this.handleConnectionError(
         error instanceof Error ? error : new Error(String(error)),
       );
@@ -105,10 +127,24 @@ class WitsConnection {
       this.healthCheckInterval = null;
     }
 
+    // Clear WebSocket specific intervals/timeouts
+    this.stopWebSocketHeartbeat();
+
     if (this.socket) {
       try {
         if (this.isBrowser) {
-          this.socket.close();
+          // For WebSocket connections, send a clean close message if possible
+          if (this.socket.readyState === WebSocket.OPEN) {
+            try {
+              this.socket.send(
+                JSON.stringify({ type: "disconnect", command: "disconnect" }),
+              );
+              console.log("Sent clean disconnect message to WebSocket server");
+            } catch (e) {
+              console.warn("Error sending WebSocket disconnect message", e);
+            }
+          }
+          this.socket.close(1000, "Client initiated disconnect");
         } else {
           if (this.options.protocol === "udp") {
             this.socket.close();
@@ -138,8 +174,11 @@ class WitsConnection {
     this.connecting = false;
     this.buffer = "";
     this.reconnectAttempts = 0; // Reset reconnect attempts on manual disconnect
+    this.missedPongs = 0; // Reset missed pongs counter
     this.notifyConnectionCallbacks(false);
     this.notifyErrorCallbacks(null); // Clear any error messages
+
+    console.log("WITS connection disconnected and resources cleaned up");
   }
 
   public isConnected(): boolean {
@@ -205,49 +244,237 @@ class WitsConnection {
   }
 
   /* Private Methods */
+  // WebSocket specific properties
+  private pingInterval: NodeJS.Timeout | null = null;
+  private pongTimeout: NodeJS.Timeout | null = null;
+  private missedPongs: number = 0;
+  private lastPingSent: number = 0;
+  private lastPongReceived: number = 0;
+  private maxMissedPongs: number = 3;
+  private heartbeatInterval: number = 15000; // 15 seconds between pings
+  private pongWaitTime: number = 10000; // 10 seconds to wait for pong response
+
   private connectWebSocket(): void {
     if (this.options.noralisMode && !this.options.wsEndpoint) {
       this.options.wsEndpoint = "/noralis";
     }
 
-    const isSecure = window.location.protocol === "https:";
+    // Determine if we should use secure WebSockets based on current page protocol
+    // or if the host is not localhost (production environments should use TLS)
+    const isSecure =
+      window.location.protocol === "https:" ||
+      (this.options.host !== "localhost" &&
+        this.options.host !== "127.0.0.1" &&
+        !this.options.host?.startsWith("192.168."));
     const wsProtocol = isSecure ? "wss://" : "ws://";
     const host = this.options.host || "localhost";
-    const port = this.options.port || 80;
+    const port = this.options.port || (isSecure ? 443 : 80);
     const endpoint = this.options.wsEndpoint || "/wits";
     let wsUrl = `${wsProtocol}${host}:${port}${endpoint}`;
 
-    if (this.options.noralisMode) {
-      wsUrl += `?protocol=tcp&noralis=true&version=${this.options.witsVersion}`;
+    // Add query parameters for proxy configuration
+    const queryParams = new URLSearchParams();
+
+    // If using proxy, these parameters tell the proxy where to connect
+    if (this.options.proxyMode) {
+      console.log("Using WebSocket-to-TCP proxy mode");
+      // Ensure we have valid TCP host and port values
+      const tcpHost = this.options.tcpHost || "localhost";
+      const tcpPort = this.options.tcpPort || 5000;
+
+      queryParams.set("host", tcpHost);
+      queryParams.set("port", String(tcpPort));
+      // Add protocol type for proxy to know what kind of connection to make
+      queryParams.set("protocol", "tcp");
+
+      // Log proxy configuration
+      console.log(`Proxy target: ${tcpHost}:${tcpPort}`);
     }
+
+    if (this.options.noralisMode) {
+      queryParams.set("noralis", "true");
+      queryParams.set("version", this.options.witsLevel || "0");
+    }
+
+    // Append query string if we have parameters
+    if (queryParams.toString()) {
+      wsUrl += `?${queryParams.toString()}`;
+    }
+
+    console.log(
+      `Connecting to WebSocket at ${wsUrl} with heartbeat interval ${this.heartbeatInterval}ms`,
+    );
 
     const connectionTimeout = setTimeout(() => {
       if (!this.connected) {
-        this.handleConnectionError(new Error("WebSocket connection timeout"));
+        this.handleConnectionError(
+          new Error("WebSocket connection timeout after 20 seconds"),
+        );
       }
-    }, 20000); // Increased timeout to 20 seconds
+    }, 20000); // 20 second connection timeout
 
-    this.socket = new WebSocket(wsUrl);
+    try {
+      this.socket = new WebSocket(wsUrl);
 
-    this.socket.onopen = () => {
+      // Set binary type to arraybuffer for better binary data handling
+      this.socket.binaryType = "arraybuffer";
+
+      this.socket.onopen = () => {
+        clearTimeout(connectionTimeout);
+        this.handleConnectionSuccess();
+        this.startWebSocketHeartbeat();
+      };
+
+      this.socket.onmessage = (event: MessageEvent) => {
+        this.lastDataTime = Date.now();
+
+        // Check if this is a pong message
+        if (typeof event.data === "string") {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "pong") {
+              this.handlePong();
+              return;
+            }
+          } catch (e) {
+            // Not JSON or not a pong message, process as normal data
+          }
+        }
+
+        // Process as normal data message
+        this.handleIncomingData(event.data);
+      };
+
+      this.socket.onclose = (event: CloseEvent) => {
+        clearTimeout(connectionTimeout);
+        this.stopWebSocketHeartbeat();
+
+        // Log detailed close information
+        console.log(
+          `WebSocket closed with code ${event.code}: ${event.reason || "No reason provided"}`,
+        );
+
+        // Handle different close codes appropriately
+        if (event.code === 1000) {
+          // Normal closure
+          this.handleConnectionClose(event.code, "Connection closed normally");
+        } else if (event.code === 1006) {
+          // Abnormal closure
+          this.handleConnectionClose(
+            event.code,
+            "Connection closed abnormally - server may be down or network interrupted",
+          );
+        } else {
+          this.handleConnectionClose(
+            event.code,
+            event.reason || "Connection closed",
+          );
+        }
+      };
+
+      this.socket.onerror = (error: Event) => {
+        clearTimeout(connectionTimeout);
+        this.stopWebSocketHeartbeat();
+
+        // Extract more detailed error information if possible
+        let errorMessage = "WebSocket error";
+        if (error && (error as any).message) {
+          errorMessage = `WebSocket error: ${(error as any).message}`;
+        }
+
+        console.error("WebSocket error event:", error);
+        this.handleConnectionError(new Error(errorMessage));
+      };
+    } catch (error) {
       clearTimeout(connectionTimeout);
-      this.handleConnectionSuccess();
-    };
+      console.error("Error creating WebSocket:", error);
+      this.handleConnectionError(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  }
 
-    this.socket.onmessage = (event: MessageEvent) => {
-      this.lastDataTime = Date.now();
-      this.handleIncomingData(event.data);
-    };
+  private startWebSocketHeartbeat(): void {
+    if (
+      !this.isBrowser ||
+      !this.socket ||
+      this.socket.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
 
-    this.socket.onclose = (event: CloseEvent) => {
-      clearTimeout(connectionTimeout);
-      this.handleConnectionClose(event.code, event.reason);
-    };
+    this.stopWebSocketHeartbeat(); // Clear any existing intervals
+    this.missedPongs = 0;
 
-    this.socket.onerror = (error: Event) => {
-      clearTimeout(connectionTimeout);
-      this.handleConnectionError(new Error("WebSocket error"));
-    };
+    console.log(
+      `Starting WebSocket heartbeat with ${this.heartbeatInterval}ms interval`,
+    );
+
+    // Set up ping interval
+    this.pingInterval = setInterval(() => {
+      if (this.socket?.readyState === WebSocket.OPEN) {
+        try {
+          // Send ping message
+          this.socket.send(
+            JSON.stringify({ type: "ping", timestamp: Date.now() }),
+          );
+          this.lastPingSent = Date.now();
+          console.debug(
+            `Sent WebSocket ping at ${new Date(this.lastPingSent).toISOString()}`,
+          );
+
+          // Set timeout for pong response
+          if (this.pongTimeout) {
+            clearTimeout(this.pongTimeout);
+          }
+
+          this.pongTimeout = setTimeout(() => {
+            this.missedPongs++;
+            console.warn(
+              `Missed pong response (${this.missedPongs}/${this.maxMissedPongs})`,
+            );
+
+            if (this.missedPongs >= this.maxMissedPongs) {
+              console.error(
+                `Maximum missed pongs (${this.maxMissedPongs}) reached, reconnecting...`,
+              );
+              this.notifyErrorCallbacks(
+                `Connection unstable: Missed ${this.maxMissedPongs} heartbeat responses`,
+              );
+              this.disconnect();
+              this.attemptReconnect();
+            }
+          }, this.pongWaitTime);
+        } catch (error) {
+          console.error("Error sending WebSocket ping:", error);
+        }
+      }
+    }, this.heartbeatInterval);
+  }
+
+  private stopWebSocketHeartbeat(): void {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+
+    if (this.pongTimeout) {
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = null;
+    }
+  }
+
+  private handlePong(): void {
+    this.lastPongReceived = Date.now();
+    this.missedPongs = 0;
+
+    if (this.pongTimeout) {
+      clearTimeout(this.pongTimeout);
+      this.pongTimeout = null;
+    }
+
+    const latency = this.lastPongReceived - this.lastPingSent;
+    console.debug(`Received pong with ${latency}ms latency`);
   }
 
   private connectDirect(): void {
@@ -255,12 +482,24 @@ class WitsConnection {
       throw new Error("Net module not available");
     }
 
+    // Log connection attempt details
+    console.log(
+      `Attempting ${this.options.protocol} connection to ${this.options.host}:${this.options.port}`,
+    );
+
     const connectionTimeout = setTimeout(() => {
       if (!this.connected) {
+        console.error(
+          `Connection attempt to ${this.options.host}:${this.options.port} timed out after 60 seconds`,
+        );
         this.socket?.destroy();
-        this.handleConnectionError(new Error("Connection timeout"));
+        this.handleConnectionError(
+          new Error(
+            "Connection timeout - verify server is running and accessible",
+          ),
+        );
       }
-    }, 60000); // Further increased timeout to 60 seconds
+    }, 60000); // 60 second timeout
 
     switch (this.options.protocol) {
       case "tcp":
@@ -290,9 +529,18 @@ class WitsConnection {
         });
 
         // TCP optimizations with more resilient settings
-        this.socket.setKeepAlive(true, 120000); // Significantly increased keepalive interval
+        this.socket.setKeepAlive(true, 30000); // 30 second keepalive interval
         this.socket.setNoDelay(true); // Disable Nagle's algorithm for immediate data transmission
-        this.socket.setTimeout(300000); // Significantly increased socket timeout
+        this.socket.setTimeout(300000); // 5 minute socket timeout
+
+        // Set TCP socket options for better reliability
+        if (typeof this.socket.setKeepAlive === "function") {
+          // Enable TCP keepalive with more aggressive settings
+          this.socket.setKeepAlive(true, 30000);
+        }
+
+        // Log socket configuration
+        console.log("TCP socket configured with keepalive and no delay");
         break;
 
       case "udp":
@@ -371,15 +619,32 @@ class WitsConnection {
     // Keep incomplete record in buffer
     this.buffer = records.pop() || "";
 
+    // Prevent buffer from growing too large if no complete records are received
+    if (this.buffer.length > 10000) {
+      console.warn("Buffer exceeds 10KB without finding delimiter, truncating");
+      this.buffer = this.buffer.substring(this.buffer.length - 5000);
+    }
+
+    // Process each complete record
+    let processedRecords = 0;
     records.forEach((record) => {
       if (record.trim().length > 0) {
-        if (this.options.noralisMode) {
-          this.parseNoralisRecord(record);
-        } else {
-          this.parseStandardWitsRecord(record);
+        try {
+          if (this.options.noralisMode) {
+            this.parseNoralisRecord(record);
+          } else {
+            this.parseStandardWitsRecord(record);
+          }
+          processedRecords++;
+        } catch (error) {
+          console.error("Error parsing record:", error, "Record:", record);
         }
       }
     });
+
+    if (processedRecords > 0) {
+      console.debug(`Processed ${processedRecords} complete records`);
+    }
   }
 
   private parseNoralisRecord(record: string): void {
@@ -398,6 +663,20 @@ class WitsConnection {
       timestamp: new Date().toISOString(),
       source: "noralis",
     };
+
+    // Add well information to the data if available
+    if (this.options.wellId) {
+      witsData.wellId = this.options.wellId;
+    }
+    if (this.options.wellName) {
+      witsData.wellName = this.options.wellName;
+    }
+    if (this.options.rigName) {
+      witsData.rigName = this.options.rigName;
+    }
+    if (this.options.sensorOffset !== undefined) {
+      witsData.sensorOffset = this.options.sensorOffset;
+    }
 
     for (let i = 0; i < items.length; i += 2) {
       const channelStr = items[i];
@@ -419,7 +698,7 @@ class WitsConnection {
 
   private parseStandardWitsRecord(record: string): void {
     // Standard WITS Level 0 format: fixed-width fields
-    if (this.options.witsVersion === "0") {
+    if (this.options.witsLevel === "0") {
       const recordLength = 120; // Standard WITS Level 0 record length
       if (record.length < recordLength) return;
 
@@ -433,6 +712,20 @@ class WitsConnection {
         source: "wits",
       };
 
+      // Add well information to the data if available
+      if (this.options.wellId) {
+        witsData.wellId = this.options.wellId;
+      }
+      if (this.options.wellName) {
+        witsData.wellName = this.options.wellName;
+      }
+      if (this.options.rigName) {
+        witsData.rigName = this.options.rigName;
+      }
+      if (this.options.sensorOffset !== undefined) {
+        witsData.sensorOffset = this.options.sensorOffset;
+      }
+
       for (let channel = 1; channel < items.length; channel++) {
         const value = parseFloat(items[channel]);
         if (!isNaN(value)) {
@@ -444,11 +737,26 @@ class WitsConnection {
       this.notifyDataCallbacks(mappedData);
     }
     // WITS Level 1 format (JSON)
-    else if (this.options.witsVersion === "1") {
+    else if (this.options.witsLevel === "1") {
       try {
         const data = JSON.parse(record) as WitsDataType;
         data.timestamp = data.timestamp || new Date().toISOString();
         data.source = data.source || "wits";
+
+        // Add well information to the data if available
+        if (this.options.wellId) {
+          data.wellId = this.options.wellId;
+        }
+        if (this.options.wellName) {
+          data.wellName = this.options.wellName;
+        }
+        if (this.options.rigName) {
+          data.rigName = this.options.rigName;
+        }
+        if (this.options.sensorOffset !== undefined) {
+          data.sensorOffset = this.options.sensorOffset;
+        }
+
         const mappedData = this.applyWitsMappings(data);
         this.notifyDataCallbacks(mappedData);
       } catch (error) {
@@ -490,6 +798,21 @@ class WitsConnection {
 
       rawData.timestamp = rawData.timestamp || new Date().toISOString();
       rawData.source = rawData.source || "wits";
+
+      // Add well information to the data if available
+      if (this.options.wellId) {
+        rawData.wellId = this.options.wellId;
+      }
+      if (this.options.wellName) {
+        rawData.wellName = this.options.wellName;
+      }
+      if (this.options.rigName) {
+        rawData.rigName = this.options.rigName;
+      }
+      if (this.options.sensorOffset !== undefined) {
+        rawData.sensorOffset = this.options.sensorOffset;
+      }
+
       const mappedData = this.applyWitsMappings(rawData);
       this.notifyDataCallbacks(mappedData);
     } catch (error) {
@@ -623,6 +946,16 @@ class WitsConnection {
         if (this.options.noralisMode && this.socket && !this.isBrowser) {
           this.socket.write(this.options.delimiter);
         } else if (
+          !this.options.noralisMode &&
+          this.socket &&
+          !this.isBrowser &&
+          this.socket.writable
+        ) {
+          // Send a TCP keepalive packet for standard WITS connections
+          this.socket.write(
+            JSON.stringify({ command: "ping" }) + this.options.delimiter,
+          );
+        } else if (
           this.isBrowser &&
           this.socket?.readyState === WebSocket.OPEN
         ) {
@@ -630,8 +963,16 @@ class WitsConnection {
         }
       } catch (error) {
         console.warn("Error sending keepalive:", error);
+        // If we can't send a keepalive, the connection might be dead
+        if (this.connected) {
+          this.notifyErrorCallbacks(
+            "Failed to send keepalive, connection may be broken",
+          );
+          this.disconnect();
+          this.attemptReconnect();
+        }
       }
-    }, 120000); // Significantly increased interval to 120 seconds
+    }, 60000); // Reduced interval to 60 seconds for more frequent health checks
   }
 
   private attemptReconnect(): void {
@@ -640,22 +981,40 @@ class WitsConnection {
     const maxAttempts = this.options.maxReconnectAttempts || 100;
     if (this.reconnectAttempts >= maxAttempts) {
       this.notifyErrorCallbacks(
-        `Maximum reconnect attempts (${maxAttempts}) reached`,
+        `Maximum reconnect attempts (${maxAttempts}) reached. Please check your connection settings and try again manually.`,
       );
       return;
     }
 
     this.reconnectAttempts++;
     const reconnectInterval = this.options.reconnectInterval || 10000;
-    // Use a fixed interval without backoff to maintain consistent reconnection attempts
-    const adjustedInterval = reconnectInterval;
+
+    // Use exponential backoff with a cap to avoid hammering the server
+    // but still maintain reasonable reconnection times
+    const baseInterval = reconnectInterval;
+    const maxInterval = 60000; // Cap at 60 seconds
+    const exponentialFactor = Math.min(
+      Math.pow(1.5, Math.min(this.reconnectAttempts, 10) - 1),
+      6,
+    );
+    const adjustedInterval = Math.min(
+      baseInterval * exponentialFactor,
+      maxInterval,
+    );
+
+    console.log(
+      `Scheduling reconnect attempt ${this.reconnectAttempts}/${maxAttempts} in ${adjustedInterval / 1000} seconds`,
+    );
 
     this.notifyErrorCallbacks(
-      `Reconnecting (attempt ${this.reconnectAttempts}/${maxAttempts})...`,
+      `Reconnecting (attempt ${this.reconnectAttempts}/${maxAttempts}) in ${Math.round(adjustedInterval / 1000)} seconds...`,
     );
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      console.log(
+        `Executing reconnect attempt ${this.reconnectAttempts}/${maxAttempts}`,
+      );
       this.connect();
     }, adjustedInterval);
   }

@@ -88,15 +88,17 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
       fileExt !== "xlsx" &&
       fileExt !== "xls" &&
       fileExt !== "csv" &&
-      fileExt !== "txt"
+      fileExt !== "txt" &&
+      fileExt !== "las"
     ) {
       setImportStatus("error");
       setImportMessage(
-        "Invalid file format. Please upload an Excel, CSV, or TXT file.",
+        "Invalid file format. Please upload an Excel, CSV, TXT, or LAS file.",
       );
       return;
     }
 
+    console.log(`Starting import of ${selectedFile.name} (${fileExt} format)`);
     const reader = new FileReader();
 
     reader.onload = (e) => {
@@ -104,12 +106,15 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
         let parsedSurveys: any[] = [];
         let headers: DetectedHeader[] = [];
 
-        if (fileExt === "csv" || fileExt === "txt") {
-          // Parse CSV or TXT file
+        if (fileExt === "csv" || fileExt === "txt" || fileExt === "las") {
+          // Parse CSV, TXT, or LAS file
           const content = e.target?.result as string;
+          console.log(
+            `File content loaded, length: ${content.length} characters`,
+          );
 
           // Check for specific file format with headers at row 68 and data at row 70
-          const specificFormat = detectSpecificFileFormat(content);
+          const specificFormat = surveyUtils.detectSpecificFileFormat(content);
 
           if (specificFormat) {
             console.log(
@@ -121,83 +126,286 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
               rigName: "Unknown Rig",
               sensorOffset: 0,
             };
-            parsedSurveys = surveyUtils.parseCSVSurveys(
-              content,
-              wellInfoDefault,
-              undefined,
-              specificFormat.headerRowIndex,
-              specificFormat.dataStartRow,
-            );
+
+            if (fileExt === "las") {
+              parsedSurveys = surveyUtils.parseLASSurveys(
+                content,
+                wellInfoDefault,
+                selectedFile.name,
+              );
+              console.log(
+                `Parsed ${parsedSurveys.length} surveys using parseLASSurveys`,
+              );
+            } else {
+              parsedSurveys = surveyUtils.parseCSVSurveys(
+                content,
+                wellInfoDefault,
+                selectedFile.name,
+                specificFormat.headerRowIndex,
+                specificFormat.dataStartRow,
+              );
+              console.log(
+                `Parsed ${parsedSurveys.length} surveys using parseCSVSurveys with specific format`,
+              );
+            }
           } else {
             // Use the standard parser for other formats
-            parsedSurveys = parseDelimitedFile(content);
+            console.log("Using standard delimited file parser");
+            try {
+              parsedSurveys = parseDelimitedFile(content);
+              console.log(
+                `Parsed ${parsedSurveys.length} surveys using parseDelimitedFile`,
+              );
+            } catch (error) {
+              console.error("Error in parseDelimitedFile:", error);
+              // Fallback to direct parsing if delimited file parsing fails
+              const wellInfoDefault = {
+                wellName: "Unknown Well",
+                rigName: "Unknown Rig",
+                sensorOffset: 0,
+              };
+
+              if (fileExt === "las") {
+                parsedSurveys = surveyUtils.parseLASSurveys(
+                  content,
+                  wellInfoDefault,
+                  selectedFile.name,
+                );
+                console.log(
+                  `Fallback: Parsed ${parsedSurveys.length} surveys using parseLASSurveys`,
+                );
+              } else if (fileExt === "txt") {
+                parsedSurveys = surveyUtils.parseTXTSurveys(
+                  content,
+                  wellInfoDefault,
+                  selectedFile.name,
+                );
+                console.log(
+                  `Fallback: Parsed ${parsedSurveys.length} surveys using parseTXTSurveys`,
+                );
+              } else {
+                parsedSurveys = surveyUtils.parseCSVSurveys(
+                  content,
+                  wellInfoDefault,
+                  selectedFile.name,
+                );
+                console.log(
+                  `Fallback: Parsed ${parsedSurveys.length} surveys using parseCSVSurveys`,
+                );
+              }
+            }
           }
+
+          console.log(
+            `Parsed ${parsedSurveys.length} surveys from ${fileExt} file`,
+          );
 
           // Extract detected headers
           if (parsedSurveys.length > 0) {
             const firstSurvey = parsedSurveys[0];
+            console.log("First parsed survey:", firstSurvey);
             headers = [
               { original: "Bit Depth", mapped: "bitDepth" },
               { original: "Inclination", mapped: "inclination" },
               { original: "Azimuth", mapped: "azimuth" },
             ];
 
-            if (firstSurvey.tvd !== null)
+            // Add additional headers if they exist in the survey
+            if (firstSurvey.tvd !== undefined && firstSurvey.tvd !== null)
               headers.push({ original: "TVD", mapped: "tvd" });
-            if (firstSurvey.northSouth !== null)
+            if (
+              firstSurvey.northSouth !== undefined &&
+              firstSurvey.northSouth !== null
+            )
               headers.push({ original: "NS", mapped: "northSouth" });
-            if (firstSurvey.eastWest !== null)
+            if (
+              firstSurvey.eastWest !== undefined &&
+              firstSurvey.eastWest !== null
+            )
               headers.push({ original: "EW", mapped: "eastWest" });
-            if (firstSurvey.gamma !== null)
+            if (firstSurvey.gamma !== undefined && firstSurvey.gamma !== null)
               headers.push({ original: "Gamma", mapped: "gamma" });
+            if (
+              firstSurvey.toolFace !== undefined &&
+              firstSurvey.toolFace !== null
+            )
+              headers.push({ original: "Tool Face", mapped: "toolFace" });
+            if (firstSurvey.bTotal !== undefined && firstSurvey.bTotal !== null)
+              headers.push({ original: "B Total", mapped: "bTotal" });
+            if (firstSurvey.aTotal !== undefined && firstSurvey.aTotal !== null)
+              headers.push({ original: "A Total", mapped: "aTotal" });
+            if (firstSurvey.dip !== undefined && firstSurvey.dip !== null)
+              headers.push({ original: "Dip", mapped: "dip" });
+            if (
+              firstSurvey.toolTemp !== undefined &&
+              firstSurvey.toolTemp !== null
+            )
+              headers.push({ original: "Tool Temp", mapped: "toolTemp" });
           }
         } else if (fileExt === "xlsx" || fileExt === "xls") {
           // Parse Excel file
+          console.log("Parsing Excel file");
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: "array" });
           const sheetName = workbook.SheetNames[0];
+          console.log(`Excel sheet name: ${sheetName}`);
           const worksheet = workbook.Sheets[sheetName];
           const excelData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          console.log(`Excel data rows: ${excelData.length}`);
 
           parsedSurveys = parseSurveyExcel(excelData as any[][]);
+          console.log(`Parsed ${parsedSurveys.length} surveys from Excel file`);
 
           // Extract detected headers
           if (parsedSurveys.length > 0) {
             const firstSurvey = parsedSurveys[0];
+            console.log("First parsed survey from Excel:", firstSurvey);
             headers = [
               { original: "Bit Depth", mapped: "bitDepth" },
               { original: "Inclination", mapped: "inclination" },
               { original: "Azimuth", mapped: "azimuth" },
             ];
 
-            if (firstSurvey.tvd !== null)
+            // Add additional headers if they exist in the survey
+            if (firstSurvey.tvd !== undefined && firstSurvey.tvd !== null)
               headers.push({ original: "TVD", mapped: "tvd" });
-            if (firstSurvey.northSouth !== null)
+            if (
+              firstSurvey.northSouth !== undefined &&
+              firstSurvey.northSouth !== null
+            )
               headers.push({ original: "NS", mapped: "northSouth" });
-            if (firstSurvey.eastWest !== null)
+            if (
+              firstSurvey.eastWest !== undefined &&
+              firstSurvey.eastWest !== null
+            )
               headers.push({ original: "EW", mapped: "eastWest" });
-            if (firstSurvey.gamma !== null)
+            if (firstSurvey.gamma !== undefined && firstSurvey.gamma !== null)
               headers.push({ original: "Gamma", mapped: "gamma" });
+            if (
+              firstSurvey.toolFace !== undefined &&
+              firstSurvey.toolFace !== null
+            )
+              headers.push({ original: "Tool Face", mapped: "toolFace" });
+            if (firstSurvey.bTotal !== undefined && firstSurvey.bTotal !== null)
+              headers.push({ original: "B Total", mapped: "bTotal" });
+            if (firstSurvey.aTotal !== undefined && firstSurvey.aTotal !== null)
+              headers.push({ original: "A Total", mapped: "aTotal" });
+            if (firstSurvey.dip !== undefined && firstSurvey.dip !== null)
+              headers.push({ original: "Dip", mapped: "dip" });
+            if (
+              firstSurvey.toolTemp !== undefined &&
+              firstSurvey.toolTemp !== null
+            )
+              headers.push({ original: "Tool Temp", mapped: "toolTemp" });
           }
         }
 
         // Convert to SurveyData format
-        const surveyData: SurveyData[] = parsedSurveys.map((survey, index) => ({
-          id: `imported-${Date.now()}-${index}`,
-          timestamp: survey.timestamp || new Date().toISOString(),
-          bitDepth: survey.bitDepth || 0,
-          inclination: survey.inclination || 0,
-          azimuth: survey.azimuth || 0,
-          toolFace: 0, // Default value
-          bTotal: 0, // Default value
-          aTotal: 0, // Default value
-          dip: 0, // Default value
-          toolTemp: 0, // Default value
-          qualityCheck: surveyUtils.determineQualityCheck(
-            survey.inclination || 0,
-            survey.azimuth || 0,
-          ),
-        }));
+        const surveyData: SurveyData[] = [];
+
+        for (let i = 0; i < parsedSurveys.length; i++) {
+          const survey = parsedSurveys[i];
+          console.log(`Processing survey ${i}:`, survey);
+
+          // Skip invalid surveys
+          if (
+            !survey ||
+            typeof survey !== "object" ||
+            (survey.bitDepth === undefined &&
+              survey.inclination === undefined &&
+              survey.azimuth === undefined)
+          ) {
+            console.log(`Skipping invalid survey at index ${i}`);
+            continue;
+          }
+
+          // Create a valid survey object with all required fields
+          try {
+            const validSurvey: SurveyData = {
+              id: `imported-${Date.now()}-${i}`,
+              timestamp: survey.timestamp || new Date().toISOString(),
+              bitDepth:
+                typeof survey.bitDepth === "number"
+                  ? survey.bitDepth
+                  : parseFloat(survey.bitDepth) || 0,
+              inclination:
+                typeof survey.inclination === "number"
+                  ? survey.inclination
+                  : parseFloat(survey.inclination) || 0,
+              azimuth:
+                typeof survey.azimuth === "number"
+                  ? survey.azimuth
+                  : parseFloat(survey.azimuth) || 0,
+              toolFace:
+                typeof survey.toolFace === "number"
+                  ? survey.toolFace
+                  : parseFloat(survey.toolFace) || 0,
+              bTotal:
+                typeof survey.bTotal === "number"
+                  ? survey.bTotal
+                  : parseFloat(survey.bTotal) || 0,
+              aTotal:
+                typeof survey.aTotal === "number"
+                  ? survey.aTotal
+                  : parseFloat(survey.aTotal) || 0,
+              dip:
+                typeof survey.dip === "number"
+                  ? survey.dip
+                  : parseFloat(survey.dip) || 0,
+              toolTemp:
+                typeof survey.toolTemp === "number"
+                  ? survey.toolTemp
+                  : parseFloat(survey.toolTemp) || 0,
+              wellName: survey.wellName || "Unknown Well",
+              rigName: survey.rigName || "Unknown Rig",
+              sensorOffset:
+                typeof survey.sensorOffset === "number"
+                  ? survey.sensorOffset
+                  : parseFloat(survey.sensorOffset) || 0,
+              measuredDepth:
+                typeof survey.measuredDepth === "number"
+                  ? survey.measuredDepth
+                  : survey.bitDepth - (survey.sensorOffset || 0),
+              qualityCheck:
+                survey.qualityCheck ||
+                surveyUtils.determineQualityCheck(
+                  typeof survey.inclination === "number"
+                    ? survey.inclination
+                    : parseFloat(survey.inclination) || 0,
+                  typeof survey.azimuth === "number"
+                    ? survey.azimuth
+                    : parseFloat(survey.azimuth) || 0,
+                ),
+            };
+
+            // Validate the survey has required numeric fields with valid values
+            if (
+              !isNaN(validSurvey.bitDepth) &&
+              !isNaN(validSurvey.inclination) &&
+              !isNaN(validSurvey.azimuth) &&
+              (validSurvey.bitDepth > 0 ||
+                validSurvey.inclination > 0 ||
+                validSurvey.azimuth > 0)
+            ) {
+              console.log(`Created valid survey:`, validSurvey);
+              surveyData.push(validSurvey);
+            } else {
+              console.warn(
+                `Skipping survey with invalid numeric values:`,
+                validSurvey,
+              );
+            }
+          } catch (error) {
+            console.error(
+              `Error creating valid survey object for index ${i}:`,
+              error,
+            );
+          }
+        }
+
+        console.log(
+          `Converted ${surveyData.length} surveys to SurveyData format`,
+        );
 
         if (surveyData.length === 0) {
           setImportStatus("error");
@@ -229,7 +437,7 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
       setImportMessage("Error reading file. Please try again.");
     };
 
-    if (fileExt === "csv" || fileExt === "txt") {
+    if (fileExt === "csv" || fileExt === "txt" || fileExt === "las") {
       reader.readAsText(selectedFile);
     } else {
       reader.readAsArrayBuffer(selectedFile);
@@ -256,7 +464,72 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
     const surveysToImport = importedSurveys.filter((survey) =>
       selectedSurveys.includes(survey.id),
     );
-    onImportSurveys(surveysToImport);
+    console.log(`Importing ${surveysToImport.length} selected surveys`);
+
+    // Make sure we have valid surveys to import
+    if (surveysToImport.length === 0) {
+      setImportStatus("error");
+      setImportMessage("No surveys selected for import.");
+      return;
+    }
+
+    // Validate surveys before importing
+    const validSurveys = surveysToImport.filter((survey) => {
+      // Check for required fields
+      if (
+        survey.bitDepth === undefined ||
+        survey.inclination === undefined ||
+        survey.azimuth === undefined
+      ) {
+        console.warn("Survey missing required fields:", survey);
+        return false;
+      }
+
+      // Check for valid numeric values
+      if (
+        isNaN(survey.bitDepth) ||
+        isNaN(survey.inclination) ||
+        isNaN(survey.azimuth)
+      ) {
+        console.warn("Survey has invalid numeric values:", survey);
+        return false;
+      }
+
+      // Check for reasonable values
+      if (survey.inclination < 0 || survey.inclination > 180) {
+        console.warn(
+          "Survey has out-of-range inclination value:",
+          survey.inclination,
+        );
+        // Don't reject the survey, just log a warning
+      }
+
+      if (survey.azimuth < 0 || survey.azimuth > 360) {
+        console.warn("Survey has out-of-range azimuth value:", survey.azimuth);
+        // Don't reject the survey, just log a warning
+      }
+
+      return true;
+    });
+
+    if (validSurveys.length === 0) {
+      setImportStatus("error");
+      setImportMessage("No valid surveys found in selection.");
+      return;
+    }
+
+    if (validSurveys.length < surveysToImport.length) {
+      console.warn(
+        `Filtered out ${surveysToImport.length - validSurveys.length} invalid surveys`,
+      );
+    }
+
+    // Log all surveys being imported for debugging
+    console.log("All surveys being imported:", validSurveys);
+
+    onImportSurveys(validSurveys);
+    setImportStatus("success");
+    setImportMessage(`Successfully imported ${validSurveys.length} surveys`);
   };
 
   const handleClearFile = () => {
@@ -351,14 +624,14 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
                 ref={fileInputRef}
                 className="hidden"
                 onChange={handleFileChange}
-                accept=".xlsx,.xls,.csv,.txt"
+                accept=".xlsx,.xls,.csv,.txt,.las"
               />
               <Upload className="h-12 w-12 text-gray-500 mx-auto mb-4" />
               <h3 className="text-gray-300 font-medium mb-2">
                 Drag & Drop or Click to Upload
               </h3>
               <p className="text-gray-500 text-sm mb-2">
-                Supported formats: XLSX, XLS, CSV, TXT
+                Supported formats: XLSX, XLS, CSV, TXT, LAS
               </p>
               {selectedFile && (
                 <div className="mt-4 p-2 bg-gray-800 rounded-md inline-flex items-center gap-2">

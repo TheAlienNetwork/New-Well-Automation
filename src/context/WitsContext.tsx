@@ -7,6 +7,8 @@ import React, {
   useRef,
 } from "react";
 import { witsConnection } from "@/lib/witsConnection";
+import { getWell } from "@/lib/database";
+import { useUser } from "@/context/UserContext";
 
 export interface WitsDataType {
   timestamp: string;
@@ -41,6 +43,11 @@ export interface WitsDataType {
   signalQuality: number;
   batteryLevel: number;
   toolTemp: number;
+  wellId?: string;
+  wellName?: string;
+  rigName?: string;
+  sensorOffset?: number;
+  source?: string;
   [key: number]: number | string | object; // Allow for dynamic WITS channel access
 }
 
@@ -80,6 +87,19 @@ interface ConnectionConfigType {
   autoConnect: boolean;
   witsmlConfig: WitsmlConfig;
   connectionType: "wits" | "witsml";
+  wellId?: string;
+  wellName?: string;
+  rigName?: string;
+  sensorOffset?: number;
+  // WebSocket specific options
+  heartbeatInterval?: number;
+  maxMissedPongs?: number;
+  connectionTimeout?: number;
+  binaryType?: "blob" | "arraybuffer";
+  // WebSocket-to-TCP proxy options
+  proxyMode?: boolean;
+  tcpHost?: string;
+  tcpPort?: number;
 }
 
 interface WitsContextType {
@@ -95,6 +115,7 @@ interface WitsContextType {
   disconnect: () => void;
   lastError: string | null;
   clearError: () => void;
+  clearWitsData: () => boolean;
   sendCommand: (command: string, params?: any) => void;
   connectionConfig: ConnectionConfigType;
   updateConfig: (config: Partial<ConnectionConfigType>) => void;
@@ -163,8 +184,8 @@ const defaultWitsMappings: WitsMappings = {
 
 const defaultConnectionConfig: ConnectionConfigType = {
   ipAddress: "localhost",
-  port: 5000,
-  protocol: "TCP",
+  port: typeof window !== "undefined" ? 80 : 5000, // Default to port 80 for browser WebSocket
+  protocol: typeof window !== "undefined" ? "WS" : "TCP", // Default to WebSocket for browser
   autoConnect: false,
   witsmlConfig: {
     url: "",
@@ -176,11 +197,17 @@ const defaultConnectionConfig: ConnectionConfigType = {
     pollingInterval: 10000,
   },
   connectionType: "wits",
+  // WebSocket specific defaults
+  heartbeatInterval: 15000,
+  maxMissedPongs: 3,
+  connectionTimeout: 20000,
 };
 
 const WitsContext = createContext<WitsContextType | undefined>(undefined);
 
-export function WitsProvider({ children }: { children: ReactNode }) {
+// Define the provider component
+const WitsProvider = ({ children }: { children: ReactNode }) => {
+  const { userProfile } = useUser();
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isReceiving, setIsReceiving] = useState<boolean>(false);
   const [witsData, setWitsData] = useState<WitsDataType>(defaultWitsData);
@@ -191,6 +218,7 @@ export function WitsProvider({ children }: { children: ReactNode }) {
     useState<WitsMappings>(defaultWitsMappings);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
   const dataReceivedRef = useRef<boolean>(false);
+  const wellDataFetchedRef = useRef<boolean>(false);
 
   // Set up WITS connection handlers
   useEffect(() => {
@@ -234,8 +262,58 @@ export function WitsProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Fetch well data from database when currentWellId changes
+  useEffect(() => {
+    const fetchWellData = async () => {
+      if (userProfile.currentWellId && !wellDataFetchedRef.current) {
+        try {
+          const wellData = await getWell(userProfile.currentWellId);
+          if (wellData) {
+            // Update connection config with well data
+            setConnectionConfig((prev) => ({
+              ...prev,
+              wellId: wellData.id,
+              wellName: wellData.name,
+              rigName: wellData.rig_name || "",
+              sensorOffset: wellData.sensor_offset || 0,
+            }));
+
+            console.log("Fetched well data for WITS connection:", wellData);
+            wellDataFetchedRef.current = true;
+          }
+        } catch (error) {
+          console.error("Error fetching well data for WITS connection:", error);
+        }
+      }
+    };
+
+    fetchWellData();
+  }, [userProfile.currentWellId]);
+
   const updateConfig = (config: Partial<ConnectionConfigType>) => {
     setConnectionConfig((prev) => ({ ...prev, ...config }));
+
+    // If we're already connected, update the connection with new well data
+    if (
+      witsConnection.isConnected() &&
+      (config.wellId !== undefined ||
+        config.wellName !== undefined ||
+        config.rigName !== undefined ||
+        config.sensorOffset !== undefined)
+    ) {
+      const wellOptions: any = {};
+
+      // Only include properties that are defined in the config update
+      if (config.wellId !== undefined) wellOptions.wellId = config.wellId;
+      if (config.wellName !== undefined) wellOptions.wellName = config.wellName;
+      if (config.rigName !== undefined) wellOptions.rigName = config.rigName;
+      if (config.sensorOffset !== undefined)
+        wellOptions.sensorOffset = config.sensorOffset;
+
+      // Update the connection with new well data
+      witsConnection.updateOptions(wellOptions);
+      console.log("Updated WITS connection with new well data:", wellOptions);
+    }
   };
 
   const updateWitsMappings = (mappings: WitsMappings) => {
@@ -311,6 +389,9 @@ export function WitsProvider({ children }: { children: ReactNode }) {
       `Connecting to WITS server at ${connectHost}:${connectPort} using ${connectProtocol}`,
     );
 
+    // Clear any previous errors before attempting to connect
+    setLastError(null);
+
     // Update the connection config in state if parameters were provided
     if (host || port || protocol) {
       setConnectionConfig((prev) => ({
@@ -321,14 +402,71 @@ export function WitsProvider({ children }: { children: ReactNode }) {
       }));
     }
 
-    // Prepare connection options
+    // Validate connection parameters
+    if (!connectHost || connectHost.trim() === "") {
+      setLastError("Host cannot be empty");
+      return;
+    }
+
+    if (!connectPort || connectPort <= 0 || connectPort > 65535) {
+      setLastError("Port must be between 1 and 65535");
+      return;
+    }
+
+    // Prepare connection options with optimized settings
     const options: any = {
       host: connectHost,
       port: connectPort,
       protocol: connectProtocol,
-      reconnectInterval: 30000, // Significantly increased reconnect interval
-      maxReconnectAttempts: 50, // Significantly increased max reconnect attempts
+      reconnectInterval: 10000, // 10 seconds between reconnect attempts
+      maxReconnectAttempts: 100, // Allow up to 100 reconnect attempts
+      delimiter: connectProtocol === "tcp" ? "\r\n" : "\n", // Use CRLF for TCP
     };
+
+    // Add WebSocket specific options if using WebSocket protocol
+    if (connectProtocol === "ws") {
+      options.heartbeatInterval = connectionConfig.heartbeatInterval || 15000;
+      options.maxMissedPongs = connectionConfig.maxMissedPongs || 3;
+      options.connectionTimeout = connectionConfig.connectionTimeout || 20000;
+      options.binaryType = connectionConfig.binaryType || "arraybuffer";
+
+      // Add WebSocket-to-TCP proxy options if enabled
+      if (connectionConfig.proxyMode) {
+        options.proxyMode = true;
+        options.tcpHost = connectionConfig.tcpHost || "localhost";
+        options.tcpPort = connectionConfig.tcpPort || 5000;
+
+        // Ensure tcpHost and tcpPort are properly set
+        if (!options.tcpHost || !options.tcpPort) {
+          console.warn("Missing TCP target host or port for proxy mode");
+          options.tcpHost = "localhost";
+          options.tcpPort = 5000;
+        }
+
+        console.log(
+          `Using WebSocket-to-TCP proxy mode to connect to ${options.tcpHost}:${options.tcpPort}`,
+        );
+      }
+
+      console.log(
+        "Using WebSocket protocol with heartbeat interval:",
+        options.heartbeatInterval,
+      );
+    }
+
+    // Add well information to connection options if available
+    if (connectionConfig.wellId) {
+      options.wellId = connectionConfig.wellId;
+    }
+    if (connectionConfig.wellName) {
+      options.wellName = connectionConfig.wellName;
+    }
+    if (connectionConfig.rigName) {
+      options.rigName = connectionConfig.rigName;
+    }
+    if (connectionConfig.sensorOffset !== undefined) {
+      options.sensorOffset = connectionConfig.sensorOffset;
+    }
 
     // Add additional options for serial connections
     if (connectProtocol === "serial" && additionalOptions) {
@@ -337,8 +475,23 @@ export function WitsProvider({ children }: { children: ReactNode }) {
     }
 
     // Update connection options and connect
-    witsConnection.updateOptions(options);
-    witsConnection.connect();
+    try {
+      witsConnection.updateOptions(options);
+      witsConnection.connect();
+
+      // Set a timeout to check if we've successfully connected
+      setTimeout(() => {
+        if (!witsConnection.isConnected()) {
+          setLastError(
+            "Connection attempt timed out. Please check server availability and network settings.",
+          );
+        }
+      }, 10000); // 10 second timeout for initial connection
+    } catch (error) {
+      setLastError(
+        `Connection error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   };
 
   const disconnect = () => {
@@ -349,6 +502,227 @@ export function WitsProvider({ children }: { children: ReactNode }) {
   const clearError = () => {
     setLastError(null);
   };
+
+  const clearWitsData = () => {
+    console.log("Clearing all WITS data");
+    setWitsData(defaultWitsData);
+    setLastUpdateTime(new Date());
+    return true;
+  };
+
+  // Helper function to validate and sanitize WITS data for database insertion
+  const prepareWitsDataForSave = (
+    data: WitsDataType,
+    userId?: string,
+  ): Record<string, any> => {
+    // Get current database ID from localStorage
+    const currentDatabaseId = localStorage.getItem("currentDatabaseId");
+
+    // Get well information from localStorage or data
+    const wellName =
+      data.wellName || localStorage.getItem("wellName") || "Unknown Well";
+    const rigName =
+      data.rigName || localStorage.getItem("rigName") || "Unknown Rig";
+
+    // Prepare WITS data for database insertion with proper field names
+    return {
+      timestamp: data.timestamp || new Date().toISOString(),
+      bit_depth: isNaN(data.bitDepth) ? 0 : data.bitDepth,
+      hole_depth: isNaN(data.holeDepth) ? 0 : data.holeDepth,
+      rop: isNaN(data.rop) ? 0 : data.rop,
+      wob: isNaN(data.wob) ? 0 : data.wob,
+      hookload: isNaN(data.hookload) ? 0 : data.hookload,
+      pump_pressure: isNaN(data.pumpPressure) ? 0 : data.pumpPressure,
+      flow_rate: isNaN(data.flowRate) ? 0 : data.flowRate,
+      rotary_torque: isNaN(data.rotaryTorque) ? 0 : data.rotaryTorque,
+      rotary_rpm: isNaN(data.rotaryRpm) ? 0 : data.rotaryRpm,
+      gamma: isNaN(data.gamma) ? 0 : data.gamma,
+      inclination: isNaN(data.inclination) ? 0 : data.inclination,
+      azimuth: isNaN(data.azimuth) ? 0 : data.azimuth,
+      tool_face: isNaN(data.toolFace) ? 0 : data.toolFace,
+      temperature: isNaN(data.temperature) ? 0 : data.temperature,
+      vibration: data.vibration || { lateral: 0, axial: 0, torsional: 0 },
+      motor_yield: isNaN(data.motorYield) ? 0 : data.motorYield,
+      dogleg_needed: isNaN(data.doglegNeeded) ? 0 : data.doglegNeeded,
+      dls: isNaN(data.dls) ? 0 : data.dls,
+      magnetic_field: isNaN(data.magneticField) ? 0 : data.magneticField,
+      gravity: isNaN(data.gravity) ? 0 : data.gravity,
+      signal_quality: isNaN(data.signalQuality) ? 85 : data.signalQuality,
+      battery_level: isNaN(data.batteryLevel) ? 75 : data.batteryLevel,
+      tool_temp: isNaN(data.toolTemp) ? 165 : data.toolTemp,
+      well_id: data.wellId || userId || null,
+      well_name: wellName,
+      rig_name: rigName,
+      sensor_offset: isNaN(data.sensorOffset) ? 0 : data.sensorOffset,
+      source: data.source || "WITS",
+      database_id: currentDatabaseId || null,
+      created_at: new Date().toISOString(),
+    };
+  };
+
+  // Auto-save WITS data to database if connected
+  useEffect(() => {
+    // Skip initial render and only save meaningful data
+    const isDefaultData =
+      JSON.stringify(witsData) === JSON.stringify(defaultWitsData);
+    if (isDefaultData || !isReceiving) return;
+
+    const autoSaveWitsData = async () => {
+      try {
+        // Check if we have a database selected
+        const currentDatabaseId = localStorage.getItem("currentDatabaseId");
+        if (!currentDatabaseId) {
+          console.warn("No database selected for auto-saving WITS data");
+          return;
+        }
+
+        console.log("Auto-saving WITS data to database...");
+        // Import dynamically to avoid circular dependencies
+        const { supabase } = await import("@/lib/supabase");
+
+        // Prepare WITS data for database insertion using helper function
+        const witsDataToSave = prepareWitsDataForSave(
+          witsData,
+          userProfile.currentWellId,
+        );
+
+        // Insert WITS data record
+        const { data, error } = await supabase
+          .from("wits_data")
+          .insert([witsDataToSave])
+          .select();
+
+        if (error) {
+          throw error;
+        }
+
+        console.log("Successfully auto-saved WITS data to database", data);
+
+        // Update last save timestamp in localStorage
+        localStorage.setItem("lastWitsDataSaveTime", Date.now().toString());
+
+        // Optionally update database stats
+        try {
+          await supabase
+            .from("wits_databases")
+            .update({
+              last_modified: new Date().toISOString(),
+            })
+            .eq("id", currentDatabaseId);
+        } catch (statsError) {
+          console.warn("Failed to update database stats:", statsError);
+          // Non-critical error, don't throw
+        }
+      } catch (error) {
+        console.error("Error auto-saving WITS data to database:", error);
+        // Store failed save attempt for retry
+        const failedSaves = JSON.parse(
+          localStorage.getItem("failedWitsSaves") || "[]",
+        );
+        failedSaves.push({
+          timestamp: new Date().toISOString(),
+          data: witsData,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Keep only the last 10 failed saves to prevent localStorage overflow
+        if (failedSaves.length > 10) failedSaves.shift();
+        localStorage.setItem("failedWitsSaves", JSON.stringify(failedSaves));
+      }
+    };
+
+    // Only save data every 30 seconds to avoid database overload
+    const autoSaveInterval = 30000; // 30 seconds
+    const lastSaveTime = parseInt(
+      localStorage.getItem("lastWitsDataSaveTime") || "0",
+    );
+    const currentTime = Date.now();
+
+    if (currentTime - lastSaveTime > autoSaveInterval) {
+      autoSaveWitsData();
+    }
+  }, [witsData, isReceiving, userProfile.currentWellId]);
+
+  // Retry failed WITS data saves when connection is restored
+  useEffect(() => {
+    // Only attempt retries when we have a connection and are receiving data
+    if (!isConnected || !isReceiving) return;
+
+    const retryFailedSaves = async () => {
+      try {
+        const failedSaves = JSON.parse(
+          localStorage.getItem("failedWitsSaves") || "[]",
+        );
+        if (failedSaves.length === 0) return;
+
+        console.log(
+          `Attempting to retry ${failedSaves.length} failed WITS data saves...`,
+        );
+
+        const { supabase } = await import("@/lib/supabase");
+        const currentDatabaseId = localStorage.getItem("currentDatabaseId");
+
+        if (!currentDatabaseId) {
+          console.warn("No database selected for retrying failed WITS saves");
+          return;
+        }
+
+        // Process each failed save
+        const successfulRetries = [];
+
+        for (let i = 0; i < failedSaves.length; i++) {
+          const failedSave = failedSaves[i];
+          try {
+            const witsDataToSave = prepareWitsDataForSave(
+              failedSave.data,
+              userProfile.currentWellId,
+            );
+
+            const { error } = await supabase
+              .from("wits_data")
+              .insert([witsDataToSave]);
+
+            if (error) throw error;
+
+            // Mark this save as successful
+            successfulRetries.push(i);
+            console.log(
+              `Successfully retried WITS data save from ${failedSave.timestamp}`,
+            );
+          } catch (error) {
+            console.error(
+              `Failed to retry WITS data save from ${failedSave.timestamp}:`,
+              error,
+            );
+          }
+        }
+
+        // Remove successful retries from the failed saves list
+        const updatedFailedSaves = failedSaves.filter(
+          (_, index) => !successfulRetries.includes(index),
+        );
+        localStorage.setItem(
+          "failedWitsSaves",
+          JSON.stringify(updatedFailedSaves),
+        );
+
+        if (successfulRetries.length > 0) {
+          console.log(
+            `Successfully retried ${successfulRetries.length} of ${failedSaves.length} failed WITS data saves`,
+          );
+        }
+      } catch (error) {
+        console.error("Error retrying failed WITS data saves:", error);
+      }
+    };
+
+    // Retry failed saves every 5 minutes
+    const retryInterval = setInterval(retryFailedSaves, 5 * 60 * 1000);
+
+    // Run once on connection establishment
+    retryFailedSaves();
+
+    return () => clearInterval(retryInterval);
+  }, [isConnected, isReceiving, userProfile.currentWellId]);
 
   const sendCommand = (command: string, params?: any) => {
     witsConnection.sendCommand(command, params);
@@ -364,6 +738,7 @@ export function WitsProvider({ children }: { children: ReactNode }) {
         disconnect,
         lastError,
         clearError,
+        clearWitsData,
         sendCommand,
         connectionConfig,
         updateConfig,
@@ -376,12 +751,15 @@ export function WitsProvider({ children }: { children: ReactNode }) {
       {children}
     </WitsContext.Provider>
   );
-}
+};
 
-export function useWits() {
+const useWits = () => {
   const context = useContext(WitsContext);
   if (context === undefined) {
     throw new Error("useWits must be used within a WitsProvider");
   }
   return context;
-}
+};
+
+// Export the hook and provider
+export { useWits, WitsProvider };

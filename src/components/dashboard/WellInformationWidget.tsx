@@ -8,6 +8,7 @@ import { Building2, Ruler, Save, Settings } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
 import { useUser } from "@/context/UserContext";
 import { useSurveys } from "@/context/SurveyContext";
+import { createWell, updateWell, getActiveWells } from "@/lib/database";
 
 interface WellInformationWidgetProps {
   wellName?: string;
@@ -36,20 +37,89 @@ const WellInformationWidget = ({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Update local state when props change
+  // Update local state when props change or fetch from database
   useEffect(() => {
-    // First try to get values from localStorage
-    const savedWellName = localStorage.getItem("wellName");
-    const savedRigName = localStorage.getItem("rigName");
-    const savedSensorOffset = localStorage.getItem("sensorOffset");
+    const fetchWellData = async () => {
+      try {
+        // First check if user has a current well
+        if (userProfile.currentWellId) {
+          // Fetch active wells from database
+          const activeWells = await getActiveWells();
+          const currentWell = activeWells.find(
+            (well) => well.id === userProfile.currentWellId,
+          );
 
-    // Use localStorage values if available, otherwise use props
-    setWellName(savedWellName || propWellName);
-    setRigName(savedRigName || propRigName);
-    setSensorOffset(
-      savedSensorOffset ? Number(savedSensorOffset) : propSensorOffset,
-    );
-  }, [propWellName, propRigName, propSensorOffset]);
+          if (currentWell) {
+            // Use database values
+            setWellName(currentWell.name);
+            setRigName(currentWell.rig_name || "");
+            setSensorOffset(currentWell.sensor_offset || 0);
+
+            // Update localStorage for consistency
+            localStorage.setItem("wellName", currentWell.name);
+            localStorage.setItem("rigName", currentWell.rig_name || "");
+            localStorage.setItem(
+              "sensorOffset",
+              String(currentWell.sensor_offset || 0),
+            );
+
+            console.log("Loaded well data from database:", currentWell);
+            return;
+          }
+        }
+
+        // Check if userProfile has well information (for newly created wells)
+        if (
+          userProfile.wellName ||
+          userProfile.rigName ||
+          userProfile.sensorOffset !== undefined
+        ) {
+          setWellName(userProfile.wellName || propWellName);
+          setRigName(userProfile.rigName || propRigName);
+          setSensorOffset(
+            userProfile.sensorOffset !== undefined
+              ? userProfile.sensorOffset
+              : propSensorOffset,
+          );
+
+          console.log("Using well data from user profile:", {
+            wellName: userProfile.wellName,
+            rigName: userProfile.rigName,
+            sensorOffset: userProfile.sensorOffset,
+          });
+          return;
+        }
+
+        // Fall back to localStorage if no current well or well not found
+        const savedWellName = localStorage.getItem("wellName");
+        const savedRigName = localStorage.getItem("rigName");
+        const savedSensorOffset = localStorage.getItem("sensorOffset");
+
+        // Use localStorage values if available, otherwise use props
+        setWellName(savedWellName || propWellName);
+        setRigName(savedRigName || propRigName);
+        setSensorOffset(
+          savedSensorOffset ? Number(savedSensorOffset) : propSensorOffset,
+        );
+      } catch (error) {
+        console.error("Error fetching well data:", error);
+        // Fall back to props
+        setWellName(propWellName);
+        setRigName(propRigName);
+        setSensorOffset(propSensorOffset);
+      }
+    };
+
+    fetchWellData();
+  }, [
+    propWellName,
+    propRigName,
+    propSensorOffset,
+    userProfile.currentWellId,
+    userProfile.wellName,
+    userProfile.rigName,
+    userProfile.sensorOffset,
+  ]);
 
   // Update well information from latest survey if available
   useEffect(() => {
@@ -79,54 +149,96 @@ const WellInformationWidget = ({
     }
   }, [surveys, propWellName, propRigName, propSensorOffset]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setIsSaving(true);
 
-    // Update well information
-    const wellInfo = {
-      wellName,
-      rigName,
-      sensorOffset,
-    };
+    try {
+      // Update well information
+      const wellInfo = {
+        wellName,
+        rigName,
+        sensorOffset,
+      };
 
-    // Save to localStorage for persistence across page navigation
-    localStorage.setItem("wellName", wellName);
-    localStorage.setItem("rigName", rigName);
-    localStorage.setItem("sensorOffset", sensorOffset.toString());
+      // Save to localStorage for persistence across page navigation
+      localStorage.setItem("wellName", wellName);
+      localStorage.setItem("rigName", rigName);
+      localStorage.setItem("sensorOffset", sensorOffset.toString());
 
-    // Update user profile context with well information
-    userProfile.wellName = wellName;
-    userProfile.rigName = rigName;
-    userProfile.sensorOffset = sensorOffset;
-    updateUserProfile({
-      wellName,
-      rigName,
-      sensorOffset,
-    });
-
-    // Call the onUpdate prop if provided
-    if (onUpdate) {
-      onUpdate(wellInfo);
-    }
-
-    // Update all surveys with the new well information
-    if (surveys.length > 0) {
-      // Use updateSurvey from context that we got earlier
-      surveys.forEach((survey) => {
-        const updatedSurvey = {
-          ...survey,
-          wellName,
-          rigName,
-          sensorOffset,
-        };
-        // Update the survey in the context
-        updateSurvey(updatedSurvey);
+      // Update user profile context with well information
+      userProfile.wellName = wellName;
+      userProfile.rigName = rigName;
+      userProfile.sensorOffset = sensorOffset;
+      updateUserProfile({
+        wellName,
+        rigName,
+        sensorOffset,
       });
-    }
 
-    console.log("Well information saved:", { wellName, rigName, sensorOffset });
-    setIsEditing(false);
-    setIsSaving(false);
+      // Save to database
+      if (userProfile.currentWellId) {
+        // Update existing well
+        await updateWell(userProfile.currentWellId, {
+          name: wellName,
+          rig_name: rigName,
+          sensor_offset: sensorOffset,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        });
+        console.log("Well updated in database:", userProfile.currentWellId);
+      } else {
+        // Create new well
+        const newWell = await createWell({
+          name: wellName,
+          rig_name: rigName,
+          sensor_offset: sensorOffset,
+          is_active: true,
+          created_at: new Date().toISOString(),
+        });
+
+        // Update user profile with the new well ID
+        if (newWell && newWell.id) {
+          userProfile.currentWellId = newWell.id;
+          updateUserProfile({
+            currentWellId: newWell.id,
+          });
+          console.log("New well created in database:", newWell.id);
+        }
+      }
+
+      // Call the onUpdate prop if provided
+      if (onUpdate) {
+        onUpdate(wellInfo);
+      }
+
+      // Update all surveys with the new well information
+      if (surveys.length > 0) {
+        // Use updateSurvey from context that we got earlier
+        surveys.forEach((survey) => {
+          const updatedSurvey = {
+            ...survey,
+            wellName,
+            rigName,
+            sensorOffset,
+            well_id: userProfile.currentWellId, // Add well_id to surveys
+          };
+          // Update the survey in the context
+          updateSurvey(updatedSurvey);
+        });
+      }
+
+      console.log("Well information saved:", {
+        wellName,
+        rigName,
+        sensorOffset,
+        wellId: userProfile.currentWellId,
+      });
+    } catch (error) {
+      console.error("Error saving well information to database:", error);
+    } finally {
+      setIsEditing(false);
+      setIsSaving(false);
+    }
   };
 
   return (
