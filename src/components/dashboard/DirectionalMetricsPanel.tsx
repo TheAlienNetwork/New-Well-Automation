@@ -321,8 +321,9 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
   }
 
   // Calculate build and turn rates if we have survey data
-  let buildRate = 2.5; // Default value
-  let turnRate = 1.8; // Default value
+  // Using the props values as defaults
+  let calculatedBuildRate = buildRate;
+  let calculatedTurnRate = turnRate;
 
   if (previousSurvey && latestSurvey) {
     const prevInc = previousSurvey.inclination;
@@ -340,17 +341,17 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
       typeof prevDepth === "number" &&
       typeof currentDepth === "number"
     ) {
-      buildRate = safeCalculate(
+      calculatedBuildRate = safeCalculate(
         calculateBuildRate,
         [prevInc, currentInclination, prevDepth, currentDepth],
-        2.5,
+        buildRate,
         "buildRate",
       );
 
-      turnRate = safeCalculate(
+      calculatedTurnRate = safeCalculate(
         calculateTurnRate,
         [prevAz, currentAzimuth, prevDepth, currentDepth],
-        1.8,
+        turnRate,
         "turnRate",
       );
 
@@ -363,8 +364,8 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
           currentAzimuth,
           prevDepth,
           currentDepth,
-          buildRate,
-          turnRate,
+          calculatedBuildRate,
+          calculatedTurnRate,
         },
       );
     }
@@ -401,28 +402,28 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
 
   const projectedInc = safeCalculate(
     calculateProjectedInclination,
-    [currentInc, buildRate, targetDistance],
+    [currentInc, calculatedBuildRate, targetDistance],
     currentInc,
     "projectedInc",
   );
 
   console.log("DirectionalMetricsPanel - Projected inclination calculation:", {
     currentInc,
-    buildRate,
+    calculatedBuildRate,
     distance: targetDistance,
     result: projectedInc,
   });
 
   const projectedAz = safeCalculate(
     calculateProjectedAzimuth,
-    [currentAz, turnRate, targetDistance],
+    [currentAz, calculatedTurnRate, targetDistance],
     currentAz,
     "projectedAz",
   );
 
   console.log("DirectionalMetricsPanel - Projected azimuth calculation:", {
     currentAz,
-    turnRate,
+    calculatedTurnRate,
     distance: targetDistance,
     result: projectedAz,
   });
@@ -462,22 +463,25 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
       // Default DLS calculation based on build and turn rates
       // Validate build and turn rates first
       if (
-        typeof buildRate !== "number" ||
-        isNaN(buildRate) ||
-        !isFinite(buildRate) ||
-        typeof turnRate !== "number" ||
-        isNaN(turnRate) ||
-        !isFinite(turnRate)
+        typeof calculatedBuildRate !== "number" ||
+        isNaN(calculatedBuildRate) ||
+        !isFinite(calculatedBuildRate) ||
+        typeof calculatedTurnRate !== "number" ||
+        isNaN(calculatedTurnRate) ||
+        !isFinite(calculatedTurnRate)
       ) {
         console.warn(
-          `Invalid build rate (${buildRate}) or turn rate (${turnRate}). Using defaults.`,
+          `Invalid build rate (${calculatedBuildRate}) or turn rate (${calculatedTurnRate}). Using defaults.`,
         );
         return 2.5; // Default DLS value if rates are invalid
       }
 
-      let dls = Math.sqrt(buildRate * buildRate + turnRate * turnRate);
+      let dls = Math.sqrt(
+        calculatedBuildRate * calculatedBuildRate +
+          calculatedTurnRate * calculatedTurnRate,
+      );
       console.log(
-        `Default DLS calculation: ${dls}°/100ft from build rate ${buildRate} and turn rate ${turnRate}`,
+        `Default DLS calculation: ${dls}°/100ft from build rate ${calculatedBuildRate} and turn rate ${calculatedTurnRate}`,
       );
 
       // If we have at least two surveys, calculate actual DLS
@@ -645,14 +649,17 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
       // Safely calculate default value
       try {
         if (
-          typeof buildRate === "number" &&
-          !isNaN(buildRate) &&
-          isFinite(buildRate) &&
-          typeof turnRate === "number" &&
-          !isNaN(turnRate) &&
-          isFinite(turnRate)
+          typeof calculatedBuildRate === "number" &&
+          !isNaN(calculatedBuildRate) &&
+          isFinite(calculatedBuildRate) &&
+          typeof calculatedTurnRate === "number" &&
+          !isNaN(calculatedTurnRate) &&
+          isFinite(calculatedTurnRate)
         ) {
-          return Math.sqrt(buildRate * buildRate + turnRate * turnRate);
+          return Math.sqrt(
+            calculatedBuildRate * calculatedBuildRate +
+              calculatedTurnRate * calculatedTurnRate,
+          );
         } else {
           return 2.5; // Fallback default
         }

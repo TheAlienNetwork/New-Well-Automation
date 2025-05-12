@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Database, Building2, Ruler } from "lucide-react";
 import {
   Tooltip,
@@ -6,6 +6,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { supabase } from "@/lib/supabase";
+import { useWits } from "@/context/WitsContext";
 
 interface WellInfoProps {
   wellName: string;
@@ -19,11 +21,64 @@ interface WellInfoProps {
 const WellInfo = ({
   wellName,
   rigName,
-  sensorOffset = 0,
+  sensorOffset: propSensorOffset,
   bitDepth,
   measuredDepth,
   compact = false,
 }: WellInfoProps) => {
+  const { connectionConfig } = useWits();
+  const [dbSensorOffset, setDbSensorOffset] = useState<number | undefined>(
+    undefined,
+  );
+
+  // Fetch the sensor offset from the database when wellName changes
+  useEffect(() => {
+    const fetchWellData = async () => {
+      try {
+        // Get the current well ID from localStorage or connectionConfig
+        const wellId =
+          connectionConfig.wellId || localStorage.getItem("currentWellId");
+
+        if (wellId) {
+          const { data, error } = await supabase
+            .from("wells")
+            .select("sensor_offset")
+            .eq("id", wellId)
+            .single();
+
+          if (error) {
+            console.error("Error fetching well sensor offset:", error);
+            return;
+          }
+
+          if (
+            data &&
+            data.sensor_offset !== null &&
+            data.sensor_offset !== undefined
+          ) {
+            setDbSensorOffset(data.sensor_offset);
+            console.log(
+              "Fetched sensor offset from database:",
+              data.sensor_offset,
+            );
+          }
+        }
+      } catch (error) {
+        console.error("Error in fetchWellData:", error);
+      }
+    };
+
+    fetchWellData();
+  }, [wellName, connectionConfig.wellId]);
+
+  // Use the sensor offset from the database if available, otherwise use the prop value
+  const sensorOffset =
+    dbSensorOffset !== undefined
+      ? dbSensorOffset
+      : connectionConfig.sensorOffset !== undefined
+        ? connectionConfig.sensorOffset
+        : propSensorOffset;
+
   if (compact) {
     return (
       <TooltipProvider>

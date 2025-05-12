@@ -22,6 +22,8 @@ interface WitsData {
   tvd?: number;
   magneticField?: number;
   gravity?: number;
+  rotaryRpm?: number;
+  toolFace?: number;
 }
 
 /**
@@ -188,377 +190,32 @@ export const generateOutlookDraftContent = async (
     };
   }
 
-  // Create enhanced HTML content directly
-  let htmlContent = ``;
+  // Use the HTML email template generator
+  const { generateHtmlEmailTemplate } = await import("./htmlEmailTemplate");
 
-  // Well Information Section
-  htmlContent += `
-    <div style="margin-bottom: 20px; padding: 15px; background-color: #f0f4f8; border-radius: 8px; border-left: 5px solid #2c5282;">
-      <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Well Information</h2>
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr>
-          <td style="padding: 8px 0; width: 150px; color: #4a5568; font-weight: 600;">Well Name:</td>
-          <td style="padding: 8px 0; color: #2d3748;">${wellInfo.wellName || "Unknown"}</td>
-        </tr>
-        <tr>
-          <td style="padding: 8px 0; color: #4a5568; font-weight: 600;">Rig Name:</td>
-          <td style="padding: 8px 0; color: #2d3748;">${wellInfo.rigName || "Unknown"}</td>
-        </tr>
-        <tr>
-          <td style="padding: 8px 0; color: #4a5568; font-weight: 600;">Sensor Offset:</td>
-          <td style="padding: 8px 0; color: #2d3748;">${wellInfo.sensorOffset || 0} ft</td>
-        </tr>
-      </table>
-    </div>
-  `;
+  // Generate HTML email content
+  const htmlBody = generateHtmlEmailTemplate(
+    selectedSurveys,
+    surveys,
+    wellInfo,
+    witsData,
+    {
+      includeCurveData,
+      includeTargetLineStatus,
+      targetLineData,
+      includeGammaPlot,
+      includeSurveyAnalytics,
+      includeFullSurveyData,
+    },
+  );
 
-  // Survey Summary Section
-  htmlContent += `
-    <div style="margin-bottom: 20px; padding: 15px; background-color: #f0f4f8; border-radius: 8px; border-left: 5px solid #2c5282;">
-      <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Survey Summary</h2>
-      <table style="width: 100%; border-collapse: collapse;">
-        <tr>
-          <td style="padding: 8px 0; width: 150px; color: #4a5568; font-weight: 600;">Report Generated:</td>
-          <td style="padding: 8px 0; color: #2d3748;">${new Date().toLocaleString()}</td>
-        </tr>
-        <tr>
-          <td style="padding: 8px 0; color: #4a5568; font-weight: 600;">Total Surveys:</td>
-          <td style="padding: 8px 0; color: #2d3748;">${selectedSurveyData.length}</td>
-        </tr>
-      </table>
-    </div>
-  `;
+  const subject = `MWD Survey Report - ${wellInfo.wellName || "Unknown Well"} - ${new Date().toLocaleDateString()}`;
+  const attachments = [];
 
-  // Detailed Survey Data Section
-  htmlContent += `
-    <div style="margin-bottom: 20px;">
-      <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Detailed Survey Data</h2>
-  `;
-
-  selectedSurveyData.forEach((survey, index) => {
-    const depth = (survey.bitDepth || survey.measuredDepth || 0).toFixed(2);
-    const inc = (survey.inclination || 0).toFixed(2);
-    const az = (survey.azimuth || 0).toFixed(2);
-    const tf = (survey.toolFace || 0).toFixed(2);
-    const temp = (survey.toolTemp || 0).toFixed(2);
-    const timestamp = survey.timestamp
-      ? new Date(survey.timestamp).toLocaleString()
-      : "Unknown";
-
-    // Determine quality status color
-    let statusColor = "#68d391"; // Default green for pass
-    if (survey.qualityCheck) {
-      if (survey.qualityCheck.status === "warning") {
-        statusColor = "#f6ad55"; // Orange for warning
-      } else if (survey.qualityCheck.status === "fail") {
-        statusColor = "#fc8181"; // Red for fail
-      }
-    }
-
-    htmlContent += `
-      <div style="margin-bottom: 15px; padding: 15px; background-color: #f8fafc; border-radius: 8px; border-left: 4px solid #3182ce;">
-        <h3 style="color: #3182ce; margin-top: 0; margin-bottom: 10px; font-size: 16px;">SURVEY #${index + 1} - ${timestamp}</h3>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-          <div>
-            <p style="margin: 5px 0; color: #718096; font-size: 13px;">Measured Depth</p>
-            <p style="margin: 0; color: #2d3748; font-weight: 600; font-size: 15px;">${depth} ft</p>
-          </div>
-          <div>
-            <p style="margin: 5px 0; color: #718096; font-size: 13px;">Inclination</p>
-            <p style="margin: 0; color: #2d3748; font-weight: 600; font-size: 15px;">${inc}°</p>
-          </div>
-          <div>
-            <p style="margin: 5px 0; color: #718096; font-size: 13px;">Azimuth</p>
-            <p style="margin: 0; color: #2d3748; font-weight: 600; font-size: 15px;">${az}°</p>
-          </div>
-          <div>
-            <p style="margin: 5px 0; color: #718096; font-size: 13px;">Tool Face</p>
-            <p style="margin: 0; color: #2d3748; font-weight: 600; font-size: 15px;">${tf}°</p>
-          </div>
-          <div>
-            <p style="margin: 5px 0; color: #718096; font-size: 13px;">Tool Temp</p>
-            <p style="margin: 0; color: #2d3748; font-weight: 600; font-size: 15px;">${temp}°F</p>
-          </div>
-          <div>
-            <p style="margin: 5px 0; color: #718096; font-size: 13px;">Quality Check</p>
-            <p style="margin: 0; color: ${statusColor}; font-weight: 600; font-size: 15px;">${survey.qualityCheck?.status?.toUpperCase() || "N/A"}</p>
-          </div>
-        </div>
-        ${
-          survey.qualityCheck?.message
-            ? `
-          <div style="margin-top: 10px; padding: 8px; background-color: #edf2f7; border-radius: 4px;">
-            <p style="margin: 0; color: #4a5568; font-size: 14px;"><span style="font-weight: 600;">Quality Message:</span> ${survey.qualityCheck.message}</p>
-          </div>
-        `
-            : ""
-        }
-      </div>
-    `;
-  });
-
-  htmlContent += `</div>`;
-
-  // Add curve data if requested
-  if (includeCurveData && witsData) {
-    htmlContent += `
-      <div style="margin-bottom: 20px;">
-        <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Curve Data</h2>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-          <div style="padding: 12px; background-color: #ebf8ff; border-radius: 8px; border: 1px solid #bee3f8;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Motor Yield</p>
-            <p style="margin: 0; color: #2b6cb0; font-weight: 600; font-size: 16px;">${witsData.motorYield.toFixed(2)}°/100ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #fffaf0; border-radius: 8px; border: 1px solid #feebc8;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Dogleg Needed</p>
-            <p style="margin: 0; color: #c05621; font-weight: 600; font-size: 16px;">${witsData.doglegNeeded.toFixed(2)}°/100ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #f0fff4; border-radius: 8px; border: 1px solid #c6f6d5;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Slide Seen</p>
-            <p style="margin: 0; color: #2f855a; font-weight: 600; font-size: 16px;">${witsData.slideSeen.toFixed(2)}°</p>
-          </div>
-          <div style="padding: 12px; background-color: #ebf8ff; border-radius: 8px; border: 1px solid #bee3f8;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Slide Ahead</p>
-            <p style="margin: 0; color: #2b6cb0; font-weight: 600; font-size: 16px;">${witsData.slideAhead.toFixed(2)}°</p>
-          </div>
-          <div style="padding: 12px; background-color: #faf5ff; border-radius: 8px; border: 1px solid #e9d8fd;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Projected Inc</p>
-            <p style="margin: 0; color: #6b46c1; font-weight: 600; font-size: 16px;">${witsData.projectedInc.toFixed(2)}°</p>
-          </div>
-          <div style="padding: 12px; background-color: #fff5f5; border-radius: 8px; border: 1px solid #fed7d7;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Projected Az</p>
-            <p style="margin: 0; color: #c53030; font-weight: 600; font-size: 16px;">${witsData.projectedAz.toFixed(2)}°</p>
-          </div>
-        </div>
-      </div>
-    `;
+  // Add screenshot as attachment if available
+  if (imageBlob) {
+    attachments.push(imageBlob);
   }
-
-  // Add target line status if requested
-  if (includeTargetLineStatus && targetLineData) {
-    const aboveBelowText = targetLineData.aboveBelow > 0 ? "Below" : "Above";
-    const aboveBelowColor =
-      targetLineData.aboveBelow > 0 ? "#c53030" : "#2f855a";
-    const distance = Math.sqrt(
-      targetLineData.aboveBelow * targetLineData.aboveBelow +
-        targetLineData.leftRight * targetLineData.leftRight,
-    ).toFixed(1);
-
-    htmlContent += `
-      <div style="margin-bottom: 20px;">
-        <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Target Line Status</h2>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-          <div style="padding: 12px; background-color: ${targetLineData.aboveBelow > 0 ? "#fff5f5" : "#f0fff4"}; border-radius: 8px; border: 1px solid ${targetLineData.aboveBelow > 0 ? "#fed7d7" : "#c6f6d5"};">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Above/Below</p>
-            <p style="margin: 0; color: ${aboveBelowColor}; font-weight: 600; font-size: 16px;">${aboveBelowText} ${Math.abs(targetLineData.aboveBelow).toFixed(1)} ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #fffaf0; border-radius: 8px; border: 1px solid #feebc8;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Left/Right</p>
-            <p style="margin: 0; color: #c05621; font-weight: 600; font-size: 16px;">${targetLineData.leftRight.toFixed(1)} ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #ebf8ff; border-radius: 8px; border: 1px solid #bee3f8;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Distance to Target</p>
-            <p style="margin: 0; color: #2b6cb0; font-weight: 600; font-size: 16px;">${distance} ft</p>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // Add gamma plot if requested
-  if (includeGammaPlot) {
-    htmlContent += `
-      <div style="margin-bottom: 20px;">
-        <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Gamma Ray Plot</h2>
-        <div style="padding: 15px; background-color: #2d3748; border-radius: 8px; color: #e2e8f0;">
-          <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 14px; color: #a0aec0;">Gamma Ray Log Visualization</span>
-            <span style="font-size: 12px; background-color: rgba(56, 178, 172, 0.2); color: #4fd1c5; padding: 2px 8px; border-radius: 9999px;">GAMMA</span>
-          </div>
-          <div style="height: 200px; background-color: #1a202c; border-radius: 4px; padding: 20px; position: relative; overflow: hidden;">
-            <!-- Simplified gamma visualization -->
-            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%;">
-              <polyline points="0,80 10,60 20,70 30,40 40,50 50,30 60,45 70,25 80,35 90,15 100,30" 
-                fill="none" stroke="#38b2ac" stroke-width="2" />
-              <g fill="#38b2ac">
-                <circle cx="0" cy="80" r="2" />
-                <circle cx="10" cy="60" r="2" />
-                <circle cx="20" cy="70" r="2" />
-                <circle cx="30" cy="40" r="2" />
-                <circle cx="40" cy="50" r="2" />
-                <circle cx="50" cy="30" r="2" />
-                <circle cx="60" cy="45" r="2" />
-                <circle cx="70" cy="25" r="2" />
-                <circle cx="80" cy="35" r="2" />
-                <circle cx="90" cy="15" r="2" />
-                <circle cx="100" cy="30" r="2" />
-              </g>
-            </svg>
-            <!-- Y-axis labels -->
-            <div style="position: absolute; left: 10px; top: 10px; bottom: 30px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end;">
-              <span style="color: #a0aec0; font-size: 12px;">0</span>
-              <span style="color: #a0aec0; font-size: 12px;">50</span>
-              <span style="color: #a0aec0; font-size: 12px;">100</span>
-            </div>
-            <!-- X-axis labels -->
-            <div style="position: absolute; left: 30px; right: 10px; bottom: 10px; display: flex; justify-content: space-between;">
-              <span style="color: #a0aec0; font-size: 12px;">${(latestSurvey.bitDepth - 100).toFixed(0)}</span>
-              <span style="color: #a0aec0; font-size: 12px;">${(latestSurvey.bitDepth - 50).toFixed(0)}</span>
-              <span style="color: #a0aec0; font-size: 12px;">${latestSurvey.bitDepth.toFixed(0)}</span>
-            </div>
-          </div>
-          <p style="margin-top: 10px; font-size: 12px; color: #a0aec0; text-align: center;">
-            Gamma readings from ${(latestSurvey.bitDepth - 100).toFixed(0)} to ${latestSurvey.bitDepth.toFixed(0)} ft MD
-          </p>
-        </div>
-      </div>
-    `;
-  }
-
-  // Add survey analytics if requested
-  if (includeSurveyAnalytics) {
-    htmlContent += `
-      <div style="margin-bottom: 20px;">
-        <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Survey Analytics</h2>
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-          <div style="padding: 12px; background-color: #fffaf0; border-radius: 8px; border: 1px solid #feebc8;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Dogleg Severity</p>
-            <p style="margin: 0; color: #c05621; font-weight: 600; font-size: 16px;">${(Math.random() * 3 + 1).toFixed(2)}°/100ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #ebf8ff; border-radius: 8px; border: 1px solid #bee3f8;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Build Rate</p>
-            <p style="margin: 0; color: #2b6cb0; font-weight: 600; font-size: 16px;">${(Math.random() * 2 + 0.5).toFixed(2)}°/100ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #f0fff4; border-radius: 8px; border: 1px solid #c6f6d5;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Turn Rate</p>
-            <p style="margin: 0; color: #2f855a; font-weight: 600; font-size: 16px;">${(Math.random() * 2 + 0.5).toFixed(2)}°/100ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #faf5ff; border-radius: 8px; border: 1px solid #e9d8fd;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Projected TD</p>
-            <p style="margin: 0; color: #6b46c1; font-weight: 600; font-size: 16px;">${(latestSurvey.bitDepth + 1000).toFixed(1)} ft</p>
-          </div>
-          <div style="padding: 12px; background-color: #fff5f5; border-radius: 8px; border: 1px solid #fed7d7;">
-            <p style="margin: 0 0 5px 0; color: #4a5568; font-size: 13px;">Directional Tendency</p>
-            <p style="margin: 0; color: #c53030; font-weight: 600; font-size: 16px;">Trending ${Math.random() > 0.5 ? "right" : "left"} of plan by ${(Math.random() * 5).toFixed(1)} ft</p>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  // Add full survey data if requested
-  if (includeFullSurveyData) {
-    htmlContent += `
-      <div style="margin-bottom: 20px;">
-        <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Complete Survey Data</h2>
-        <div style="overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse; border: 1px solid #e2e8f0;">
-            <thead>
-              <tr style="background-color: #2c5282;">
-                <th style="padding: 10px; text-align: left; color: white; font-weight: 600; border: 1px solid #4a5568;">MD (ft)</th>
-                <th style="padding: 10px; text-align: left; color: white; font-weight: 600; border: 1px solid #4a5568;">Inc (°)</th>
-                <th style="padding: 10px; text-align: left; color: white; font-weight: 600; border: 1px solid #4a5568;">Az (°)</th>
-                <th style="padding: 10px; text-align: left; color: white; font-weight: 600; border: 1px solid #4a5568;">TF (°)</th>
-                <th style="padding: 10px; text-align: left; color: white; font-weight: 600; border: 1px solid #4a5568;">Temp (°F)</th>
-                <th style="padding: 10px; text-align: left; color: white; font-weight: 600; border: 1px solid #4a5568;">B Total</th>
-                <th style="padding: 10px; text-align: left; color: white; font-weight: 600; border: 1px solid #4a5568;">A Total</th>
-              </tr>
-            </thead>
-            <tbody>
-    `;
-
-    selectedSurveyData.forEach((survey) => {
-      htmlContent += `
-        <tr>
-          <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.bitDepth || 0).toFixed(2)}</td>
-          <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.inclination || 0).toFixed(2)}</td>
-          <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.azimuth || 0).toFixed(2)}</td>
-          <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.toolFace || 0).toFixed(2)}</td>
-          <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.toolTemp || 0).toFixed(2)}</td>
-          <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.bTotal || 0).toFixed(2)}</td>
-          <td style="padding: 8px; border: 1px solid #e2e8f0; color: #2d3748;">${(survey.aTotal || 0).toFixed(2)}</td>
-        </tr>
-      `;
-    });
-
-    htmlContent += `
-            </tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  }
-
-  // Add notes section
-  htmlContent += `
-    <div style="margin-top: 30px; padding: 15px; background-color: #f7fafc; border-radius: 8px; border-left: 5px solid #4299e1;">
-      <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 10px; font-size: 18px;">Notes</h2>
-      <p style="margin: 0; color: #4a5568; line-height: 1.5;">
-        This report was generated automatically by the MWD Surface Software.<br>
-        Please contact the directional driller for any questions or concerns.
-      </p>
-    </div>
-  `;
-
-  // Wrap everything in HTML structure
-  const htmlBody = `
-    <html>
-      <head>
-        <style>
-          body { font-family: Calibri, Arial, sans-serif; line-height: 1.4; color: #333; margin: 0; padding: 20px; }
-          h1 { color: #1a3e72; border-bottom: 1px solid #1a3e72; padding-bottom: 8px; }
-          h2 { color: #1a3e72; margin-top: 24px; }
-          h3 { color: #2c5282; margin-bottom: 8px; }
-          .header { background-color: #f8f9fa; padding: 20px; margin-bottom: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-          .footer { margin-top: 40px; padding: 20px; border-top: 1px solid #e2e8f0; font-size: 0.9em; color: #718096; background-color: #f7fafc; border-radius: 8px; }
-          .warning { color: #d69e2e; font-weight: bold; }
-          .error { color: #e53e3e; font-weight: bold; }
-          .success { color: #38a169; font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1 style="margin-top: 0; color: #2c5282; font-size: 24px;">MWD SURVEY REPORT - ${wellInfo.wellName || "Unknown Well"}</h1>
-          <p style="margin-bottom: 0; color: #4a5568;"><strong>Rig:</strong> ${wellInfo.rigName || "Unknown Rig"} | <strong>Generated:</strong> ${new Date().toLocaleString()}</p>
-        </div>
-
-        ${htmlContent}
-
-        ${
-          imageBlob
-            ? `
-        <div style="margin: 30px 0;">
-          <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Survey Visualization</h2>
-          <div style="text-align: center;">
-            <img src="cid:surveyPlot" alt="Survey Plot" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-          </div>
-        </div>
-        `
-            : ""
-        }
-
-        <div class="footer">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <div>
-              <p style="margin: 0; font-weight: 600; color: #4a5568;">New Well Technologies</p>
-              <p style="margin: 5px 0 0 0; color: #718096;">Advanced Directional Drilling Solutions</p>
-            </div>
-            <div style="text-align: right;">
-              <p style="margin: 0; color: #4a5568;">Phone: (555) 123-4567</p>
-              <p style="margin: 5px 0 0 0; color: #4a5568;">Email: support@newwelltech.com</p>
-            </div>
-          </div>
-          <p style="margin: 15px 0 0 0; padding-top: 15px; border-top: 1px solid #e2e8f0; color: #718096; font-size: 12px; text-align: center;">
-            <strong>24/7 Technical Support:</strong> (555) 987-6543<br>
-            <em>CONFIDENTIALITY NOTICE: This email contains proprietary drilling information.</em>
-          </p>
-        </div>
-      </body>
-    </html>
-  `;
-
-  const subject = `MWD Survey Report - ${wellInfo.wellName} - ${new Date().toLocaleDateString()}`;
-  const attachments = imageBlob ? [imageBlob] : [];
 
   return {
     subject,
@@ -568,78 +225,22 @@ export const generateOutlookDraftContent = async (
 };
 
 /**
- * Launches Outlook draft with specified content
- */
-export const launchOutlookDraft = async (
-  content: { subject: string; htmlBody: string; attachments: Blob[] },
-  recipients: string[] = [],
-  ccRecipients: string[] = [],
-  fileAttachments: {
-    name: string;
-    path: string;
-    type: string;
-    size: string;
-  }[] = [],
-): Promise<void> => {
-  try {
-    // Method 1: Office JS API (best for Outlook desktop)
-    if (window.Office && window.Office.context) {
-      Office.context.mailbox.displayNewMessageAsync({
-        to: recipients,
-        cc: ccRecipients,
-        subject: content.subject,
-        htmlBody: content.htmlBody,
-        attachments: [
-          ...content.attachments.map((blob, index) => ({
-            type: Office.MailboxEnums.AttachmentType.File,
-            name: `SurveyPlot_${index + 1}.png`,
-            content: URL.createObjectURL(blob),
-          })),
-          ...fileAttachments.map((file) => ({
-            type: Office.MailboxEnums.AttachmentType.File,
-            name: file.name,
-            path: file.path,
-          })),
-        ],
-      });
-      return;
-    }
-
-    // Method 2: Use Outlook Web App URL with deep linking
-    // This will open Outlook Web App with a pre-populated draft
-    const outlookWebUrl = `https://outlook.office.com/mail/deeplink/compose?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&to=${encodeURIComponent(recipients.join(";"))}`;
-    window.open(outlookWebUrl, "_blank");
-
-    // Method 3: MS Protocol URL as fallback (works when Outlook is default client)
-    // Note: Protocol URL doesn't support file attachments directly
-    setTimeout(() => {
-      const outlookProtocolUrl = `outlook:compose?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&to=${recipients.join(";")}&cc=${ccRecipients.join(";")}`;
-      window.location.href = outlookProtocolUrl;
-    }, 1000);
-
-    // Final fallback after a delay if protocol handler doesn't work
-    setTimeout(() => {
-      // Method 4: Basic mailto with HTML
-      const mailtoUrl = `mailto:${recipients.join(";")}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&cc=${ccRecipients.join(";")}`;
-      window.location.href = mailtoUrl;
-    }, 2000);
-  } catch (error) {
-    console.error("Error launching Outlook draft:", error);
-    // Final fallback
-    const mailtoUrl = `mailto:${recipients.join(";")}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.htmlBody)}&cc=${ccRecipients.join(";")}`;
-    window.location.href = mailtoUrl;
-  }
-};
-
-/**
  * Creates a mailto URL for sending survey data via email
- * (Unchanged from original implementation)
  */
 export const createMailtoUrl = (
   emailBody: string,
   subject: string,
   recipient: string = "",
+  isHtml: boolean = false,
 ): string => {
+  // For HTML emails, we need to use a different approach
+  if (isHtml) {
+    // Most email clients don't support HTML in mailto links
+    // So we'll just include a plain text version
+    const plainTextBody = emailBody.replace(/<[^>]*>/g, "");
+    return `mailto:${recipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(plainTextBody)}`;
+  }
+
   return `mailto:${recipient}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(emailBody)}`;
 };
 
@@ -656,13 +257,28 @@ export const captureEmailPreview = async (
 
   try {
     console.log("Starting html2canvas capture");
+    // Add a small delay to ensure the element is fully rendered
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
     const canvas = await html2canvas(element, {
       backgroundColor: "#1a1a1a",
-      scale: 1.5, // Reduced scale for better performance and smaller file size
+      scale: 1.5, // Higher scale for better quality
       logging: true, // Enable logging for debugging
       useCORS: true,
       allowTaint: true, // Allow tainted canvas for better compatibility
       foreignObjectRendering: false, // Disable foreignObject rendering for better compatibility
+      onclone: (clonedDoc) => {
+        // Make sure all elements in the cloned document are visible
+        const emailPreviewContainer = clonedDoc.querySelector(
+          ".email-preview-container",
+        );
+        if (emailPreviewContainer) {
+          emailPreviewContainer.setAttribute(
+            "style",
+            "display: block !important; visibility: visible !important; opacity: 1 !important;",
+          );
+        }
+      },
     });
 
     console.log("Canvas created with dimensions", {
@@ -687,8 +303,8 @@ export const captureEmailPreview = async (
           resolve(blob);
         },
         "image/png",
-        0.85,
-      ); // Use 0.85 quality for better compression
+        0.9, // Use 0.9 quality for better image quality
+      );
     });
   } catch (error) {
     console.error("Error capturing email preview:", error);
@@ -698,7 +314,6 @@ export const captureEmailPreview = async (
 
 /**
  * Copies an image to clipboard
- * (Unchanged from original implementation)
  */
 export const copyImageToClipboard = async (blob: Blob): Promise<boolean> => {
   try {
@@ -753,9 +368,9 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
  * New function to handle the complete Outlook email creation flow
  */
 export const createOutlookEmailWithSurveyData = async (
-  selectedSurveys: string[],
-  surveys: SurveyData[],
-  wellInfo: WellInfo,
+  selectedSurveyIds: string[],
+  surveysToUse: SurveyData[],
+  wellInfoData: WellInfo,
   witsData: WitsData,
   options: {
     includeCurveData?: boolean;
@@ -772,128 +387,162 @@ export const createOutlookEmailWithSurveyData = async (
       path: string;
       type: string;
       size: string;
+      file?: File;
     }[];
     emailPreviewImage?: Blob | null;
     embedScreenshot?: boolean;
+    useScreenshotInEmail?: boolean;
+    replaceBodyWithScreenshot?: boolean;
   } = {},
 ) => {
+  console.log("Creating Outlook email with options:", {
+    includeCurveData: options.includeCurveData,
+    includeTargetLineStatus: options.includeTargetLineStatus,
+    includeGammaPlot: options.includeGammaPlot,
+    includeSurveyAnalytics: options.includeSurveyAnalytics,
+    includeFullSurveyData: options.includeFullSurveyData,
+    hasEmailPreviewImage: !!options.emailPreviewImage,
+    embedScreenshot: options.embedScreenshot,
+    replaceBodyWithScreenshot: options.replaceBodyWithScreenshot,
+    attachmentsCount: options.fileAttachments?.length || 0,
+  });
+
   try {
-    // Process screenshot if available and embedding is requested
-    let imageBase64: string | null = null;
-    if (options.emailPreviewImage && options.embedScreenshot) {
-      try {
-        console.log("Converting screenshot to base64");
-        imageBase64 = await blobToBase64(options.emailPreviewImage);
-        console.log("Screenshot converted to base64", {
-          length: imageBase64.length,
-          preview: imageBase64.substring(0, 50) + "...",
-        });
-      } catch (imgError) {
-        console.error("Failed to convert screenshot to base64:", imgError);
-      }
-    }
-
-    // Generate email content
-    const emailContentObj = await generateOutlookDraftContent(
-      selectedSurveys,
-      surveys,
-      wellInfo,
-      witsData,
-      options.includeCurveData,
-      options.includeTargetLineStatus,
-      options.targetLineData,
-      options.includeGammaPlot,
-      options.emailPreviewImage,
-      options.includeSurveyAnalytics,
-      options.includeFullSurveyData,
-    );
-
-    // Create email subject with fallback values if wellInfo properties are undefined
-    const subject = `Survey Report - Well ${wellInfo.wellName || "Unknown"} - ${wellInfo.rigName || "Unknown"}`;
-
-    // Prepare the HTML body with embedded image if available
-    let htmlBody = emailContentObj.htmlBody;
-
-    // If we have a base64 image and embedding is requested, insert it directly into the HTML
-    if (imageBase64 && options.embedScreenshot) {
-      // Find the closing body tag and insert the image before it
-      const imageHtml = `
-        <div style="margin: 30px 0;">
-          <h2 style="color: #2c5282; margin-top: 0; margin-bottom: 15px; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Survey Visualization</h2>
-          <div style="text-align: center;">
-            <img src="${imageBase64}" alt="Survey Plot" style="max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-          </div>
-        </div>
-      `;
-
-      // Insert before the footer div or body closing tag
-      htmlBody = htmlBody.replace(
-        /<div class="footer"/,
-        `${imageHtml}<div class="footer"`,
-      );
-
-      console.log("Added embedded screenshot to email HTML");
-    }
-
-    // Prepare attachments - only add as attachment if we're not embedding
-    const attachments = [];
-    if (options.emailPreviewImage && !imageBase64) {
-      attachments.push(options.emailPreviewImage);
-      console.log("Adding screenshot as attachment instead of embedding");
-    }
-
-    // Launch Outlook draft with HTML content and file attachments
-    await launchOutlookDraft(
-      {
-        subject,
-        htmlBody: htmlBody,
-        attachments: attachments,
-      },
-      options.recipients || [],
-      options.ccRecipients || [],
-      options.fileAttachments || [],
-    );
-  } catch (error) {
-    console.error("Error creating Outlook email with survey data:", error);
-
-    // Fallback method if the main approach fails
-    try {
-      // Create a simplified plain text version as fallback
-      const { generateEmailContent } = await import("@/utils/emailUtils");
-      const plainTextContent = generateEmailContent(
-        selectedSurveys,
-        surveys,
-        wellInfo,
+    // Generate email content based on options
+    const { subject, htmlBody, attachments } =
+      await generateOutlookDraftContent(
+        selectedSurveyIds,
+        surveysToUse,
+        wellInfoData,
         witsData,
         options.includeCurveData,
         options.includeTargetLineStatus,
         options.targetLineData,
         options.includeGammaPlot,
+        options.emailPreviewImage,
         options.includeSurveyAnalytics,
         options.includeFullSurveyData,
       );
 
-      const subject = `Survey Report - Well ${wellInfo.wellName || "Unknown"} - ${wellInfo.rigName || "Unknown"}`;
-      const recipients = options.recipients || [];
+    // Prepare recipients
+    const recipientList = options.recipients?.join(";") || "";
+    const ccList = options.ccRecipients?.join(";") || "";
 
-      // Use simple mailto as last resort
-      const mailtoUrl = `mailto:${encodeURIComponent(recipients.join(";"))}?subject=${encodeURIComponent(subject)}`;
-      window.location.href = mailtoUrl;
-
-      // Copy content to clipboard as backup
-      try {
-        await navigator.clipboard.writeText(plainTextContent);
-        alert(
-          "Email content copied to clipboard as fallback. You can paste it into your email client.",
-        );
-      } catch (clipboardError) {
-        console.error("Failed to copy to clipboard:", clipboardError);
+    // If we have a screenshot and want to use it, we'll need to handle it differently
+    if (options.emailPreviewImage && options.embedScreenshot) {
+      // For screenshot emails, we'll open a new window with the image
+      // and instructions to copy/paste it into an email
+      const imageUrl = URL.createObjectURL(options.emailPreviewImage);
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.write(`
+          <html>
+            <head>
+              <title>Email Screenshot</title>
+              <style>
+                body { font-family: Arial, sans-serif; background-color: #f0f0f0; margin: 0; padding: 20px; text-align: center; }
+                .container { max-width: 800px; margin: 0 auto; background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                h2 { color: #333; }
+                .instructions { margin: 20px 0; padding: 15px; background-color: #f8f9fa; border-left: 4px solid #007bff; }
+                .email-image { max-width: 100%; height: auto; border: 1px solid #ddd; margin: 20px 0; }
+                .button { display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; border-radius: 4px; text-decoration: none; margin: 10px; }
+                .button:hover { background-color: #0069d9; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h2>Email Screenshot Ready</h2>
+                <div class="instructions">
+                  <p>1. Right-click on the image below and select "Copy Image"</p>
+                  <p>2. Open your email client and paste the image into a new email</p>
+                  <p>3. Add recipients and send your email</p>
+                </div>
+                <img src="${imageUrl}" alt="Email Preview" class="email-image" />
+                <div>
+                  <a href="ms-outlook:compose?subject=${encodeURIComponent(subject)}" class="button">Open Outlook</a>
+                  <button onclick="window.close()" class="button">Close Window</button>
+                </div>
+              </div>
+            </body>
+          </html>
+        `);
       }
-    } catch (fallbackError) {
-      console.error("Fallback email method also failed:", fallbackError);
-      alert(
-        "Could not open email client. Please try again or use the manual export option.",
-      );
+      return;
     }
+
+    // Use desktop Outlook application protocol
+    let outlookUrl = `ms-outlook:compose?subject=${encodeURIComponent(subject)}`;
+
+    // Add recipients if available
+    if (recipientList) {
+      outlookUrl += `&to=${encodeURIComponent(recipientList)}`;
+    }
+
+    // Add CC recipients if available
+    if (ccList) {
+      outlookUrl += `&cc=${encodeURIComponent(ccList)}`;
+    }
+
+    // Add HTML body
+    outlookUrl += `&body=${encodeURIComponent(htmlBody)}`;
+
+    // Open Outlook with the composed email
+    window.location.href = outlookUrl;
+
+    // If there are attachments, show instructions to the user
+    if (options.fileAttachments && options.fileAttachments.length > 0) {
+      setTimeout(() => {
+        alert(
+          `Please manually attach the ${options.fileAttachments?.length} file(s) to your email.\n\nThe email draft has been opened in Outlook.`,
+        );
+      }, 1000);
+    }
+
+    // Create a backup method using the clipboard for HTML content
+    setTimeout(() => {
+      try {
+        // Copy the HTML to clipboard for pasting
+        const tempElement = document.createElement("div");
+        tempElement.innerHTML = htmlBody;
+        document.body.appendChild(tempElement);
+
+        const selection = window.getSelection();
+        if (selection) {
+          const range = document.createRange();
+          range.selectNodeContents(tempElement);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          document.execCommand("copy");
+          selection.removeAllRanges();
+        }
+        document.body.removeChild(tempElement);
+
+        console.log("HTML content copied to clipboard as backup");
+      } catch (clipboardError) {
+        console.error("Failed to copy HTML to clipboard:", clipboardError);
+      }
+    }, 1500);
+  } catch (error) {
+    console.error("Error creating Outlook email:", error);
+    // Fallback to basic mailto
+    const plainTextContent = generateEmailContent(
+      selectedSurveyIds,
+      surveysToUse,
+      wellInfoData,
+      witsData,
+      options.includeCurveData,
+      options.includeTargetLineStatus,
+      options.targetLineData,
+      options.includeGammaPlot,
+      options.includeSurveyAnalytics,
+      options.includeFullSurveyData,
+    );
+    const subject = `MWD Survey Report - ${wellInfoData.wellName || "Unknown"} - ${new Date().toLocaleDateString()}`;
+    const mailtoUrl = createMailtoUrl(
+      plainTextContent,
+      subject,
+      options.recipients?.join(";") || "",
+    );
+    window.location.href = mailtoUrl;
   }
 };

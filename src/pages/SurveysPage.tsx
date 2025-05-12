@@ -71,6 +71,7 @@ const SurveysPage = () => {
     setExportFolderPath,
     autoExportEnabled,
     setAutoExportEnabled,
+    currentWellId,
   } = useSurveys();
 
   // Well information state - moved to the top to ensure it's initialized before use
@@ -89,10 +90,140 @@ const SurveysPage = () => {
   const [monitoredFilePath, setMonitoredFilePath] = useState<string>("");
   const [lastFileModified, setLastFileModified] = useState<number>(0);
 
-  // Reset error state when surveys change
+  // Reset error state when surveys change and listen for survey events
   useEffect(() => {
     setHasError(false);
-  }, [surveys]);
+
+    // Listen for surveysLoaded events
+    const handleSurveysLoaded = (event: CustomEvent) => {
+      console.log("SurveysPage received surveysLoaded event:", event.detail);
+      if (event.detail && event.detail.surveys) {
+        // Force update the well info
+        const wellName = localStorage.getItem("wellName") || "";
+        const rigName = localStorage.getItem("rigName") || "";
+        const sensorOffset = Number(localStorage.getItem("sensorOffset")) || 0;
+
+        setWellInfo({
+          wellName,
+          rigName,
+          sensorOffset,
+        });
+      }
+    };
+
+    // Listen for wellInfoUpdated events
+    const handleWellInfoUpdated = (event: CustomEvent) => {
+      console.log("SurveysPage received wellInfoUpdated event:", event.detail);
+      if (event.detail) {
+        const newWellInfo = { ...wellInfo };
+        if (event.detail.wellName) newWellInfo.wellName = event.detail.wellName;
+        if (event.detail.rigName) newWellInfo.rigName = event.detail.rigName;
+        if (event.detail.sensorOffset !== undefined)
+          newWellInfo.sensorOffset = event.detail.sensorOffset;
+
+        setWellInfo(newWellInfo);
+      }
+    };
+
+    window.addEventListener(
+      "surveysLoaded",
+      handleSurveysLoaded as EventListener,
+    );
+    window.addEventListener(
+      "wellInfoUpdated",
+      handleWellInfoUpdated as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "surveysLoaded",
+        handleSurveysLoaded as EventListener,
+      );
+      window.removeEventListener(
+        "wellInfoUpdated",
+        handleWellInfoUpdated as EventListener,
+      );
+    };
+  }, [surveys, wellInfo]);
+
+  // Update well information when currentWellId changes
+  useEffect(() => {
+    if (currentWellId) {
+      // Update well information from localStorage based on current well
+      const wellName = localStorage.getItem("wellName") || "";
+      const rigName = localStorage.getItem("rigName") || "";
+      const sensorOffset = Number(localStorage.getItem("sensorOffset")) || 0;
+
+      setWellInfo({
+        wellName,
+        rigName,
+        sensorOffset,
+      });
+
+      console.log(`Updated well info for well ID: ${currentWellId}`, {
+        wellName,
+        rigName,
+        sensorOffset,
+      });
+
+      // Force UI update by dispatching a custom event
+      const wellInfoUpdatedEvent = new CustomEvent("wellInfoUpdated", {
+        detail: { wellName, rigName, sensorOffset, wellId: currentWellId },
+      });
+      window.dispatchEvent(wellInfoUpdatedEvent);
+
+      // Fetch the latest surveys for this well
+      const fetchSurveysForCurrentWell = async () => {
+        try {
+          const { supabase } = await import("@/lib/supabase");
+
+          const { data, error } = await supabase
+            .from("surveys")
+            .select("*")
+            .eq("well_id", currentWellId)
+            .order("timestamp", { ascending: false });
+
+          if (error) {
+            console.error("Error fetching surveys for current well:", error);
+            return;
+          }
+
+          if (data && data.length > 0) {
+            // Convert database format to application format
+            const formattedSurveys = data.map((survey) => ({
+              id: survey.id,
+              timestamp: survey.timestamp,
+              bitDepth: survey.bit_depth,
+              inclination: survey.inclination,
+              azimuth: survey.azimuth,
+              toolFace: survey.tool_face,
+              bTotal: survey.b_total,
+              aTotal: survey.a_total,
+              dip: survey.dip,
+              toolTemp: survey.tool_temp,
+              wellName: survey.well_name || wellName,
+              rigName: survey.rig_name || rigName,
+              qualityCheck: survey.quality_check,
+              sensorOffset: survey.sensor_offset || sensorOffset,
+              measuredDepth: survey.measured_depth,
+              wellId: survey.well_id,
+            }));
+
+            // Update surveys in context
+            formattedSurveys.forEach((survey) => addSurvey(survey));
+
+            console.log(
+              `SurveysPage: Loaded ${formattedSurveys.length} surveys for well ${currentWellId}`,
+            );
+          }
+        } catch (error) {
+          console.error("Error in fetchSurveysForCurrentWell:", error);
+        }
+      };
+
+      fetchSurveysForCurrentWell();
+    }
+  }, [currentWellId, addSurvey]);
 
   // Check for file updates if monitoring is enabled
   useEffect(() => {
@@ -228,6 +359,10 @@ const SurveysPage = () => {
         return;
       }
 
+      console.log(
+        `SurveysPage: Processing ${surveys.length} surveys to find latest`,
+      );
+
       if (surveys.length > 0) {
         // Validate surveys before sorting
         const validSurveys = surveys.filter((survey) => {
@@ -265,12 +400,34 @@ const SurveysPage = () => {
         // Validate the latest survey before setting it
         const latest = sortedSurveys[0];
         if (latest && typeof latest === "object") {
+          console.log("SurveysPage: Setting latest survey:", {
+            id: latest.id,
+            timestamp: latest.timestamp,
+            inclination: latest.inclination,
+            azimuth: latest.azimuth,
+            bitDepth: latest.bitDepth,
+            measuredDepth: latest.measuredDepth,
+          });
           setLatestSurvey(latest);
+
+          // Also update well info from the latest survey if needed
+          if (latest.wellName || latest.rigName || latest.sensorOffset) {
+            const updatedWellInfo = { ...wellInfo };
+            if (latest.wellName) updatedWellInfo.wellName = latest.wellName;
+            if (latest.rigName) updatedWellInfo.rigName = latest.rigName;
+            if (latest.sensorOffset)
+              updatedWellInfo.sensorOffset = latest.sensorOffset;
+
+            setWellInfo(updatedWellInfo);
+          }
         } else {
           console.warn("Latest survey is invalid:", latest);
           setLatestSurvey(null);
         }
       } else {
+        console.log(
+          "SurveysPage: No surveys available, setting latestSurvey to null",
+        );
         setLatestSurvey(null);
       }
     } catch (error) {
@@ -278,7 +435,7 @@ const SurveysPage = () => {
       setLatestSurvey(null);
       setHasError(true);
     }
-  }, [surveys]);
+  }, [surveys, currentWellId, wellInfo]);
 
   // Fallback method for folder selection
   const fallbackFolderSelection = () => {
@@ -744,7 +901,10 @@ const SurveysPage = () => {
       return (
         <div className="min-h-screen bg-gray-950 text-gray-200">
           <Navbar />
-          <StatusBar />
+          <StatusBar
+            wellName={wellInfo.wellName}
+            sensorOffset={wellInfo.sensorOffset}
+          />
           <div className="container mx-auto px-4 py-6">
             <div className="grid grid-cols-1 gap-6">
               <div className="flex justify-between items-center mb-4">

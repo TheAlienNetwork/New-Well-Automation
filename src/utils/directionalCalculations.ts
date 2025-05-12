@@ -319,7 +319,8 @@ export const calculateBuildRate = (
     !isFinite(inc2) ||
     !isFinite(md1) ||
     !isFinite(md2) ||
-    md1 === md2
+    md1 === md2 ||
+    Math.abs(md2 - md1) < 0.001 // Prevent division by very small numbers
   ) {
     return 0; // Return 0 if inputs are invalid
   }
@@ -362,7 +363,8 @@ export const calculateTurnRate = (
     !isFinite(azi2) ||
     !isFinite(md1) ||
     !isFinite(md2) ||
-    md1 === md2
+    md1 === md2 ||
+    Math.abs(md2 - md1) < 0.001 // Prevent division by very small numbers
   ) {
     return 0; // Return 0 if inputs are invalid
   }

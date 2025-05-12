@@ -16,20 +16,43 @@ import * as fs from "fs";
 // Configuration
 const config = {
   // WebSocket server settings
-  webSocketPort: 8080,
+  webSocketPort: process.env.WITS_PROXY_PORT
+    ? parseInt(process.env.WITS_PROXY_PORT, 10)
+    : 8080,
   // Default TCP server settings (can be overridden by client)
-  defaultTcpHost: "localhost",
-  defaultTcpPort: 5000,
+  defaultTcpHost: process.env.WITS_DEFAULT_HOST || "localhost",
+  defaultTcpPort: process.env.WITS_DEFAULT_PORT
+    ? parseInt(process.env.WITS_DEFAULT_PORT, 10)
+    : 5000,
   // Heartbeat settings
-  heartbeatInterval: 15000,
-  pongTimeout: 10000,
-  maxMissedPongs: 3,
+  heartbeatInterval: process.env.WITS_HEARTBEAT_INTERVAL
+    ? parseInt(process.env.WITS_HEARTBEAT_INTERVAL, 10)
+    : 15000,
+  pongTimeout: process.env.WITS_PONG_TIMEOUT
+    ? parseInt(process.env.WITS_PONG_TIMEOUT, 10)
+    : 10000,
+  maxMissedPongs: process.env.WITS_MAX_MISSED_PONGS
+    ? parseInt(process.env.WITS_MAX_MISSED_PONGS, 10)
+    : 3,
   // SSL/TLS settings
   useTLS: process.env.USE_TLS === "true",
   certPath: process.env.CERT_PATH || "./certs/cert.pem",
   keyPath: process.env.KEY_PATH || "./certs/key.pem",
   // Client connection multiplexing
   enableMultiplexing: process.env.ENABLE_MULTIPLEXING === "true",
+  // Connection reliability settings
+  maxReconnectAttempts: process.env.WITS_MAX_RECONNECT_ATTEMPTS
+    ? parseInt(process.env.WITS_MAX_RECONNECT_ATTEMPTS, 10)
+    : 10,
+  bufferSize: process.env.WITS_BUFFER_SIZE
+    ? parseInt(process.env.WITS_BUFFER_SIZE, 10)
+    : 10000,
+  tcpKeepAliveInterval: process.env.WITS_TCP_KEEPALIVE_INTERVAL
+    ? parseInt(process.env.WITS_TCP_KEEPALIVE_INTERVAL, 10)
+    : 30000,
+  socketTimeout: process.env.WITS_SOCKET_TIMEOUT
+    ? parseInt(process.env.WITS_SOCKET_TIMEOUT, 10)
+    : 300000,
 };
 
 // Create Express app for handling HTTP requests
@@ -278,9 +301,20 @@ wss.on("connection", (ws, req) => {
       attemptReconnect();
     });
 
-    // TCP socket optimizations
-    tcpSocket.setKeepAlive(true, 30000);
-    tcpSocket.setNoDelay(true);
+    // TCP socket optimizations for production reliability
+    tcpSocket.setKeepAlive(true, config.tcpKeepAliveInterval);
+    tcpSocket.setNoDelay(true); // Disable Nagle's algorithm
+    tcpSocket.setTimeout(config.socketTimeout); // Set socket timeout
+
+    // Set additional socket options for better reliability
+    if (typeof tcpSocket.setKeepAlive === "function") {
+      tcpSocket.setKeepAlive(true, config.tcpKeepAliveInterval);
+    }
+
+    // Increase socket buffer sizes for better performance
+    if (typeof tcpSocket.setNoDelay === "function") {
+      tcpSocket.setNoDelay(true);
+    }
   };
 
   // Process the buffer for complete WITS records
@@ -291,17 +325,22 @@ wss.on("connection", (ws, req) => {
     buffer = records.pop() || "";
 
     // Prevent buffer from growing too large
-    if (buffer.length > 10000) {
-      console.warn("Buffer exceeds 10KB without finding delimiter, truncating");
-      buffer = buffer.substring(buffer.length - 5000);
+    if (buffer.length > config.bufferSize) {
+      console.warn(
+        `Buffer exceeds ${config.bufferSize / 1000}KB without finding delimiter, truncating`,
+      );
+      buffer = buffer.substring(buffer.length - config.bufferSize / 2);
 
       // Also truncate the shared buffer if multiplexing is enabled
       if (config.enableMultiplexing) {
         const tcpKey = `${tcpHost}:${tcpPort}`;
         const sharedConnection = tcpConnections.get(tcpKey);
-        if (sharedConnection && sharedConnection.buffer.length > 10000) {
+        if (
+          sharedConnection &&
+          sharedConnection.buffer.length > config.bufferSize
+        ) {
           sharedConnection.buffer = sharedConnection.buffer.substring(
-            sharedConnection.buffer.length - 5000,
+            sharedConnection.buffer.length - config.bufferSize / 2,
           );
         }
       }
@@ -322,9 +361,9 @@ wss.on("connection", (ws, req) => {
     });
   };
 
-  // Attempt to reconnect to TCP server
+  // Attempt to reconnect to TCP server with exponential backoff
   const attemptReconnect = () => {
-    const maxReconnectAttempts = 10;
+    const maxReconnectAttempts = config.maxReconnectAttempts;
     if (reconnectAttempts >= maxReconnectAttempts) {
       console.log(
         `Maximum reconnect attempts (${maxReconnectAttempts}) reached`,
@@ -339,7 +378,12 @@ wss.on("connection", (ws, req) => {
     }
 
     reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 30000);
+    // Improved exponential backoff algorithm with jitter for better distribution
+    const baseDelay = 1000; // Start with 1 second
+    const maxDelay = 60000; // Cap at 60 seconds
+    const exponentialPart = Math.min(Math.pow(1.5, reconnectAttempts), 60); // Exponential factor
+    const jitter = Math.random() * 0.3 + 0.85; // Random between 0.85 and 1.15 (±15% jitter)
+    const delay = Math.min(baseDelay * exponentialPart * jitter, maxDelay);
 
     console.log(
       `Attempting to reconnect in ${delay / 1000} seconds (attempt ${reconnectAttempts}/${maxReconnectAttempts})`,

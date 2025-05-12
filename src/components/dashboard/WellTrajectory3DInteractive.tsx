@@ -250,15 +250,36 @@ const WellTrajectory3DInteractive = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowUp") {
-        setCurrentSurveyIndex((prev) => Math.max(prev - 1, 0));
+        if (surveys.length > 0) {
+          setCurrentSurveyIndex((prev) => Math.max(prev - 1, 0));
+          // Auto-adjust view in 2D mode
+          if (viewMode === "2d" && surveys.length > 0) {
+            const newIndex = Math.max(currentSurveyIndex - 1, 0);
+            const targetY = (surveys[newIndex].tvd * scale2D) / 100;
+            setPan2D((prev) => ({ ...prev, y: -targetY + 200 }));
+          }
+        }
       } else if (e.key === "ArrowDown") {
-        setCurrentSurveyIndex((prev) => Math.min(prev + 1, surveys.length - 1));
+        if (surveys.length > 0) {
+          setCurrentSurveyIndex((prev) =>
+            Math.min(prev + 1, surveys.length - 1),
+          );
+          // Auto-adjust view in 2D mode
+          if (viewMode === "2d" && surveys.length > 0) {
+            const newIndex = Math.min(
+              currentSurveyIndex + 1,
+              surveys.length - 1,
+            );
+            const targetY = (surveys[newIndex].tvd * scale2D) / 100;
+            setPan2D((prev) => ({ ...prev, y: -targetY + 200 }));
+          }
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [surveys.length]);
+  }, [surveys.length, surveys, currentSurveyIndex, viewMode, scale2D]);
 
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
@@ -748,6 +769,31 @@ const WellTrajectory3DInteractive = ({
     draw2DScene,
   ]);
 
+  // Auto-adjust view when currentSurveyIndex changes in 3D mode
+  useEffect(() => {
+    if (
+      viewMode === "3d" &&
+      surveys.length > 0 &&
+      currentSurveyIndex < surveys.length
+    ) {
+      // In 3D mode, we adjust the rotation to keep the current point in view
+      // This is a simplified approach - a more sophisticated one would calculate the ideal rotation
+      const currentPoint = surveys[currentSurveyIndex];
+      if (currentPoint) {
+        // Adjust rotation based on the current survey point's position
+        // This creates a subtle camera movement to follow the trajectory
+        const azRad = (currentPoint.az * Math.PI) / 180;
+        const incRad = (currentPoint.inc * Math.PI) / 180;
+
+        // Smooth transition to a rotation that shows the current point well
+        setRotation((prev) => ({
+          x: prev.x * 0.8 + incRad * 0.1 * 0.2,
+          y: prev.y * 0.8 + azRad * 0.1 * 0.2,
+        }));
+      }
+    }
+  }, [currentSurveyIndex, surveys, viewMode]);
+
   useEffect(() => {
     let animationFrameId: number;
 
@@ -942,9 +988,17 @@ const WellTrajectory3DInteractive = ({
               variant="outline"
               size="icon"
               className="h-10 w-10 bg-gray-800/80 backdrop-blur-sm border-cyan-700/50 shadow-lg shadow-cyan-900/20 hover:bg-cyan-900/30 transition-colors"
-              onClick={() =>
-                setCurrentSurveyIndex((prev) => Math.max(prev - 1, 0))
-              }
+              onClick={() => {
+                if (surveys.length > 0) {
+                  setCurrentSurveyIndex((prev) => Math.max(prev - 1, 0));
+                  // Auto-adjust view in 2D mode
+                  if (viewMode === "2d") {
+                    const newIndex = Math.max(currentSurveyIndex - 1, 0);
+                    const targetY = (surveys[newIndex].tvd * scale2D) / 100;
+                    setPan2D((prev) => ({ ...prev, y: -targetY + 200 }));
+                  }
+                }
+              }}
               disabled={surveys.length === 0}
             >
               <ArrowUp className="h-5 w-5" />
@@ -953,11 +1007,22 @@ const WellTrajectory3DInteractive = ({
               variant="outline"
               size="icon"
               className="h-10 w-10 bg-gray-800/80 backdrop-blur-sm border-cyan-700/50 shadow-lg shadow-cyan-900/20 hover:bg-cyan-900/30 transition-colors"
-              onClick={() =>
-                setCurrentSurveyIndex((prev) =>
-                  Math.min(prev + 1, surveys.length - 1),
-                )
-              }
+              onClick={() => {
+                if (surveys.length > 0) {
+                  setCurrentSurveyIndex((prev) =>
+                    Math.min(prev + 1, surveys.length - 1),
+                  );
+                  // Auto-adjust view in 2D mode
+                  if (viewMode === "2d") {
+                    const newIndex = Math.min(
+                      currentSurveyIndex + 1,
+                      surveys.length - 1,
+                    );
+                    const targetY = (surveys[newIndex].tvd * scale2D) / 100;
+                    setPan2D((prev) => ({ ...prev, y: -targetY + 200 }));
+                  }
+                }
+              }}
               disabled={surveys.length === 0}
             >
               <ArrowDown className="h-5 w-5" />

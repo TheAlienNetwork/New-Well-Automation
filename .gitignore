@@ -7,6 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Build directories
 node_modules
 dist
 dist-ssr
@@ -23,9 +24,20 @@ dist-ssr
 *.sln
 *.sw?
 
+# Environment variables
+.env
+.env.local
+.env.development
+.env.production
+
+# Vite specific
 !node_modules/.vite
 
+# Tempo specific
 **/tempobook/dynamic/
 **/tempobook/storyboards/
 
+# Other
 core
+certs/
+*.pem

@@ -7,6 +7,7 @@ import React, {
   useRef,
 } from "react";
 import { witsConnection } from "@/lib/witsConnection";
+import { witsmlConnection } from "@/lib/witsmlConnection";
 import { getWell } from "@/lib/database";
 import { useUser } from "@/context/UserContext";
 
@@ -51,13 +52,6 @@ export interface WitsDataType {
   [key: number]: number | string | object; // Allow for dynamic WITS channel access
 }
 
-interface WitsMappingItem {
-  name: string;
-  channel: number;
-  witsId: number;
-  unit: string;
-}
-
 interface CalculatedMappingItem {
   name: string;
   source: string;
@@ -78,6 +72,8 @@ interface WitsmlConfig {
   wellboreUid: string;
   logUid: string;
   pollingInterval: number;
+  witsmlVersion?: string; // Optional WITSML version (1.3.1.1 or 1.4.1.1)
+  requestTimeout?: number; // Optional timeout for WITSML requests in ms
 }
 
 interface ConnectionConfigType {
@@ -100,6 +96,13 @@ interface ConnectionConfigType {
   proxyMode?: boolean;
   tcpHost?: string;
   tcpPort?: number;
+}
+
+export interface WitsMappingItem {
+  name: string;
+  channel: number;
+  witsId: number;
+  unit: string;
 }
 
 interface WitsContextType {
@@ -195,6 +198,8 @@ const defaultConnectionConfig: ConnectionConfigType = {
     wellboreUid: "",
     logUid: "",
     pollingInterval: 10000,
+    witsmlVersion: "1.4.1.1", // Default to WITSML 1.4.1
+    requestTimeout: 30000, // 30 second timeout for requests
   },
   connectionType: "wits",
   // WebSocket specific defaults
@@ -220,7 +225,7 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
   const dataReceivedRef = useRef<boolean>(false);
   const wellDataFetchedRef = useRef<boolean>(false);
 
-  // Set up WITS connection handlers
+  // Set up connection handlers for both WITS and WITSML
   useEffect(() => {
     // Handle connection status changes
     const handleConnectionChange = (connected: boolean) => {
@@ -231,7 +236,7 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    // Handle incoming WITS data
+    // Handle incoming data
     const handleWitsData = (data: WitsDataType) => {
       setWitsData(data);
       setLastUpdateTime(new Date());
@@ -246,19 +251,29 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
       setLastError(error);
     };
 
-    // Register event handlers
+    // Register event handlers for WITS
     witsConnection.onConnectionChange(handleConnectionChange);
     witsConnection.onData(handleWitsData);
     witsConnection.onError(handleError);
-
-    // Initialize WITS mappings in the connection manager
     witsConnection.updateWitsMappings(witsMappings);
+
+    // Register event handlers for WITSML
+    witsmlConnection.onConnectionChange(handleConnectionChange);
+    witsmlConnection.onData(handleWitsData);
+    witsmlConnection.onError(handleError);
+    witsmlConnection.updateWitsMappings(witsMappings);
 
     // Clean up event handlers on unmount
     return () => {
+      // Clean up WITS handlers
       witsConnection.removeConnectionCallback(handleConnectionChange);
       witsConnection.removeDataCallback(handleWitsData);
       witsConnection.removeErrorCallback(handleError);
+
+      // Clean up WITSML handlers
+      witsmlConnection.removeConnectionCallback(handleConnectionChange);
+      witsmlConnection.removeDataCallback(handleWitsData);
+      witsmlConnection.removeErrorCallback(handleError);
     };
   }, []);
 
@@ -351,12 +366,20 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
         validateMappingItem(item, "directional", index),
       );
 
+      // Validate custom mappings if present
+      if (mappings.custom) {
+        mappings.custom.forEach((item, index) =>
+          validateMappingItem(item, "custom", index),
+        );
+      }
+
       // Update state with validated mappings
       setWitsMappings(mappings);
       console.log("WITS mappings updated:", mappings);
 
-      // Update mappings in the WITS connection manager
+      // Update mappings in both connection managers
       witsConnection.updateWitsMappings(mappings);
+      witsmlConnection.updateWitsMappings(mappings);
 
       // Clear any previous errors
       setLastError(null);
@@ -373,12 +396,67 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  /**
+   * Connect to WITS or WITSML server with enhanced error handling and connection options
+   * @param host - Server hostname or IP address
+   * @param port - Server port number
+   * @param protocol - Connection protocol (tcp, udp, serial, ws)
+   * @param additionalOptions - Protocol-specific options
+   */
   const connect = (
     host?: string,
     port?: number,
     protocol?: string,
     additionalOptions?: any,
   ) => {
+    // Clear any previous errors before attempting to connect
+    setLastError(null);
+
+    // Check if we're using WITSML connection
+    if (connectionConfig.connectionType === "witsml") {
+      console.log(
+        `Connecting to WITSML server at ${connectionConfig.witsmlConfig.url}`,
+      );
+
+      try {
+        // Update WITSML connection options
+        witsmlConnection.updateOptions({
+          url: connectionConfig.witsmlConfig.url,
+          username: connectionConfig.witsmlConfig.username,
+          password: connectionConfig.witsmlConfig.password,
+          wellUid: connectionConfig.witsmlConfig.wellUid,
+          wellboreUid: connectionConfig.witsmlConfig.wellboreUid,
+          logUid: connectionConfig.witsmlConfig.logUid,
+          pollingInterval: connectionConfig.witsmlConfig.pollingInterval,
+          witsmlVersion: connectionConfig.witsmlConfig.witsmlVersion,
+          requestTimeout: connectionConfig.witsmlConfig.requestTimeout,
+          wellId: connectionConfig.wellId,
+          wellName: connectionConfig.wellName,
+          rigName: connectionConfig.rigName,
+          sensorOffset: connectionConfig.sensorOffset,
+        });
+
+        // Connect to WITSML server
+        witsmlConnection.connect();
+
+        // Set a timeout to check if we've successfully connected
+        setTimeout(() => {
+          if (!witsmlConnection.isConnected()) {
+            setLastError(
+              "WITSML connection attempt timed out. Please check server availability and credentials.",
+            );
+          }
+        }, 15000); // 15 second timeout for initial WITSML connection
+      } catch (error) {
+        setLastError(
+          `WITSML connection error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      return;
+    }
+
+    // Standard WITS connection
     const connectHost = host || connectionConfig.ipAddress;
     const connectPort = port || connectionConfig.port;
     const connectProtocol = (
@@ -388,9 +466,6 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
     console.log(
       `Connecting to WITS server at ${connectHost}:${connectPort} using ${connectProtocol}`,
     );
-
-    // Clear any previous errors before attempting to connect
-    setLastError(null);
 
     // Update the connection config in state if parameters were provided
     if (host || port || protocol) {
@@ -413,14 +488,19 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    // Prepare connection options with optimized settings
+    // Prepare connection options with optimized settings for production use
     const options: any = {
       host: connectHost,
       port: connectPort,
       protocol: connectProtocol,
-      reconnectInterval: 10000, // 10 seconds between reconnect attempts
-      maxReconnectAttempts: 100, // Allow up to 100 reconnect attempts
+      reconnectInterval: connectionConfig.reconnectInterval || 10000, // 10 seconds between reconnect attempts
+      maxReconnectAttempts: connectionConfig.maxReconnectAttempts || 100, // Allow up to 100 reconnect attempts
       delimiter: connectProtocol === "tcp" ? "\r\n" : "\n", // Use CRLF for TCP
+      // Add protocol-specific optimizations
+      keepAlive: true, // Enable TCP keepalive
+      keepAliveInterval: 30000, // 30 second keepalive interval
+      noDelay: true, // Disable Nagle's algorithm
+      socketTimeout: 300000, // 5 minute socket timeout
     };
 
     // Add WebSocket specific options if using WebSocket protocol
@@ -429,6 +509,8 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
       options.maxMissedPongs = connectionConfig.maxMissedPongs || 3;
       options.connectionTimeout = connectionConfig.connectionTimeout || 20000;
       options.binaryType = connectionConfig.binaryType || "arraybuffer";
+      options.retryOnError = true; // Always retry on WebSocket errors
+      options.autoReconnect = true; // Enable automatic reconnection
 
       // Add WebSocket-to-TCP proxy options if enabled
       if (connectionConfig.proxyMode) {
@@ -472,6 +554,30 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
     if (connectProtocol === "serial" && additionalOptions) {
       options.serialPort = additionalOptions.serialPort;
       options.baudRate = additionalOptions.baudRate;
+      options.dataBits = additionalOptions.dataBits || 8;
+      options.parity = additionalOptions.parity || "none";
+      options.stopBits = additionalOptions.stopBits || 1;
+      options.flowControl = additionalOptions.flowControl || false;
+    }
+
+    // Add TCP-specific options
+    if (connectProtocol === "tcp" && additionalOptions) {
+      if (additionalOptions.keepAlive !== undefined)
+        options.keepAlive = additionalOptions.keepAlive;
+      if (additionalOptions.noDelay !== undefined)
+        options.noDelay = additionalOptions.noDelay;
+      if (additionalOptions.delimiter !== undefined)
+        options.delimiter = additionalOptions.delimiter;
+    }
+
+    // Add UDP-specific options
+    if (connectProtocol === "udp" && additionalOptions) {
+      if (additionalOptions.broadcast !== undefined)
+        options.broadcast = additionalOptions.broadcast;
+      if (additionalOptions.reuseAddr !== undefined)
+        options.reuseAddr = additionalOptions.reuseAddr;
+      if (additionalOptions.delimiter !== undefined)
+        options.delimiter = additionalOptions.delimiter;
     }
 
     // Update connection options and connect
@@ -495,8 +601,13 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const disconnect = () => {
-    console.log("Disconnecting from WITS server");
-    witsConnection.disconnect();
+    if (connectionConfig.connectionType === "witsml") {
+      console.log("Disconnecting from WITSML server");
+      witsmlConnection.disconnect();
+    } else {
+      console.log("Disconnecting from WITS server");
+      witsConnection.disconnect();
+    }
   };
 
   const clearError = () => {
@@ -762,4 +873,5 @@ const useWits = () => {
 };
 
 // Export the hook and provider
-export { useWits, WitsProvider };
+export { useWits };
+export { WitsProvider };

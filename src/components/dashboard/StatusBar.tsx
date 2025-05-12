@@ -6,12 +6,17 @@ import ConnectionStatus from "./status/ConnectionStatus";
 import WellInfo from "./status/WellInfo";
 import SurveyData from "./status/SurveyData";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/lib/supabase";
 
 interface StatusBarProps {
   wellName?: string;
+  sensorOffset?: number;
 }
 
-const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
+const StatusBar = ({
+  wellName: propWellName,
+  sensorOffset: propSensorOffset,
+}: StatusBarProps) => {
   const {
     isConnected,
     isReceiving,
@@ -20,7 +25,7 @@ const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
     connectionConfig,
     disconnect,
   } = useWits();
-  const { surveys } = useSurveys();
+  const { surveys, currentWellId } = useSurveys();
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [pulseIndicator, setPulseIndicator] = useState(false);
@@ -37,12 +42,19 @@ const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
         })[0]
       : null;
 
-  // Use well name from latest survey if available, otherwise from localStorage, props, or default
-  const wellName =
-    latestSurvey?.wellName ||
-    localStorage.getItem("wellName") ||
-    propWellName ||
-    "Well Alpha-123";
+  // State for well data from database
+  const [wellData, setWellData] = useState({
+    wellName:
+      localStorage.getItem("wellName") || propWellName || "No Well Selected",
+    sensorOffset:
+      Number(localStorage.getItem("sensorOffset")) || propSensorOffset || 0,
+  });
+
+  // Always prioritize the current well data from localStorage for consistency
+  const wellName = wellData.wellName;
+
+  // Always use the sensor offset from localStorage for consistency
+  const sensorOffset = wellData.sensorOffset;
 
   // Update time every second
   useEffect(() => {
@@ -73,13 +85,108 @@ const StatusBar = ({ wellName: propWellName }: StatusBarProps) => {
     }
   }, [lastUpdateTime]);
 
-  // Update display when surveys change
+  // Fetch well data when currentWellId changes
+  useEffect(() => {
+    const fetchWellData = async () => {
+      try {
+        const wellId = currentWellId || localStorage.getItem("currentWellId");
+
+        if (wellId) {
+          const { data, error } = await supabase
+            .from("wells")
+            .select("name, sensor_offset")
+            .eq("id", wellId)
+            .single();
+
+          if (error) {
+            console.error("Error fetching well data:", error);
+            return;
+          }
+
+          if (data) {
+            // Update local state with fetched data
+            setWellData({
+              wellName:
+                data.name ||
+                localStorage.getItem("wellName") ||
+                propWellName ||
+                "No Well Selected",
+              sensorOffset:
+                data.sensor_offset !== null
+                  ? data.sensor_offset
+                  : Number(localStorage.getItem("sensorOffset")) ||
+                    propSensorOffset ||
+                    0,
+            });
+
+            // Also update localStorage for consistency
+            if (data.name) localStorage.setItem("wellName", data.name);
+            if (data.sensor_offset !== null)
+              localStorage.setItem(
+                "sensorOffset",
+                data.sensor_offset.toString(),
+              );
+          }
+        }
+      } catch (error) {
+        console.error("Error in fetchWellData:", error);
+      }
+    };
+
+    fetchWellData();
+  }, [currentWellId, propWellName, propSensorOffset]);
+
+  // Update display when surveys change or well info is updated
   useEffect(() => {
     if (surveys.length > 0) {
       // Force a re-render when surveys change
       setCurrentTime(new Date());
     }
-  }, [surveys]);
+
+    // Listen for well info updates
+    const handleWellInfoUpdated = (event: CustomEvent) => {
+      console.log("StatusBar received wellInfoUpdated event:", event.detail);
+      // Force a re-render
+      setCurrentTime(new Date());
+
+      // Update well data if provided in the event
+      if (event.detail) {
+        const newData = {};
+        if (event.detail.wellName) newData["wellName"] = event.detail.wellName;
+        if (event.detail.sensorOffset !== undefined)
+          newData["sensorOffset"] = event.detail.sensorOffset;
+
+        if (Object.keys(newData).length > 0) {
+          setWellData((prev) => ({ ...prev, ...newData }));
+        }
+      }
+    };
+
+    // Listen for well changed events
+    const handleWellChanged = (event: CustomEvent) => {
+      console.log("StatusBar received wellChanged event:", event.detail);
+      // Force a re-render
+      setCurrentTime(new Date());
+    };
+
+    window.addEventListener(
+      "wellInfoUpdated",
+      handleWellInfoUpdated as EventListener,
+    );
+
+    window.addEventListener("wellChanged", handleWellChanged as EventListener);
+
+    return () => {
+      window.removeEventListener(
+        "wellInfoUpdated",
+        handleWellInfoUpdated as EventListener,
+      );
+      window.removeEventListener(
+        "wellChanged",
+        handleWellChanged as EventListener,
+      );
+    };
+  }, [surveys, currentWellId]);
 
   // Get values with priority to survey data, falling back to WITS data
   const measuredDepth = latestSurvey?.measuredDepth ?? witsData.measuredDepth;

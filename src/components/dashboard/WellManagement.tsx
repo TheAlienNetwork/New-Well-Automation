@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Edit,
   Save,
+  Database,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { createWell, getActiveWells, updateWell } from "@/lib/database";
@@ -82,6 +83,21 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
   // Fetch wells on component mount
   useEffect(() => {
     fetchWells();
+
+    // Listen for well updates
+    const handleWellUpdated = () => {
+      // Check if the selected well ID matches the current well ID in localStorage
+      const currentWellId = localStorage.getItem("currentWellId");
+      if (currentWellId !== selectedWellId) {
+        setSelectedWellId(currentWellId);
+      }
+    };
+
+    window.addEventListener("wellUpdated", handleWellUpdated);
+
+    return () => {
+      window.removeEventListener("wellUpdated", handleWellUpdated);
+    };
   }, []);
 
   // Fetch wells from Supabase
@@ -124,16 +140,211 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
     }
   };
 
+  // Load surveys for a specific well
+  const loadSurveysForWell = async (wellId: string) => {
+    try {
+      // Prevent duplicate loading operations
+      if (isLoading && operationType === "loading") {
+        console.log("Already loading surveys, skipping request");
+        return;
+      }
+
+      setIsLoading(true);
+      setOperationType("loading");
+
+      // First clear any existing surveys
+      localStorage.removeItem("mwd_surveys_data");
+      const clearEvent = new CustomEvent("clearSurveys", {});
+      window.dispatchEvent(clearEvent);
+
+      // Wait a moment to ensure surveys are cleared
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      console.log("Loading surveys for well ID:", wellId);
+      const { data, error } = await supabase
+        .from("surveys")
+        .select("*")
+        .eq("well_id", wellId)
+        .order("timestamp", { ascending: false });
+
+      if (error) {
+        console.error("Error loading surveys for well:", error);
+        toast({
+          title: "Error",
+          description: `Failed to load surveys: ${error.message}`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (data && data.length > 0) {
+        console.log(`Found ${data.length} surveys for well ${wellId}`);
+
+        // Convert database format to application format
+        const formattedSurveys = data.map((survey) => ({
+          id: survey.id,
+          timestamp: survey.timestamp,
+          bitDepth: survey.bit_depth,
+          inclination: survey.inclination,
+          azimuth: survey.azimuth,
+          toolFace: survey.tool_face,
+          bTotal: survey.b_total,
+          aTotal: survey.a_total,
+          dip: survey.dip,
+          toolTemp: survey.tool_temp,
+          wellName: survey.well_name,
+          rigName: survey.rig_name,
+          qualityCheck: survey.quality_check,
+          sensorOffset: survey.sensor_offset,
+          measuredDepth: survey.measured_depth,
+          wellId: survey.well_id,
+        }));
+
+        // Update localStorage with the loaded surveys
+        localStorage.setItem(
+          "mwd_surveys_data",
+          JSON.stringify(formattedSurveys),
+        );
+
+        // Get the well data to update well info in localStorage
+        const { data: wellData, error: wellError } = await supabase
+          .from("wells")
+          .select("name, rig_name, sensor_offset")
+          .eq("id", wellId)
+          .single();
+
+        if (!wellError && wellData) {
+          // Update localStorage with well information
+          localStorage.setItem("wellName", wellData.name || "");
+          localStorage.setItem("rigName", wellData.rig_name || "");
+          localStorage.setItem(
+            "sensorOffset",
+            String(wellData.sensor_offset || 0),
+          );
+          localStorage.setItem("currentWellId", wellId);
+
+          // Update user profile with well information
+          updateUserProfile({
+            currentWellId: wellId,
+            wellName: wellData.name,
+            rigName: wellData.rig_name || "",
+            sensorOffset: wellData.sensor_offset || 0,
+          });
+        }
+
+        // Dispatch an event to notify the SurveyContext that surveys have been loaded
+        const loadEvent = new CustomEvent("surveysLoaded", {
+          detail: { surveys: formattedSurveys, wellId: wellId },
+        });
+        window.dispatchEvent(loadEvent);
+
+        // Dispatch a wellInfoUpdated event to update the status bar
+        const wellInfoEvent = new CustomEvent("wellInfoUpdated", {
+          detail: {
+            wellName: wellData?.name || "",
+            rigName: wellData?.rig_name || "",
+            sensorOffset: wellData?.sensor_offset || 0,
+            wellId: wellId,
+          },
+        });
+        window.dispatchEvent(wellInfoEvent);
+
+        toast({
+          title: "Surveys Loaded",
+          description: `Successfully loaded ${data.length} surveys for well: ${wells.find((w) => w.id === wellId)?.name || "Unknown"}`,
+        });
+      } else {
+        console.log(`No surveys found for well ${wellId}`);
+        // Clear surveys if none found for this well
+        localStorage.removeItem("mwd_surveys_data");
+
+        // Get the well data to update well info in localStorage
+        const { data: wellData, error: wellError } = await supabase
+          .from("wells")
+          .select("name, rig_name, sensor_offset")
+          .eq("id", wellId)
+          .single();
+
+        if (!wellError && wellData) {
+          // Update localStorage with well information
+          localStorage.setItem("wellName", wellData.name || "");
+          localStorage.setItem("rigName", wellData.rig_name || "");
+          localStorage.setItem(
+            "sensorOffset",
+            String(wellData.sensor_offset || 0),
+          );
+          localStorage.setItem("currentWellId", wellId);
+
+          // Update user profile with well information
+          updateUserProfile({
+            currentWellId: wellId,
+            wellName: wellData.name,
+            rigName: wellData.rig_name || "",
+            sensorOffset: wellData.sensor_offset || 0,
+          });
+
+          // Dispatch a wellInfoUpdated event to update the status bar
+          const wellInfoEvent = new CustomEvent("wellInfoUpdated", {
+            detail: {
+              wellName: wellData.name || "",
+              rigName: wellData.rig_name || "",
+              sensorOffset: wellData.sensor_offset || 0,
+              wellId: wellId,
+            },
+          });
+          window.dispatchEvent(wellInfoEvent);
+        }
+
+        // Dispatch an event to notify the SurveyContext that surveys have been cleared
+        const clearEvent = new CustomEvent("clearSurveys", {});
+        window.dispatchEvent(clearEvent);
+
+        toast({
+          title: "No Surveys",
+          description: "No surveys found for this well.",
+        });
+      }
+    } catch (error: any) {
+      console.error("Error in loadSurveysForWell:", error);
+      toast({
+        title: "Error",
+        description: `Failed to load surveys: ${error.message}`,
+        variant: "destructive",
+      });
+    } finally {
+      // Add a small delay before setting isLoading to false to prevent rapid clicking
+      setTimeout(() => {
+        setIsLoading(false);
+        setOperationType("");
+      }, 500);
+    }
+  };
+
   // Handle well selection
   const handleSelectWell = async (wellId: string) => {
     try {
       if (wellId === selectedWellId) {
         console.log("Well already selected, no action needed");
+        // Even if already selected, force reload surveys
+        loadSurveysForWell(wellId);
+        return;
+      }
+
+      // Prevent duplicate operations
+      if (isLoading) {
+        console.log("Operation in progress, please wait...");
+        toast({
+          title: "Operation in Progress",
+          description: "Please wait for the current operation to complete.",
+        });
         return;
       }
 
       setIsLoading(true);
       setOperationType("selecting");
+
+      // Set the selected well ID immediately to provide visual feedback
+      setSelectedWellId(wellId);
 
       toast({
         title: "Selecting Well",
@@ -151,8 +362,8 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
         throw new Error("Selected well does not exist or cannot be accessed");
       }
 
-      // Set the selected well ID
-      setSelectedWellId(wellId);
+      // Get the previous well ID for saving surveys
+      const previousWellId = localStorage.getItem("currentWellId");
 
       // Update user profile with well information
       updateUserProfile({
@@ -162,13 +373,22 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
         sensorOffset: wellExists.sensor_offset || 0,
       });
 
+      // Update localStorage with well information
+      localStorage.setItem("wellName", wellExists.name || "");
+      localStorage.setItem("rigName", wellExists.rig_name || "");
+      localStorage.setItem(
+        "sensorOffset",
+        String(wellExists.sensor_offset || 0),
+      );
+      localStorage.setItem("currentWellId", wellId);
+
       // Force a save of any existing surveys before switching wells
       const forceSaveSurveys = async () => {
         try {
           const { supabase } = await import("@/lib/supabase");
           const surveysData = localStorage.getItem("mwd_surveys_data");
 
-          if (surveysData) {
+          if (surveysData && previousWellId) {
             const surveys = JSON.parse(surveysData);
             if (surveys && surveys.length > 0) {
               console.log("Force saving surveys before switching wells");
@@ -201,7 +421,7 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
                       well_name: survey.wellName,
                       rig_name: survey.rigName,
                       quality_check: survey.qualityCheck,
-                      well_id: userProfile.currentWellId,
+                      well_id: previousWellId,
                       created_at: new Date().toISOString(),
                       updated_at: new Date().toISOString(),
                       sensor_offset: survey.sensorOffset,
@@ -231,6 +451,9 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
       // which will load the surveys for this well
       setCurrentWell(wellId);
 
+      // Wait a moment to ensure the well is set before loading surveys
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
       // Get the selected well name for the toast message
       const selectedWell = wells.find((well) => well.id === wellId);
 
@@ -257,6 +480,29 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
 
       // Refresh the well list to show updated stats
       fetchWells();
+
+      // Force UI update by dispatching a custom event
+      const wellInfoUpdatedEvent = new CustomEvent("wellInfoUpdated", {
+        detail: {
+          wellName: wellExists.name,
+          rigName: wellExists.rig_name || "",
+          sensorOffset: wellExists.sensor_offset || 0,
+          wellId: wellId,
+        },
+      });
+      window.dispatchEvent(wellInfoUpdatedEvent);
+
+      // Dispatch wellChanged event
+      const wellChangedEvent = new CustomEvent("wellChanged", {
+        detail: {
+          previousWellId: previousWellId,
+          newWellId: wellId,
+        },
+      });
+      window.dispatchEvent(wellChangedEvent);
+
+      // Always load surveys for the selected well
+      await loadSurveysForWell(wellId);
     } catch (error: any) {
       console.error("Error selecting well:", error);
       toast({
@@ -530,6 +776,11 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
     }
   };
 
+  // Get the selected well object once instead of calling find() multiple times
+  const selectedWell = selectedWellId
+    ? wells.find((well) => well.id === selectedWellId)
+    : null;
+
   return (
     <>
       <div className="grid grid-cols-1 gap-6">
@@ -613,28 +864,62 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
                       <tr
                         key={well.id}
                         className={`hover:bg-gray-800/30 ${well.id === selectedWellId ? "bg-blue-900/20" : ""}`}
-                        onClick={() => handleSelectWell(well.id)}
                       >
-                        <td className="px-4 py-2 text-sm font-medium">
+                        <td
+                          className="px-4 py-2 text-sm font-medium cursor-pointer"
+                          onClick={() => handleSelectWell(well.id)}
+                        >
                           {well.name}
                         </td>
-                        <td className="px-4 py-2 text-sm text-gray-400">
+                        <td
+                          className="px-4 py-2 text-sm text-gray-400 cursor-pointer"
+                          onClick={() => handleSelectWell(well.id)}
+                        >
                           {well.rig_name || "--"}
                         </td>
-                        <td className="px-4 py-2 text-sm text-gray-400">
+                        <td
+                          className="px-4 py-2 text-sm text-gray-400 cursor-pointer"
+                          onClick={() => handleSelectWell(well.id)}
+                        >
                           {well.api_number || "--"}
                         </td>
-                        <td className="px-4 py-2 text-sm text-gray-400">
+                        <td
+                          className="px-4 py-2 text-sm text-gray-400 cursor-pointer"
+                          onClick={() => handleSelectWell(well.id)}
+                        >
                           {well.operator || "--"}
                         </td>
-                        <td className="px-4 py-2 text-sm text-gray-400">
+                        <td
+                          className="px-4 py-2 text-sm text-gray-400 cursor-pointer"
+                          onClick={() => handleSelectWell(well.id)}
+                        >
                           {well.location || "--"}
                         </td>
-                        <td className="px-4 py-2 text-sm text-gray-400">
-                          {new Date(well.created_at).toLocaleDateString()}
+                        <td
+                          className="px-4 py-2 text-sm text-gray-400 cursor-pointer"
+                          onClick={() => handleSelectWell(well.id)}
+                        >
+                          <div className="flex flex-col">
+                            <span>
+                              {new Date(well.created_at).toLocaleDateString()}
+                            </span>
+                            <span className="text-xs text-blue-400">
+                              {well.survey_count || 0} surveys
+                            </span>
+                          </div>
                         </td>
                         <td className="px-4 py-2 text-sm">
                           <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-gray-400 hover:text-green-400 hover:bg-gray-800"
+                              onClick={() => loadSurveysForWell(well.id)}
+                              title="Load surveys for this well"
+                              disabled={isLoading}
+                            >
+                              <Database className="h-4 w-4" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"
@@ -678,59 +963,60 @@ const WellManagement: React.FC<WellManagementProps> = ({ onRefresh }) => {
                   Selected Well
                 </CardTitle>
               </div>
+              {selectedWellId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                  onClick={() => loadSurveysForWell(selectedWellId)}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Loading Surveys...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Load Surveys
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent className="p-4">
             <div className="space-y-4">
-              {selectedWellId && wells && wells.length > 0 ? (
+              {selectedWell ? (
                 <div className="p-3 bg-gray-800/50 rounded-md border border-gray-800">
                   <div className="flex items-center gap-2">
                     <BuildingIcon className="h-4 w-4 text-blue-400" />
-                    <span className="font-medium">
-                      {wells.find((well) => well.id === selectedWellId)?.name}
-                    </span>
+                    <span className="font-medium">{selectedWell.name}</span>
                   </div>
                   <div className="mt-2 text-xs text-gray-500">
-                    Rig Name:{" "}
-                    {wells.find((well) => well.id === selectedWellId)
-                      ?.rig_name || "--"}
+                    Rig Name: {selectedWell.rig_name || "--"}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
-                    API Number:{" "}
-                    {wells.find((well) => well.id === selectedWellId)
-                      ?.api_number || "--"}
+                    API Number: {selectedWell.api_number || "--"}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
-                    Operator:{" "}
-                    {wells.find((well) => well.id === selectedWellId)
-                      ?.operator || "--"}
+                    Operator: {selectedWell.operator || "--"}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
-                    Location:{" "}
-                    {wells.find((well) => well.id === selectedWellId)
-                      ?.location || "--"}
+                    Location: {selectedWell.location || "--"}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
-                    Sensor Offset:{" "}
-                    {wells.find((well) => well.id === selectedWellId)
-                      ?.sensor_offset || 0}{" "}
-                    ft
+                    Sensor Offset: {selectedWell.sensor_offset || 0} ft
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
                     Created:{" "}
-                    {new Date(
-                      wells.find((well) => well.id === selectedWellId)
-                        ?.created_at || "",
-                    ).toLocaleDateString()}
+                    {new Date(selectedWell.created_at).toLocaleDateString()}
                   </div>
                   <div className="mt-1 text-xs text-gray-500">
                     Last Updated:{" "}
-                    {wells.find((well) => well.id === selectedWellId)
-                      ?.updated_at
-                      ? new Date(
-                          wells.find((well) => well.id === selectedWellId)
-                            ?.updated_at || "",
-                        ).toLocaleDateString()
+                    {selectedWell.updated_at
+                      ? new Date(selectedWell.updated_at).toLocaleDateString()
                       : "--"}
                   </div>
                 </div>

@@ -81,7 +81,10 @@ const GammaPlot = ({
 
   return (
     <Card
-      className={`w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden ${className}`}
+      className={
+        `w-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden ${className}` +
+        " h-max"
+      }
     >
       <CardHeader className="p-3 pb-0 flex flex-row items-center justify-between">
         <div className="flex items-center gap-2">
@@ -123,18 +126,18 @@ const GammaPlot = ({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="p-0 pt-2 h-[800px]">
+      <CardContent className="p-0 pt-2 h-[1000px]">
         <div className="h-full w-full">
           {plotData.length > 0 ? (
             <ResponsiveContainer
               width="100%"
-              height={900}
-              className="h-[700px]"
+              height={950}
+              className="h-[950px]"
             >
               <ScatterChart
                 margin={{ top: 10, right: 30, left: 40, bottom: 20 }}
                 layout="vertical"
-                className="h-[700px]"
+                className="h-[950px]"
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <YAxis

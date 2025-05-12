@@ -278,7 +278,7 @@ const SurveyTable = ({
   );
 
   return (
-    <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden flex flex-col">
+    <Card className="w-full h-full bg-gray-900 border-gray-800 shadow-lg overflow-hidden flex flex-col items-center">
       <CardHeader className="p-4 pb-0">
         <div className="flex justify-between items-center">
           <CardTitle className="text-xl font-bold text-gray-200">
@@ -344,7 +344,6 @@ const SurveyTable = ({
           </div>
         </div>
       </CardHeader>
-
       <CardContent className="p-4 pt-4 flex-grow overflow-hidden">
         <ScrollArea
           className="h-full"

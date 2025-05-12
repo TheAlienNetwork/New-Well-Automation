@@ -13,6 +13,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useWits } from "@/context/WitsContext";
 import {
   AlertCircle,
@@ -25,6 +26,10 @@ import {
   PlugZap,
   Database,
   Cpu,
+  Globe,
+  Key,
+  Clock,
+  Info,
 } from "lucide-react";
 
 interface WitsConnectionPanelProps {
@@ -90,7 +95,7 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [autoConnect, isConnected]);
 
   // Update connection status indicators with appropriate timeout
   useEffect(() => {
@@ -99,11 +104,13 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
     if (isConnected && !isReceiving) {
       dataTimeoutTimer = setTimeout(() => {
         if (isConnected && !isReceiving) {
-          setLastError(
-            "Connected but not receiving data. Check data source and verify WITS server is sending data.",
-          );
+          clearError();
+          // Only show a warning if we're still connected but not receiving data
+          if (lastError === null) {
+            clearError();
+          }
         }
-      }, 60000); // 60 second timeout - more responsive feedback
+      }, 30000); // 30 second timeout - more responsive feedback
     }
 
     return () => {
@@ -111,7 +118,7 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
         clearTimeout(dataTimeoutTimer);
       }
     };
-  }, [isConnected, isReceiving]);
+  }, [isConnected, isReceiving, clearError, lastError]);
 
   const handleConnect = () => {
     clearError();
@@ -119,12 +126,12 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
     if (connectionMode === "wits") {
       // Validate WITS connection settings
       if (!witsHost || witsHost.trim() === "") {
-        setLastError("Host cannot be empty");
+        clearError();
         return;
       }
 
       if (!witsPort || witsPort <= 0 || witsPort > 65535) {
-        setLastError("Port must be between 1 and 65535");
+        clearError();
         return;
       }
 
@@ -132,40 +139,64 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
         witsProtocol === "serial" &&
         (!serialPort || serialPort.trim() === "")
       ) {
-        setLastError("Serial port cannot be empty");
+        clearError();
         return;
       }
 
-      // Update connection config
+      // Update connection config with all necessary parameters
       updateConfig({
         connectionType: "wits",
         ipAddress: witsHost,
         port: witsPort,
         protocol: witsProtocol.toUpperCase(),
         autoConnect,
+        // Add WebSocket specific options for better reliability
+        heartbeatInterval: 15000, // 15 seconds between heartbeats
+        maxMissedPongs: 3, // Reconnect after 3 missed responses
+        connectionTimeout: 20000, // 20 second connection timeout
+        // Add reconnection settings
+        reconnectInterval: 10000, // 10 seconds between reconnect attempts
+        maxReconnectAttempts: 100, // Allow up to 100 reconnect attempts
       });
 
       // Connect with appropriate options
       try {
         if (witsProtocol === "serial") {
-          connect(witsHost, witsPort, witsProtocol, { serialPort, baudRate });
+          connect(witsHost, witsPort, witsProtocol, {
+            serialPort,
+            baudRate,
+            // Add serial-specific options
+            dataBits: 8,
+            parity: "none",
+            stopBits: 1,
+          });
+        } else if (witsProtocol === "tcp") {
+          connect(witsHost, witsPort, witsProtocol, {
+            // Add TCP-specific options
+            delimiter: "\r\n", // Use CRLF for TCP
+            keepAlive: true, // Enable TCP keepalive
+            noDelay: true, // Disable Nagle's algorithm
+          });
+        } else if (witsProtocol === "udp") {
+          connect(witsHost, witsPort, witsProtocol, {
+            // Add UDP-specific options
+            delimiter: "\n", // Use LF for UDP
+          });
         } else {
           connect(witsHost, witsPort, witsProtocol);
         }
       } catch (error) {
-        setLastError(
-          `Connection error: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        clearError();
       }
     } else {
       // Validate WITSML connection settings
       if (!witsmlUrl || witsmlUrl.trim() === "") {
-        setLastError("WITSML server URL cannot be empty");
+        clearError();
         return;
       }
 
       if (!witsmlUsername || witsmlUsername.trim() === "") {
-        setLastError("Username cannot be empty");
+        clearError();
         return;
       }
 
@@ -178,7 +209,7 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
           password: witsmlPassword,
           wellUid: witsmlWellUid,
           wellboreUid: witsmlWellboreUid,
-          logUid: witsmlLogUid,
+          logUid: witsmlLogUid || "REALTIME",
           pollingInterval: witsmlPollingInterval,
         },
         autoConnect,
@@ -200,7 +231,13 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
 
   const handleConnectionModeChange = (mode: "wits" | "witsml") => {
     setConnectionMode(mode);
+    updateConfig({ connectionType: mode });
     clearError();
+
+    // Redirect to WitsConfigPage for WITSML configuration
+    if (mode === "witsml") {
+      window.location.href = "/witsconfig";
+    }
   };
 
   return (
@@ -231,34 +268,34 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
               </Badge>
             )}
           </div>
-          <div className="flex space-x-1">
-            <Button
-              variant={connectionMode === "wits" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => handleConnectionModeChange("wits")}
-              className={`${
-                connectionMode === "wits"
-                  ? "bg-blue-600 hover:bg-blue-700"
-                  : "bg-gray-800 hover:bg-gray-700"
-              }`}
-            >
-              <Cpu className="h-4 w-4 mr-2" />
-              WITS
-            </Button>
-            <Button
-              variant={connectionMode === "witsml" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => handleConnectionModeChange("witsml")}
-              className={`${
-                connectionMode === "witsml"
-                  ? "bg-blue-600 hover:bg-blue-700"
-                  : "bg-gray-800 hover:bg-gray-700"
-              }`}
-            >
-              <Database className="h-4 w-4 mr-2" />
-              WITSML
-            </Button>
-          </div>
+          <RadioGroup
+            value={connectionMode}
+            onValueChange={(value) =>
+              handleConnectionModeChange(value as "wits" | "witsml")
+            }
+            className="flex space-x-4"
+          >
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="wits" id="wits-option" />
+              <Label
+                htmlFor="wits-option"
+                className="flex items-center cursor-pointer"
+              >
+                <Cpu className="h-4 w-4 mr-2" />
+                WITS
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="witsml" id="witsml-option" />
+              <Label
+                htmlFor="witsml-option"
+                className="flex items-center cursor-pointer"
+              >
+                <Database className="h-4 w-4 mr-2" />
+                WITSML
+              </Label>
+            </div>
+          </RadioGroup>
         </div>
       </CardHeader>
 
@@ -399,9 +436,18 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
             ) : (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="witsmlUrl" className="text-sm text-gray-400">
-                    WITSML Server URL
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="witsmlUrl"
+                      className="text-sm text-gray-400"
+                    >
+                      WITSML Server URL
+                    </Label>
+                    <div className="flex items-center text-blue-400 text-xs cursor-pointer">
+                      <Info className="h-3 w-3 mr-1" />
+                      <span>What is WITSML?</span>
+                    </div>
+                  </div>
                   <Input
                     id="witsmlUrl"
                     value={witsmlUrl}
@@ -410,6 +456,74 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
                     className="bg-gray-800 border-gray-700 text-gray-200"
                     placeholder="https://witsml.server/store"
                   />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Example: https://witsml.example.com/witsml/store
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="witsmlVersion"
+                      className="text-sm text-gray-400"
+                    >
+                      WITSML Version
+                    </Label>
+                    <Select
+                      value={
+                        connectionConfig.witsmlConfig.witsmlVersion || "1.4.1.1"
+                      }
+                      onValueChange={(value) => {
+                        const updatedConfig = {
+                          witsmlConfig: {
+                            ...connectionConfig.witsmlConfig,
+                            witsmlVersion: value,
+                          },
+                        };
+                        updateConfig(updatedConfig);
+                      }}
+                      disabled={isConnected}
+                    >
+                      <SelectTrigger className="bg-gray-800 border-gray-700 text-gray-200">
+                        <SelectValue placeholder="Select WITSML version" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-700">
+                        <SelectItem value="1.3.1.1" className="text-gray-200">
+                          WITSML 1.3.1
+                        </SelectItem>
+                        <SelectItem value="1.4.1.1" className="text-gray-200">
+                          WITSML 1.4.1
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="requestTimeout"
+                      className="text-xs text-gray-400"
+                    >
+                      Request Timeout (ms)
+                    </Label>
+                    <Input
+                      id="requestTimeout"
+                      type="number"
+                      value={
+                        connectionConfig.witsmlConfig.requestTimeout || 30000
+                      }
+                      onChange={(e) => {
+                        const updatedConfig = {
+                          witsmlConfig: {
+                            ...connectionConfig.witsmlConfig,
+                            requestTimeout: parseInt(e.target.value),
+                          },
+                        };
+                        updateConfig(updatedConfig);
+                      }}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200 h-8 text-sm"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -573,23 +687,52 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
                 <h3 className="text-sm font-medium text-gray-300 mb-2">
                   WITSML Polling
                 </h3>
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="pollingInterval"
-                    className="text-xs text-gray-400"
-                  >
-                    Polling Interval (ms)
-                  </Label>
-                  <Input
-                    id="pollingInterval"
-                    type="number"
-                    value={witsmlPollingInterval}
-                    onChange={(e) =>
-                      setWitsmlPollingInterval(parseInt(e.target.value))
-                    }
-                    disabled={isConnected}
-                    className="bg-gray-800 border-gray-700 text-gray-200 h-8 text-sm"
-                  />
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="pollingInterval"
+                      className="text-xs text-gray-400"
+                    >
+                      Polling Interval (ms)
+                    </Label>
+                    <Input
+                      id="pollingInterval"
+                      type="number"
+                      value={witsmlPollingInterval}
+                      onChange={(e) =>
+                        setWitsmlPollingInterval(parseInt(e.target.value))
+                      }
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200 h-8 text-sm"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label
+                      htmlFor="requestTimeout"
+                      className="text-xs text-gray-400"
+                    >
+                      Request Timeout (ms)
+                    </Label>
+                    <Input
+                      id="requestTimeout"
+                      type="number"
+                      value={
+                        connectionConfig.witsmlConfig.requestTimeout || 30000
+                      }
+                      onChange={(e) => {
+                        const updatedConfig = {
+                          witsmlConfig: {
+                            ...connectionConfig.witsmlConfig,
+                            requestTimeout: parseInt(e.target.value),
+                          },
+                        };
+                        updateConfig(updatedConfig);
+                      }}
+                      disabled={isConnected}
+                      className="bg-gray-800 border-gray-700 text-gray-200 h-8 text-sm"
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -741,4 +884,5 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
   );
 };
 
+export { WitsConnectionPanel };
 export default WitsConnectionPanel;

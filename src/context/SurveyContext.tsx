@@ -18,6 +18,7 @@ interface SurveyContextType {
   setExportFolderPath: (path: string) => void;
   autoExportEnabled: boolean;
   setAutoExportEnabled: (enabled: boolean) => void;
+  loadSurveysForWell: (wellId: string) => Promise<void>;
 }
 
 const SurveyContext = createContext<SurveyContextType | undefined>(undefined);
@@ -27,8 +28,9 @@ const SURVEYS_STORAGE_KEY = "mwd_surveys_data";
 const EXPORT_FOLDER_PATH_KEY = "mwd_export_folder_path";
 const AUTO_EXPORT_ENABLED_KEY = "mwd_auto_export_enabled";
 
-// Define SurveyProvider component
-export const SurveyProvider = ({ children }: { children: ReactNode }) => {
+// Define SurveyProvider component as a named function declaration
+// This ensures consistent exports for Fast Refresh
+function SurveyProvider({ children }: { children: ReactNode }) {
   // Initialize state from localStorage if available
   const [surveys, setSurveys] = useState<SurveyData[]>(() => {
     try {
@@ -58,6 +60,11 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
     const initialWellId = localStorage.getItem("currentWellId");
     console.log("SurveyContext initialized with well ID:", initialWellId);
 
+    // If we have an initial well ID, load surveys for it
+    if (initialWellId) {
+      setTimeout(() => loadSurveysForWell(initialWellId), 300);
+    }
+
     // Handle the clearSurveys custom event
     const handleClearSurveys = () => {
       console.log("Received clearSurveys event, clearing all surveys");
@@ -65,9 +72,21 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
       localStorage.removeItem(SURVEYS_STORAGE_KEY);
     };
 
+    // Handle the surveysLoaded custom event
+    const handleSurveysLoaded = (event: CustomEvent) => {
+      console.log("Received surveysLoaded event", event.detail);
+      if (event.detail && event.detail.surveys) {
+        setSurveys(event.detail.surveys);
+      }
+    };
+
     // Handle the wellChanged custom event
     const handleWellChanged = (event: CustomEvent) => {
       console.log("Well changed event received:", event.detail);
+
+      // Clear surveys immediately when well changes
+      setSurveys([]);
+      localStorage.removeItem(SURVEYS_STORAGE_KEY);
 
       // First, save any existing surveys for the previous well
       const saveExistingSurveys = async () => {
@@ -88,14 +107,14 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
               const { data: existingSurvey } = await supabase
                 .from("surveys")
                 .select("id")
-                .eq("id", survey.id)
+                .eq("id", String(survey.id))
                 .single();
 
               if (!existingSurvey) {
                 // Insert new survey
                 await supabase.from("surveys").insert([
                   {
-                    id: survey.id,
+                    id: String(survey.id),
                     timestamp: survey.timestamp,
                     bit_depth: survey.bitDepth,
                     inclination: survey.inclination,
@@ -201,7 +220,15 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
       // First save existing surveys, then load new ones
       saveExistingSurveys().then(() => {
         console.log("Finished saving existing surveys, now loading new ones");
-        loadNewWellSurveys();
+        setTimeout(() => {
+          loadNewWellSurveys();
+
+          // Dispatch an event to notify other components that surveys have been loaded
+          const surveysLoadedEvent = new CustomEvent("surveysLoaded", {
+            detail: { wellId: event.detail.newWellId },
+          });
+          window.dispatchEvent(surveysLoadedEvent);
+        }, 300); // Add a delay to ensure database operations complete
       });
     };
 
@@ -220,6 +247,10 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
       "clearSurveys",
       handleClearSurveys as EventListener,
     );
+    window.addEventListener(
+      "surveysLoaded",
+      handleSurveysLoaded as EventListener,
+    );
 
     return () => {
       window.removeEventListener("storage", handleStorageChange);
@@ -230,6 +261,10 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
       window.removeEventListener(
         "clearSurveys",
         handleClearSurveys as EventListener,
+      );
+      window.removeEventListener(
+        "surveysLoaded",
+        handleSurveysLoaded as EventListener,
       );
     };
   }, []);
@@ -375,9 +410,10 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
           return prevSurveys;
         }
 
-        // If no duplicates found, add the new survey
+        // If no duplicates found, add the new survey to the beginning of the array
+        // so that the latest survey appears at the bottom of the table
         console.log("Adding new survey to state");
-        return [...prevSurveys, sanitizedSurvey];
+        return [sanitizedSurvey, ...prevSurveys];
       });
 
       // Always try to save to database, even if we don't have a well ID
@@ -390,14 +426,14 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
           const { data: existingSurvey } = await supabase
             .from("surveys")
             .select("id")
-            .eq("id", sanitizedSurvey.id)
+            .eq("id", String(sanitizedSurvey.id))
             .single();
 
           if (!existingSurvey) {
             // Insert new survey
             const { error } = await supabase.from("surveys").insert([
               {
-                id: sanitizedSurvey.id,
+                id: String(sanitizedSurvey.id),
                 timestamp: sanitizedSurvey.timestamp,
                 bit_depth: sanitizedSurvey.bitDepth,
                 inclination: sanitizedSurvey.inclination,
@@ -436,11 +472,13 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const updateSurvey = (updatedSurvey: SurveyData) => {
+  const updateSurvey = async (updatedSurvey: SurveyData) => {
     try {
       // Validate and sanitize the survey data
       const sanitizedSurvey = validateAndSanitizeSurvey(updatedSurvey);
+      const currentWellId = localStorage.getItem("currentWellId");
 
+      // Update in local state
       setSurveys((prevSurveys) => {
         // Check if the survey exists before updating
         const surveyExists = prevSurveys.some(
@@ -461,16 +499,117 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
           survey.id === sanitizedSurvey.id ? sanitizedSurvey : survey,
         );
       });
+
+      // Update in database
+      const updateSurveyInDatabase = async () => {
+        try {
+          console.log("Updating survey in database:", sanitizedSurvey.id);
+          const { supabase } = await import("@/lib/supabase");
+
+          // Check if survey exists in database
+          const { data: existingSurvey } = await supabase
+            .from("surveys")
+            .select("id")
+            .eq("id", String(sanitizedSurvey.id))
+            .single();
+
+          if (existingSurvey) {
+            // Update existing survey
+            const { error } = await supabase
+              .from("surveys")
+              .update({
+                timestamp: sanitizedSurvey.timestamp,
+                bit_depth: sanitizedSurvey.bitDepth,
+                inclination: sanitizedSurvey.inclination,
+                azimuth: sanitizedSurvey.azimuth,
+                tool_face: sanitizedSurvey.toolFace,
+                b_total: sanitizedSurvey.bTotal,
+                a_total: sanitizedSurvey.aTotal,
+                dip: sanitizedSurvey.dip,
+                tool_temp: sanitizedSurvey.toolTemp,
+                well_name: sanitizedSurvey.wellName,
+                rig_name: sanitizedSurvey.rigName,
+                quality_check: sanitizedSurvey.qualityCheck,
+                well_id: sanitizedSurvey.wellId || currentWellId || null,
+                updated_at: new Date().toISOString(),
+                sensor_offset: sanitizedSurvey.sensorOffset,
+                measured_depth: sanitizedSurvey.measuredDepth,
+              })
+              .eq("id", String(sanitizedSurvey.id));
+
+            if (error) {
+              console.error("Error updating survey in database:", error);
+            } else {
+              console.log("Survey updated in database successfully");
+            }
+          } else {
+            // If survey doesn't exist in database, insert it
+            console.log("Survey not found in database, inserting instead");
+            const { error } = await supabase.from("surveys").insert([
+              {
+                id: String(sanitizedSurvey.id),
+                timestamp: sanitizedSurvey.timestamp,
+                bit_depth: sanitizedSurvey.bitDepth,
+                inclination: sanitizedSurvey.inclination,
+                azimuth: sanitizedSurvey.azimuth,
+                tool_face: sanitizedSurvey.toolFace,
+                b_total: sanitizedSurvey.bTotal,
+                a_total: sanitizedSurvey.aTotal,
+                dip: sanitizedSurvey.dip,
+                tool_temp: sanitizedSurvey.toolTemp,
+                well_name: sanitizedSurvey.wellName,
+                rig_name: sanitizedSurvey.rigName,
+                quality_check: sanitizedSurvey.qualityCheck,
+                well_id: sanitizedSurvey.wellId || currentWellId || null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                sensor_offset: sanitizedSurvey.sensorOffset,
+                measured_depth: sanitizedSurvey.measuredDepth,
+              },
+            ]);
+
+            if (error) {
+              console.error("Error inserting survey to database:", error);
+            } else {
+              console.log("Survey inserted to database successfully");
+            }
+          }
+        } catch (error) {
+          console.error("Error in updateSurveyInDatabase:", error);
+        }
+      };
+
+      // Execute database update
+      updateSurveyInDatabase();
     } catch (error) {
       console.error("Error updating survey:", error);
       // Return without crashing
     }
   };
 
-  const deleteSurvey = (id: string) => {
-    setSurveys((prevSurveys) =>
-      prevSurveys.filter((survey) => survey.id !== id),
-    );
+  const deleteSurvey = async (id: string) => {
+    try {
+      // First, delete from local state
+      setSurveys((prevSurveys) =>
+        prevSurveys.filter((survey) => survey.id !== id),
+      );
+
+      // Then delete from database
+      const { supabase } = await import("@/lib/supabase");
+
+      const { error } = await supabase
+        .from("surveys")
+        .delete()
+        .eq("id", String(id));
+
+      if (error) {
+        console.error("Error deleting survey from database:", error);
+      } else {
+        console.log(`Survey ${id} successfully deleted from database`);
+      }
+    } catch (error) {
+      console.error("Error in deleteSurvey:", error);
+    }
   };
 
   // Clear all surveys from state and localStorage
@@ -481,79 +620,137 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
     return true;
   };
 
+  // Load surveys for a specific well
+  const loadSurveysForWell = async (wellId: string) => {
+    try {
+      console.log("SurveyContext: Loading surveys for well ID:", wellId);
+
+      // Always clear existing surveys first to prevent data mixing
+      clearSurveys();
+
+      // Notify UI components that surveys are being cleared
+      const clearEvent = new CustomEvent("clearSurveys", {});
+      window.dispatchEvent(clearEvent);
+
+      const { supabase } = await import("@/lib/supabase");
+
+      // First get well information to update context
+      const { data: wellData, error: wellError } = await supabase
+        .from("wells")
+        .select("name, rig_name, sensor_offset")
+        .eq("id", wellId)
+        .single();
+
+      if (!wellError && wellData) {
+        // Update localStorage with well information
+        localStorage.setItem("wellName", wellData.name || "");
+        localStorage.setItem("rigName", wellData.rig_name || "");
+        localStorage.setItem(
+          "sensorOffset",
+          String(wellData.sensor_offset || 0),
+        );
+        localStorage.setItem("currentWellId", wellId);
+
+        // Dispatch a wellInfoUpdated event to update the status bar
+        const wellInfoEvent = new CustomEvent("wellInfoUpdated", {
+          detail: {
+            wellName: wellData.name || "",
+            rigName: wellData.rig_name || "",
+            sensorOffset: wellData.sensor_offset || 0,
+            wellId: wellId,
+          },
+        });
+        window.dispatchEvent(wellInfoEvent);
+      }
+
+      const { data, error } = await supabase
+        .from("surveys")
+        .select("*")
+        .eq("well_id", wellId)
+        .order("timestamp", { ascending: true });
+
+      if (error) {
+        console.error("Error loading surveys for well:", error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        console.log(`Found ${data.length} surveys for well ${wellId}`);
+
+        // Convert database format to application format
+        const formattedSurveys = data.map((survey) => ({
+          id: survey.id,
+          timestamp: survey.timestamp,
+          bitDepth: survey.bit_depth,
+          inclination: survey.inclination,
+          azimuth: survey.azimuth,
+          toolFace: survey.tool_face,
+          bTotal: survey.b_total,
+          aTotal: survey.a_total,
+          dip: survey.dip,
+          toolTemp: survey.tool_temp,
+          wellName: survey.well_name || wellData?.name || "",
+          rigName: survey.rig_name || wellData?.rig_name || "",
+          qualityCheck: survey.quality_check,
+          sensorOffset: survey.sensor_offset || wellData?.sensor_offset || 0,
+          measuredDepth: survey.measured_depth,
+          wellId: survey.well_id,
+        }));
+
+        // Set the surveys in state
+        setSurveys(formattedSurveys);
+
+        // Also update localStorage
+        localStorage.setItem(
+          SURVEYS_STORAGE_KEY,
+          JSON.stringify(formattedSurveys),
+        );
+
+        // Dispatch an event to notify other components that surveys have been loaded
+        const surveysLoadedEvent = new CustomEvent("surveysLoaded", {
+          detail: { surveys: formattedSurveys, wellId },
+        });
+        window.dispatchEvent(surveysLoadedEvent);
+
+        console.log(
+          "SurveyContext: Dispatched surveysLoaded event with",
+          formattedSurveys.length,
+          "surveys",
+        );
+      } else {
+        console.log(`No surveys found for well ${wellId}`);
+        // Clear surveys if none found for this well
+        clearSurveys();
+
+        // Dispatch an empty surveys loaded event to update UI
+        const surveysLoadedEvent = new CustomEvent("surveysLoaded", {
+          detail: { surveys: [], wellId },
+        });
+        window.dispatchEvent(surveysLoadedEvent);
+      }
+
+      // Update the last well ID
+      localStorage.setItem("lastWellId", wellId);
+    } catch (error) {
+      console.error("Error in loadSurveysForWell:", error);
+    }
+  };
+
   // Load surveys when the component mounts based on the current well ID
   useEffect(() => {
     const lastWellId = localStorage.getItem("lastWellId");
     const currentWellId = localStorage.getItem("currentWellId");
 
-    // Always try to load surveys for the current well ID on mount
+    // Always clear surveys first to prevent data from previous wells showing up
+    clearSurveys();
+
+    // Then try to load surveys for the current well ID on mount
     if (currentWellId) {
-      const loadSurveysForWell = async () => {
-        try {
-          console.log("Loading surveys for well ID on mount:", currentWellId);
-          const { supabase } = await import("@/lib/supabase");
-
-          const { data, error } = await supabase
-            .from("surveys")
-            .select("*")
-            .eq("well_id", currentWellId);
-
-          if (error) {
-            console.error("Error loading surveys for well:", error);
-            return;
-          }
-
-          if (data && data.length > 0) {
-            console.log(
-              `Found ${data.length} surveys for well ${currentWellId}`,
-            );
-
-            // Convert database format to application format
-            const formattedSurveys = data.map((survey) => ({
-              id: survey.id,
-              timestamp: survey.timestamp,
-              bitDepth: survey.bit_depth,
-              inclination: survey.inclination,
-              azimuth: survey.azimuth,
-              toolFace: survey.tool_face,
-              bTotal: survey.b_total,
-              aTotal: survey.a_total,
-              dip: survey.dip,
-              toolTemp: survey.tool_temp,
-              wellName: survey.well_name,
-              rigName: survey.rig_name,
-              qualityCheck: survey.quality_check,
-              sensorOffset: survey.sensor_offset,
-              measuredDepth: survey.measured_depth,
-              wellId: survey.well_id,
-            }));
-
-            // Set the surveys in state
-            setSurveys(formattedSurveys);
-
-            // Also update localStorage
-            localStorage.setItem(
-              SURVEYS_STORAGE_KEY,
-              JSON.stringify(formattedSurveys),
-            );
-          } else {
-            console.log(`No surveys found for well ${currentWellId}`);
-            // Clear surveys if none found for this well
-            clearSurveys();
-          }
-
-          // Update the last well ID
-          localStorage.setItem("lastWellId", currentWellId);
-        } catch (error) {
-          console.error("Error in loadSurveysForWell:", error);
-        }
-      };
-
-      loadSurveysForWell();
+      // Small delay to ensure clearing is complete
+      setTimeout(() => loadSurveysForWell(currentWellId), 100);
     } else if (lastWellId && !currentWellId) {
       // If we had a well before but not now, clear surveys
       console.log("No current well ID, clearing surveys");
-      clearSurveys();
       localStorage.removeItem("lastWellId");
     }
   }, []);
@@ -592,7 +789,7 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
               const { data: existingSurvey, error: checkError } = await supabase
                 .from("surveys")
                 .select("id")
-                .eq("id", survey.id)
+                .eq("id", String(survey.id))
                 .single();
 
               if (checkError && checkError.code !== "PGRST116") {
@@ -615,7 +812,7 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
                   .from("surveys")
                   .insert([
                     {
-                      id: survey.id,
+                      id: String(survey.id),
                       timestamp: survey.timestamp,
                       bit_depth: survey.bitDepth,
                       inclination: survey.inclination,
@@ -725,12 +922,13 @@ export const SurveyProvider = ({ children }: { children: ReactNode }) => {
         setExportFolderPath,
         autoExportEnabled,
         setAutoExportEnabled,
+        loadSurveysForWell,
       }}
     >
       {children}
     </SurveyContext.Provider>
   );
-};
+}
 
 // Define useSurveys hook
 export const useSurveys = () => {
@@ -740,3 +938,6 @@ export const useSurveys = () => {
   }
   return context;
 };
+
+// Export the provider as a named export to ensure consistent exports for Fast Refresh
+export { SurveyProvider };

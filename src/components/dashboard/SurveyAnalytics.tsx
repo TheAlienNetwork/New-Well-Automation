@@ -497,54 +497,202 @@ const SurveyAnalytics = ({
             </div>
 
             {surveys.length > 1 && (
-              <div className="h-[300px] w-full mt-4">
-                <h3 className="text-sm font-medium text-gray-300 mb-2">
-                  Magnetic Field & Gravity Readings
-                </h3>
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={chartData}
-                    margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis
-                      dataKey="depth"
-                      label={{
-                        value: "Depth (ft)",
-                        position: "insideBottomRight",
-                        offset: -5,
-                        fill: "#9ca3af",
-                      }}
-                      stroke="#6b7280"
-                    />
-                    <YAxis stroke="#6b7280" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#1f2937",
-                        borderColor: "#374151",
-                        color: "#e5e7eb",
-                      }}
-                    />
-                    <Legend />
-                    <Area
-                      type="monotone"
-                      dataKey="bTotal"
-                      stroke="#ff00aa"
-                      fill="#ff00aa20"
-                      strokeWidth={2}
-                      name="B Total (μT)"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="aTotal"
-                      stroke="#00aaff"
-                      fill="#00aaff20"
-                      strokeWidth={2}
-                      name="A Total (G)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                <div className="h-[300px] w-full mt-4">
+                  <h3 className="text-sm font-medium text-gray-300 mb-2">
+                    Magnetic Field & Gravity Readings (Combined)
+                  </h3>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={chartData}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="depth"
+                        label={{
+                          value: "Depth (ft)",
+                          position: "insideBottomRight",
+                          offset: -5,
+                          fill: "#9ca3af",
+                        }}
+                        stroke="#6b7280"
+                      />
+                      <YAxis stroke="#6b7280" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#1f2937",
+                          borderColor: "#374151",
+                          color: "#e5e7eb",
+                        }}
+                      />
+                      <Legend />
+                      <Area
+                        type="monotone"
+                        dataKey="bTotal"
+                        stroke="#ff00aa"
+                        fill="#ff00aa20"
+                        strokeWidth={2}
+                        name="B Total (μT)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="aTotal"
+                        stroke="#00aaff"
+                        fill="#00aaff20"
+                        strokeWidth={2}
+                        name="A Total (G)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="h-[300px] w-full mt-4">
+                  <h3 className="text-sm font-medium text-gray-300 mb-2">
+                    Magnetic Field Readings
+                  </h3>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={chartData}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="depth"
+                        label={{
+                          value: "Depth (ft)",
+                          position: "insideBottomRight",
+                          offset: -5,
+                          fill: "#9ca3af",
+                        }}
+                        stroke="#6b7280"
+                      />
+                      <YAxis stroke="#6b7280" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#1f2937",
+                          borderColor: "#374151",
+                          color: "#e5e7eb",
+                        }}
+                        formatter={(value) => [
+                          `${Number(value).toFixed(2)} μT`,
+                          "B Total",
+                        ]}
+                        labelFormatter={(label) => `Depth: ${label} ft`}
+                      />
+                      <Legend />
+                      <Area
+                        type="monotone"
+                        dataKey="bTotal"
+                        stroke="#ff00aa"
+                        fill="#ff00aa20"
+                        strokeWidth={2}
+                        name="B Total (μT)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="h-[300px] w-full mt-4">
+                  <h3 className="text-sm font-medium text-gray-300 mb-2">
+                    Gravity Readings
+                  </h3>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={chartData}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="depth"
+                        label={{
+                          value: "Depth (ft)",
+                          position: "insideBottomRight",
+                          offset: -5,
+                          fill: "#9ca3af",
+                        }}
+                        stroke="#6b7280"
+                      />
+                      <YAxis stroke="#6b7280" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#1f2937",
+                          borderColor: "#374151",
+                          color: "#e5e7eb",
+                        }}
+                        formatter={(value) => [
+                          `${Number(value).toFixed(2)} G`,
+                          "A Total",
+                        ]}
+                        labelFormatter={(label) => `Depth: ${label} ft`}
+                      />
+                      <Legend />
+                      <Area
+                        type="monotone"
+                        dataKey="aTotal"
+                        stroke="#00aaff"
+                        fill="#00aaff20"
+                        strokeWidth={2}
+                        name="A Total (G)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="h-[300px] w-full mt-4">
+                  <h3 className="text-sm font-medium text-gray-300 mb-2">
+                    Tool Temperature
+                  </h3>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={chartData}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="depth"
+                        label={{
+                          value: "Depth (ft)",
+                          position: "insideBottomRight",
+                          offset: -5,
+                          fill: "#9ca3af",
+                        }}
+                        stroke="#6b7280"
+                      />
+                      <YAxis
+                        stroke="#6b7280"
+                        label={{
+                          value: "Temperature (°F)",
+                          angle: -90,
+                          position: "insideLeft",
+                          fill: "#9ca3af",
+                        }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#1f2937",
+                          borderColor: "#374151",
+                          color: "#e5e7eb",
+                        }}
+                        formatter={(value) => [
+                          `${Number(value).toFixed(1)}°F`,
+                          "Tool Temperature",
+                        ]}
+                        labelFormatter={(label) => `Depth: ${label} ft`}
+                      />
+                      <Legend />
+                      <Area
+                        type="monotone"
+                        dataKey="toolTemp"
+                        stroke="#ff8800"
+                        fill="#ff880020"
+                        strokeWidth={2}
+                        name="Tool Temperature (°F)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
             )}
           </TabsContent>
 

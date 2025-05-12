@@ -4,6 +4,13 @@ import StatusBar from "@/components/dashboard/StatusBar";
 // Database management has been moved to its own dedicated tab
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +46,9 @@ import {
   Plus,
   Trash2,
   Edit,
+  Info,
+  Globe,
+  Key,
 } from "lucide-react";
 
 // Types for WITS data and configuration
@@ -54,6 +64,7 @@ type WitsChannel = {
 };
 
 type WitsConfig = {
+  connectionType: "wits" | "witsml";
   protocol: "TCP" | "UDP" | "Serial" | "WS";
   ipAddress: string;
   port: number;
@@ -74,6 +85,18 @@ type WitsConfig = {
   proxyMode?: boolean;
   tcpHost?: string;
   tcpPort?: number;
+  // WITSML specific options
+  witsmlConfig?: {
+    url: string;
+    username: string;
+    password: string;
+    wellUid: string;
+    wellboreUid: string;
+    logUid: string;
+    pollingInterval: number;
+    witsmlVersion?: string;
+    requestTimeout?: number;
+  };
 };
 
 type WitsRecord = {
@@ -624,12 +647,24 @@ const WitsConfigPage = () => {
   const [activeTab, setActiveTab] = useState("connection");
   const [configForm, setConfigForm] = useState<WitsConfig>({
     ...connectionConfig,
+    connectionType: "wits",
     heartbeatInterval: 15000,
     maxMissedPongs: 3,
     binaryType: "arraybuffer",
     proxyMode: false,
     tcpHost: "localhost",
     tcpPort: 5000,
+    witsmlConfig: {
+      url: "https://witsml.example.com/witsml/store",
+      username: "",
+      password: "",
+      wellUid: "",
+      wellboreUid: "",
+      logUid: "REALTIME",
+      pollingInterval: 10000,
+      witsmlVersion: "1.4.1.1",
+      requestTimeout: 30000,
+    },
   });
   const [isTesting, setIsTesting] = useState(false);
 
@@ -984,176 +1019,456 @@ const WitsConfigPage = () => {
                           <div className="flex items-center space-x-2">
                             <input
                               type="radio"
-                              id="tcp"
-                              name="protocol"
+                              id="wits"
+                              name="connectionType"
                               className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
-                              checked={configForm.protocol === "TCP"}
+                              checked={configForm.connectionType !== "witsml"}
                               onChange={() =>
-                                handleConfigChange("protocol", "TCP")
+                                handleConfigChange("connectionType", "wits")
                               }
                             />
                             <Label
-                              htmlFor="tcp"
+                              htmlFor="wits"
                               className="text-sm text-gray-300"
                             >
-                              TCP/IP
+                              WITS
                             </Label>
                           </div>
                           <div className="flex items-center space-x-2">
                             <input
                               type="radio"
-                              id="ws"
-                              name="protocol"
+                              id="witsml"
+                              name="connectionType"
                               className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
-                              checked={configForm.protocol === "WS"}
+                              checked={configForm.connectionType === "witsml"}
                               onChange={() =>
-                                handleConfigChange("protocol", "WS")
+                                handleConfigChange("connectionType", "witsml")
                               }
                             />
                             <Label
-                              htmlFor="ws"
+                              htmlFor="witsml"
                               className="text-sm text-gray-300"
                             >
-                              WebSocket
-                            </Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="radio"
-                              id="serial"
-                              name="protocol"
-                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
-                              checked={configForm.protocol === "Serial"}
-                              onChange={() =>
-                                handleConfigChange("protocol", "Serial")
-                              }
-                            />
-                            <Label
-                              htmlFor="serial"
-                              className="text-sm text-gray-300"
-                            >
-                              Serial
-                            </Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="radio"
-                              id="udp"
-                              name="protocol"
-                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
-                              checked={configForm.protocol === "UDP"}
-                              onChange={() =>
-                                handleConfigChange("protocol", "UDP")
-                              }
-                            />
-                            <Label
-                              htmlFor="udp"
-                              className="text-sm text-gray-300"
-                            >
-                              UDP
+                              WITSML
                             </Label>
                           </div>
                         </div>
+
+                        {configForm.connectionType !== "witsml" && (
+                          <div className="flex gap-4 mt-3">
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="radio"
+                                id="tcp"
+                                name="protocol"
+                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
+                                checked={configForm.protocol === "TCP"}
+                                onChange={() =>
+                                  handleConfigChange("protocol", "TCP")
+                                }
+                              />
+                              <Label
+                                htmlFor="tcp"
+                                className="text-sm text-gray-300"
+                              >
+                                TCP/IP
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="radio"
+                                id="ws"
+                                name="protocol"
+                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
+                                checked={configForm.protocol === "WS"}
+                                onChange={() =>
+                                  handleConfigChange("protocol", "WS")
+                                }
+                              />
+                              <Label
+                                htmlFor="ws"
+                                className="text-sm text-gray-300"
+                              >
+                                WebSocket
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="radio"
+                                id="serial"
+                                name="protocol"
+                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
+                                checked={configForm.protocol === "Serial"}
+                                onChange={() =>
+                                  handleConfigChange("protocol", "Serial")
+                                }
+                              />
+                              <Label
+                                htmlFor="serial"
+                                className="text-sm text-gray-300"
+                              >
+                                Serial
+                              </Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="radio"
+                                id="udp"
+                                name="protocol"
+                                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
+                                checked={configForm.protocol === "UDP"}
+                                onChange={() =>
+                                  handleConfigChange("protocol", "UDP")
+                                }
+                              />
+                              <Label
+                                htmlFor="udp"
+                                className="text-sm text-gray-300"
+                              >
+                                UDP
+                              </Label>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      <div>
-                        <Label
-                          htmlFor="ipAddress"
-                          className="text-sm text-gray-400"
-                        >
-                          IP Address
-                        </Label>
-                        <Input
-                          id="ipAddress"
-                          placeholder="192.168.1.100"
-                          value={configForm.ipAddress}
-                          onChange={(e) =>
-                            handleConfigChange("ipAddress", e.target.value)
-                          }
-                          className="bg-gray-800 border-gray-700 text-gray-200 mt-1"
-                        />
-                      </div>
+                      {configForm.connectionType !== "witsml" ? (
+                        <>
+                          <div>
+                            <Label
+                              htmlFor="ipAddress"
+                              className="text-sm text-gray-400"
+                            >
+                              IP Address
+                            </Label>
+                            <Input
+                              id="ipAddress"
+                              placeholder="192.168.1.100"
+                              value={configForm.ipAddress}
+                              onChange={(e) =>
+                                handleConfigChange("ipAddress", e.target.value)
+                              }
+                              className="bg-gray-800 border-gray-700 text-gray-200 mt-1"
+                            />
+                          </div>
 
-                      <div>
-                        <Label htmlFor="port" className="text-sm text-gray-400">
-                          Port
-                        </Label>
-                        <Input
-                          id="port"
-                          placeholder="8080"
-                          type="number"
-                          value={configForm.port}
-                          onChange={(e) =>
-                            handleConfigChange("port", parseInt(e.target.value))
-                          }
-                          className="bg-gray-800 border-gray-700 text-gray-200 mt-1"
-                        />
-                      </div>
+                          <div>
+                            <Label
+                              htmlFor="port"
+                              className="text-sm text-gray-400"
+                            >
+                              Port
+                            </Label>
+                            <Input
+                              id="port"
+                              placeholder="8080"
+                              type="number"
+                              value={configForm.port}
+                              onChange={(e) =>
+                                handleConfigChange(
+                                  "port",
+                                  parseInt(e.target.value),
+                                )
+                              }
+                              className="bg-gray-800 border-gray-700 text-gray-200 mt-1"
+                            />
+                          </div>
 
-                      <div>
-                        <Label
-                          htmlFor="witsLevel"
-                          className="text-sm text-gray-400"
-                        >
-                          WITS Level
-                        </Label>
-                        <div className="flex gap-4 mt-1">
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="radio"
-                              id="level0"
-                              name="witsLevel"
-                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
-                              checked={configForm.witsLevel === "0"}
-                              onChange={() =>
-                                handleConfigChange("witsLevel", "0")
-                              }
-                            />
+                          <div>
                             <Label
-                              htmlFor="level0"
-                              className="text-sm text-gray-300"
+                              htmlFor="witsLevel"
+                              className="text-sm text-gray-400"
                             >
-                              Level 0
+                              WITS Level
                             </Label>
+                            <div className="flex gap-4 mt-1">
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="radio"
+                                  id="level0"
+                                  name="witsLevel"
+                                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
+                                  checked={configForm.witsLevel === "0"}
+                                  onChange={() =>
+                                    handleConfigChange("witsLevel", "0")
+                                  }
+                                />
+                                <Label
+                                  htmlFor="level0"
+                                  className="text-sm text-gray-300"
+                                >
+                                  Level 0
+                                </Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="radio"
+                                  id="level1"
+                                  name="witsLevel"
+                                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
+                                  checked={configForm.witsLevel === "1"}
+                                  onChange={() =>
+                                    handleConfigChange("witsLevel", "1")
+                                  }
+                                />
+                                <Label
+                                  htmlFor="level1"
+                                  className="text-sm text-gray-300"
+                                >
+                                  Level 1
+                                </Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="radio"
+                                  id="level2"
+                                  name="witsLevel"
+                                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
+                                  checked={configForm.witsLevel === "2"}
+                                  onChange={() =>
+                                    handleConfigChange("witsLevel", "2")
+                                  }
+                                />
+                                <Label
+                                  htmlFor="level2"
+                                  className="text-sm text-gray-300"
+                                >
+                                  Level 2
+                                </Label>
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="radio"
-                              id="level1"
-                              name="witsLevel"
-                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
-                              checked={configForm.witsLevel === "1"}
-                              onChange={() =>
-                                handleConfigChange("witsLevel", "1")
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <Label
+                                htmlFor="witsmlUrl"
+                                className="text-sm text-gray-400"
+                              >
+                                WITSML Server URL
+                              </Label>
+                              <div className="flex items-center text-blue-400 text-xs cursor-pointer">
+                                <Info className="h-3 w-3 mr-1" />
+                                <span>What is WITSML?</span>
+                              </div>
+                            </div>
+                            <Input
+                              id="witsmlUrl"
+                              value={configForm.witsmlConfig?.url || ""}
+                              onChange={(e) =>
+                                handleConfigChange("witsmlConfig", {
+                                  ...configForm.witsmlConfig,
+                                  url: e.target.value,
+                                })
                               }
+                              className="bg-gray-800 border-gray-700 text-gray-200 mt-1"
+                              placeholder="https://witsml.server/store"
                             />
-                            <Label
-                              htmlFor="level1"
-                              className="text-sm text-gray-300"
-                            >
-                              Level 1
-                            </Label>
+                            <p className="text-xs text-gray-400 mt-1">
+                              Example: https://witsml.example.com/witsml/store
+                            </p>
                           </div>
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="radio"
-                              id="level2"
-                              name="witsLevel"
-                              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-700 bg-gray-800"
-                              checked={configForm.witsLevel === "2"}
-                              onChange={() =>
-                                handleConfigChange("witsLevel", "2")
-                              }
-                            />
-                            <Label
-                              htmlFor="level2"
-                              className="text-sm text-gray-300"
-                            >
-                              Level 2
-                            </Label>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor="witsmlUsername"
+                                className="text-sm text-gray-400"
+                              >
+                                Username
+                              </Label>
+                              <Input
+                                id="witsmlUsername"
+                                value={configForm.witsmlConfig?.username || ""}
+                                onChange={(e) =>
+                                  handleConfigChange("witsmlConfig", {
+                                    ...configForm.witsmlConfig,
+                                    username: e.target.value,
+                                  })
+                                }
+                                className="bg-gray-800 border-gray-700 text-gray-200"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor="witsmlPassword"
+                                className="text-sm text-gray-400"
+                              >
+                                Password
+                              </Label>
+                              <Input
+                                id="witsmlPassword"
+                                type="password"
+                                value={configForm.witsmlConfig?.password || ""}
+                                onChange={(e) =>
+                                  handleConfigChange("witsmlConfig", {
+                                    ...configForm.witsmlConfig,
+                                    password: e.target.value,
+                                  })
+                                }
+                                className="bg-gray-800 border-gray-700 text-gray-200"
+                              />
+                            </div>
                           </div>
-                        </div>
-                      </div>
+
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor="witsmlWellUid"
+                                className="text-sm text-gray-400"
+                              >
+                                Well UID
+                              </Label>
+                              <Input
+                                id="witsmlWellUid"
+                                value={configForm.witsmlConfig?.wellUid || ""}
+                                onChange={(e) =>
+                                  handleConfigChange("witsmlConfig", {
+                                    ...configForm.witsmlConfig,
+                                    wellUid: e.target.value,
+                                  })
+                                }
+                                className="bg-gray-800 border-gray-700 text-gray-200"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor="witsmlWellboreUid"
+                                className="text-sm text-gray-400"
+                              >
+                                Wellbore UID
+                              </Label>
+                              <Input
+                                id="witsmlWellboreUid"
+                                value={
+                                  configForm.witsmlConfig?.wellboreUid || ""
+                                }
+                                onChange={(e) =>
+                                  handleConfigChange("witsmlConfig", {
+                                    ...configForm.witsmlConfig,
+                                    wellboreUid: e.target.value,
+                                  })
+                                }
+                                className="bg-gray-800 border-gray-700 text-gray-200"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor="witsmlLogUid"
+                                className="text-sm text-gray-400"
+                              >
+                                Log UID
+                              </Label>
+                              <Input
+                                id="witsmlLogUid"
+                                value={
+                                  configForm.witsmlConfig?.logUid || "REALTIME"
+                                }
+                                onChange={(e) =>
+                                  handleConfigChange("witsmlConfig", {
+                                    ...configForm.witsmlConfig,
+                                    logUid: e.target.value,
+                                  })
+                                }
+                                className="bg-gray-800 border-gray-700 text-gray-200"
+                                placeholder="REALTIME"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor="witsmlVersion"
+                                className="text-sm text-gray-400"
+                              >
+                                WITSML Version
+                              </Label>
+                              <Select
+                                value={
+                                  configForm.witsmlConfig?.witsmlVersion ||
+                                  "1.4.1.1"
+                                }
+                                onValueChange={(value) =>
+                                  handleConfigChange("witsmlConfig", {
+                                    ...configForm.witsmlConfig,
+                                    witsmlVersion: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="bg-gray-800 border-gray-700 text-gray-200">
+                                  <SelectValue placeholder="Select WITSML version" />
+                                </SelectTrigger>
+                                <SelectContent className="bg-gray-800 border-gray-700">
+                                  <SelectItem
+                                    value="1.3.1.1"
+                                    className="text-gray-200"
+                                  >
+                                    WITSML 1.3.1
+                                  </SelectItem>
+                                  <SelectItem
+                                    value="1.4.1.1"
+                                    className="text-gray-200"
+                                  >
+                                    WITSML 1.4.1
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label
+                                  htmlFor="pollingInterval"
+                                  className="text-sm text-gray-400"
+                                >
+                                  Polling Interval (ms)
+                                </Label>
+                                <Input
+                                  id="pollingInterval"
+                                  type="number"
+                                  value={
+                                    configForm.witsmlConfig?.pollingInterval ||
+                                    10000
+                                  }
+                                  onChange={(e) =>
+                                    handleConfigChange("witsmlConfig", {
+                                      ...configForm.witsmlConfig,
+                                      pollingInterval: parseInt(e.target.value),
+                                    })
+                                  }
+                                  className="bg-gray-800 border-gray-700 text-gray-200"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label
+                                  htmlFor="requestTimeout"
+                                  className="text-sm text-gray-400"
+                                >
+                                  Request Timeout (ms)
+                                </Label>
+                                <Input
+                                  id="requestTimeout"
+                                  type="number"
+                                  value={
+                                    configForm.witsmlConfig?.requestTimeout ||
+                                    30000
+                                  }
+                                  onChange={(e) =>
+                                    handleConfigChange("witsmlConfig", {
+                                      ...configForm.witsmlConfig,
+                                      requestTimeout: parseInt(e.target.value),
+                                    })
+                                  }
+                                  className="bg-gray-800 border-gray-700 text-gray-200"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="space-y-4">

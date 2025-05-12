@@ -43,7 +43,7 @@ const WitsConnectionTester = ({ onClose }: WitsConnectionTesterProps) => {
   const handleConnect = () => {
     addLog("Updating connection configuration...");
 
-    // Update connection configuration
+    // Update connection configuration with enhanced WebSocket options
     updateConfig({
       ipAddress: proxyHost,
       port: parseInt(proxyPort, 10),
@@ -51,6 +51,14 @@ const WitsConnectionTester = ({ onClose }: WitsConnectionTesterProps) => {
       proxyMode: useProxy,
       tcpHost: tcpHost,
       tcpPort: parseInt(tcpPort, 10),
+      // Add WebSocket specific options for better reliability
+      heartbeatInterval: 15000, // 15 seconds between heartbeats
+      maxMissedPongs: 3, // Reconnect after 3 missed responses
+      connectionTimeout: 20000, // 20 second connection timeout
+      binaryType: "arraybuffer", // Better binary data handling
+      // Add reconnection settings
+      reconnectInterval: 10000, // 10 seconds between reconnect attempts
+      maxReconnectAttempts: 100, // Allow up to 100 reconnect attempts
     });
 
     addLog("Configuration updated.");

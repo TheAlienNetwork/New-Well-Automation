@@ -10,6 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useSurveys } from "@/context/SurveyContext";
 import { useWits } from "@/context/WitsContext";
+import { useCurveData } from "@/hooks/useCurveData";
 import {
   useEmailRecipients,
   PredefinedGroup,
@@ -56,6 +57,8 @@ interface AttachmentFile {
   size: string;
   type: string;
   path: string;
+  lastModified?: number;
+  file?: File; // Store the actual file object for attachment
 }
 
 const SurveyEmailSettings = ({
@@ -84,6 +87,18 @@ const SurveyEmailSettings = ({
     handleAddRecipient,
     handleRemoveRecipient,
     handleAddGroup,
+    isEditingGroup,
+    currentGroup,
+    newGroupName,
+    newGroupEmails,
+    setNewGroupName,
+    setNewGroupEmails,
+    handleCreateGroup,
+    handleEditGroup,
+    handleUpdateGroup,
+    handleDeleteGroup,
+    handleCancelEdit,
+    setIsEditingGroup,
   } = useEmailRecipients({
     initialRecipients: recipients,
     onUpdateRecipients,
@@ -114,6 +129,9 @@ const SurveyEmailSettings = ({
   const [attachments, setAttachments] = useState<AttachmentFile[]>([]);
   const [emailPreviewKey, setEmailPreviewKey] = useState(Date.now()); // Force re-render when needed
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [folderWatchInterval, setFolderWatchInterval] = useState<number | null>(
+    null,
+  );
   const emailPreviewRef = useRef<HTMLDivElement>(null);
 
   // Calculated curve data to pass to email preview
@@ -150,124 +168,26 @@ const SurveyEmailSettings = ({
     leftRight: number;
   } | null>(null);
 
-  // Calculate curve data whenever wits data or survey data changes
+  // Use the shared curve data hook
+  const { curveData } = useCurveData({
+    minDistanceThreshold: 1.0,
+    rotationRpmThreshold: 5.0,
+    debounceMs: 500,
+    movingAverageCount: 3,
+  });
+
+  // Update calculated curve data when the hook data changes
   useEffect(() => {
-    try {
-      // Get current inclination and azimuth from survey or WITS data with validation
-      const currentInc =
-        typeof latestSurvey?.inclination === "number" &&
-        !isNaN(latestSurvey.inclination) &&
-        isFinite(latestSurvey.inclination)
-          ? latestSurvey.inclination
-          : typeof witsData?.inclination === "number" &&
-              !isNaN(witsData.inclination) &&
-              isFinite(witsData.inclination)
-            ? witsData.inclination
-            : 0;
-
-      const currentAz =
-        typeof latestSurvey?.azimuth === "number" &&
-        !isNaN(latestSurvey.azimuth) &&
-        isFinite(latestSurvey.azimuth)
-          ? latestSurvey.azimuth
-          : typeof witsData?.azimuth === "number" &&
-              !isNaN(witsData.azimuth) &&
-              isFinite(witsData.azimuth)
-            ? witsData.azimuth
-            : 0;
-
-      // Standard parameters used across components
-      const slideDistance = 30;
-      const bendAngle = 2.0;
-      const bitToBendDistance = 5;
-      const targetInc = 90;
-      const targetAz = 270;
-      const targetDistance = 100;
-      const buildRate = 2.5;
-      const turnRate = 1.8;
-
-      // Determine if the tool is rotating based on rotary RPM
-      const rotationThreshold = 5; // RPM threshold standardized across components
-      const isRotating =
-        typeof witsData?.rotaryRpm === "number"
-          ? witsData.rotaryRpm > rotationThreshold
-          : false;
-
-      // Import dynamically to avoid circular dependencies
-      import("@/utils/directionalCalculations")
-        .then(
-          ({
-            calculateMotorYield,
-            calculateDoglegNeeded,
-            calculateSlideSeen,
-            calculateSlideAhead,
-            calculateProjectedInclination,
-            calculateProjectedAzimuth,
-          }) => {
-            // Calculate motor yield
-            const motorYield = calculateMotorYield(
-              slideDistance,
-              bendAngle,
-              bitToBendDistance,
-            );
-
-            // Calculate slide seen
-            const slideSeen = calculateSlideSeen(
-              motorYield,
-              slideDistance,
-              isRotating,
-            );
-
-            // Calculate slide ahead
-            const slideAhead = calculateSlideAhead(
-              motorYield,
-              slideDistance,
-              bitToBendDistance,
-              isRotating,
-            );
-
-            // Calculate projected inclination
-            const projectedInc = calculateProjectedInclination(
-              currentInc,
-              buildRate,
-              targetDistance,
-            );
-
-            // Calculate projected azimuth
-            const projectedAz = calculateProjectedAzimuth(
-              currentAz,
-              turnRate,
-              targetDistance,
-            );
-
-            // Calculate dogleg needed
-            const doglegNeeded = calculateDoglegNeeded(
-              currentInc,
-              currentAz,
-              targetInc,
-              targetAz,
-              targetDistance,
-            );
-
-            // Update the calculated curve data
-            setCalculatedCurveData({
-              motorYield,
-              doglegNeeded,
-              slideSeen,
-              slideAhead,
-              projectedInc,
-              projectedAz,
-              isRotating,
-            });
-          },
-        )
-        .catch((error) => {
-          console.error("Error importing directional calculations:", error);
-        });
-    } catch (error) {
-      console.error("Error calculating curve data:", error);
-    }
-  }, [latestSurvey, witsData]);
+    setCalculatedCurveData({
+      motorYield: curveData.motorYield,
+      doglegNeeded: curveData.doglegNeeded,
+      slideSeen: curveData.slideSeen,
+      slideAhead: curveData.slideAhead,
+      projectedInc: curveData.projectedInc,
+      projectedAz: curveData.projectedAz,
+      isRotating: curveData.isRotating,
+    });
+  }, [curveData]);
 
   // Update email preview when wits data changes or when email content options change
   useEffect(() => {
@@ -322,8 +242,7 @@ const SurveyEmailSettings = ({
     }
   };
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const processSelectedFiles = (files: FileList) => {
     if (!files || files.length === 0) return;
 
     // Get the folder path from the first file
@@ -365,6 +284,8 @@ const SurveyEmailSettings = ({
           size: fileSize,
           type: fileType,
           path: `/${folderPath}/${file.name}`,
+          lastModified: file.lastModified,
+          file: file, // Store the actual file object for attachment
         });
       }
     }
@@ -375,6 +296,34 @@ const SurveyEmailSettings = ({
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+
+    // Set up folder watching
+    setupFolderWatching();
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      processSelectedFiles(files);
+    }
+  };
+
+  // Setup folder watching to auto-update attachments
+  const setupFolderWatching = () => {
+    // Clear any existing interval
+    if (folderWatchInterval !== null) {
+      clearInterval(folderWatchInterval);
+    }
+
+    // Set up a new interval to check for file changes
+    const intervalId = window.setInterval(() => {
+      if (fileInputRef.current && attachmentFolder) {
+        // Trigger a new folder selection to refresh files
+        fileInputRef.current.click();
+      }
+    }, 30000); // Check every 30 seconds
+
+    setFolderWatchInterval(intervalId);
   };
 
   const handleRemoveAttachment = (path: string) => {
@@ -443,17 +392,10 @@ const SurveyEmailSettings = ({
 
   const handleSendOutlookEmail = async () => {
     try {
-      // If using screenshot and no screenshot exists yet, capture one
-      if (useScreenshotInEmail && !emailPreviewScreenshot) {
-        await captureEmailPreviewScreenshot();
-      }
-
       // Import dynamically to avoid circular dependencies
-      const {
-        generateEmailContent,
-        createMailtoUrl,
-        createOutlookEmailWithSurveyData,
-      } = await import("@/utils/emailUtils");
+      const { createOutlookEmailWithSurveyData } = await import(
+        "@/utils/emailUtils"
+      );
 
       // Get well info from props or localStorage
       const wellInfoData = {
@@ -467,75 +409,24 @@ const SurveyEmailSettings = ({
       const surveysToUse = globalSurveys.length > 0 ? globalSurveys : surveys;
       const selectedSurveyIds = [latestSurvey.id].filter(Boolean);
 
-      if (useScreenshotInEmail && emailPreviewScreenshot) {
-        // Use the enhanced email creation with screenshot
-        await createOutlookEmailWithSurveyData(
-          selectedSurveyIds,
-          surveysToUse,
-          wellInfoData,
-          getWitsDataForPreview(),
-          {
-            includeCurveData,
-            includeTargetLineStatus,
-            targetLineData,
-            includeGammaPlot,
-            includeSurveyAnalytics,
-            includeFullSurveyData,
-            recipients: emailRecipients,
-            emailPreviewImage: emailPreviewScreenshot,
-            fileAttachments: attachments,
-            embedScreenshot: true, // Always embed the screenshot in the email body
-            ccRecipients: [], // Can be expanded later if needed
-          },
-        );
-      } else {
-        // Generate plain text email content (original method)
-        const emailContent = generateEmailContent(
-          selectedSurveyIds,
-          surveysToUse,
-          wellInfoData,
-          witsData,
+      // Always use the HTML email approach
+      await createOutlookEmailWithSurveyData(
+        selectedSurveyIds,
+        surveysToUse,
+        wellInfoData,
+        getWitsDataForPreview(),
+        {
           includeCurveData,
           includeTargetLineStatus,
           targetLineData,
           includeGammaPlot,
           includeSurveyAnalytics,
           includeFullSurveyData,
-        );
-
-        const emailSubject = `Survey Report - Well ${wellInfoData.wellName} - ${wellInfoData.rigName}`;
-        const emailTo = emailRecipients.join(",");
-
-        try {
-          // Create mailto URL with the generated content
-          const mailtoUrl = createMailtoUrl(
-            emailContent,
-            emailSubject,
-            emailTo,
-          );
-          window.location.href = mailtoUrl;
-        } catch (error) {
-          console.error("Error opening email client:", error);
-          toast({
-            title: "Email Client Error",
-            description:
-              "Could not open email client. Content copied to clipboard instead.",
-            variant: "destructive",
-          });
-
-          // Offer to copy content to clipboard as fallback
-          const textarea = document.createElement("textarea");
-          textarea.value = emailContent;
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand("copy");
-          document.body.removeChild(textarea);
-          toast({
-            title: "Content Copied",
-            description: "Email content copied to clipboard",
-          });
-        }
-      }
+          recipients: emailRecipients,
+          fileAttachments: attachments,
+          ccRecipients: [], // Can be expanded later if needed
+        },
+      );
     } catch (error) {
       console.error("Failed to send email:", error);
       toast({
@@ -601,11 +492,27 @@ const SurveyEmailSettings = ({
 
   const copyEmailPreviewToClipboard = async () => {
     try {
-      const blob = await captureEmailPreviewScreenshot();
-      if (!blob) return;
+      if (!emailPreviewRef.current) {
+        console.error("Email preview ref is not available");
+        return;
+      }
 
       // Import the utility function dynamically
-      const { copyImageToClipboard } = await import("@/utils/emailUtils");
+      const { captureEmailPreview, copyImageToClipboard } = await import(
+        "@/utils/emailUtils"
+      );
+
+      // Capture the email preview as an image
+      const blob = await captureEmailPreview(emailPreviewRef.current);
+      if (!blob) {
+        console.error("Failed to create image from email preview");
+        toast({
+          title: "Screenshot Failed",
+          description: "Failed to capture email preview as image",
+          variant: "destructive",
+        });
+        return;
+      }
 
       // Copy the image to clipboard
       const success = await copyImageToClipboard(blob);
@@ -1082,29 +989,140 @@ const SurveyEmailSettings = ({
             </div>
 
             <div className="border border-gray-800 rounded-md">
-              <div className="p-2 bg-gray-800 text-sm font-medium text-gray-300 border-b border-gray-800">
-                Predefined Groups
+              <div className="p-2 bg-gray-800 text-sm font-medium text-gray-300 border-b border-gray-800 flex justify-between items-center">
+                <span>Predefined Groups</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-blue-400 hover:text-blue-300 hover:bg-gray-700"
+                  onClick={() => setIsEditingGroup(true)}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Group
+                </Button>
               </div>
               <div className="p-2">
-                <div className="grid grid-cols-2 gap-2">
-                  {predefinedGroups.map((group) => (
-                    <div
-                      key={group.id}
-                      className="flex items-center p-2 bg-gray-800/50 rounded-md hover:bg-gray-700/50 transition-colors cursor-pointer"
-                      onClick={() => handleAddGroup(group.id)}
-                    >
-                      <div className="h-8 w-8 rounded-full bg-blue-900/30 flex items-center justify-center mr-2">
-                        <UserPlus className="h-4 w-4 text-blue-400" />
+                {isEditingGroup ? (
+                  <div className="space-y-3 p-2 bg-gray-800/70 rounded-md">
+                    <h4 className="text-sm font-medium text-gray-300">
+                      {currentGroup ? "Edit Group" : "Create New Group"}
+                    </h4>
+                    <div className="space-y-2">
+                      <div>
+                        <Label
+                          htmlFor="group-name"
+                          className="text-xs text-gray-400 mb-1 block"
+                        >
+                          Group Name
+                        </Label>
+                        <Input
+                          id="group-name"
+                          value={newGroupName}
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          placeholder="Enter group name"
+                          className="bg-gray-700 border-gray-600 text-gray-200"
+                        />
                       </div>
                       <div>
-                        <p className="text-sm text-gray-300">{group.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {group.count} recipients
-                        </p>
+                        <Label
+                          htmlFor="group-emails"
+                          className="text-xs text-gray-400 mb-1 block"
+                        >
+                          Email Addresses (one per line, or comma/semicolon
+                          separated)
+                        </Label>
+                        <textarea
+                          id="group-emails"
+                          value={newGroupEmails}
+                          onChange={(e) => setNewGroupEmails(e.target.value)}
+                          placeholder="Enter email addresses"
+                          className="w-full h-24 px-3 py-2 text-sm bg-gray-700 border border-gray-600 rounded-md text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex justify-end gap-2 mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="bg-gray-700 border-gray-600 text-gray-300 hover:bg-gray-600"
+                        onClick={handleCancelEdit}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-blue-600 hover:bg-blue-700 text-white"
+                        onClick={
+                          currentGroup ? handleUpdateGroup : handleCreateGroup
+                        }
+                      >
+                        {currentGroup ? "Update" : "Create"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {predefinedGroups.map((group) => (
+                      <div
+                        key={group.id}
+                        className="flex items-center p-2 bg-gray-800/50 rounded-md hover:bg-gray-700/50 transition-colors relative group"
+                      >
+                        <div
+                          className="h-8 w-8 rounded-full bg-blue-900/30 flex items-center justify-center mr-2 cursor-pointer"
+                          onClick={() => handleAddGroup(group.id)}
+                        >
+                          <UserPlus className="h-4 w-4 text-blue-400" />
+                        </div>
+                        <div
+                          className="flex-1 cursor-pointer"
+                          onClick={() => handleAddGroup(group.id)}
+                        >
+                          <p className="text-sm text-gray-300">{group.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {group.count} recipients
+                          </p>
+                        </div>
+                        <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-gray-400 hover:text-blue-400 hover:bg-gray-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditGroup(group);
+                            }}
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-gray-400 hover:text-red-400 hover:bg-gray-700"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteGroup(group.id);
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </TabsContent>
@@ -1995,17 +2013,17 @@ const SurveyEmailSettings = ({
                   <Button
                     variant="outline"
                     className="bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
-                    onClick={captureEmailPreviewScreenshot}
+                    onClick={copyEmailPreviewToClipboard}
                   >
                     <Camera className="h-4 w-4 mr-2" />
-                    Capture Screenshot
+                    Copy to Clipboard
                   </Button>
                   <Button
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                     onClick={handleSendOutlookEmail}
                   >
                     <Send className="h-4 w-4 mr-2" />
-                    Send Email
+                    Open in Outlook
                   </Button>
                 </div>
               </div>

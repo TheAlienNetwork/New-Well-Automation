@@ -332,12 +332,14 @@ class WitsConnection {
         if (typeof event.data === "string") {
           try {
             const data = JSON.parse(event.data);
-            if (data.type === "pong") {
+            if (data && data.type === "pong") {
               this.handlePong();
               return;
             }
           } catch (e) {
             // Not JSON or not a pong message, process as normal data
+            console.warn("Error parsing WebSocket message as JSON:", e);
+            // Continue processing as normal data
           }
         }
 
@@ -775,7 +777,16 @@ class WitsConnection {
           this.processDataBuffer();
           return;
         }
-        rawData = JSON.parse(data) as WitsDataType;
+
+        try {
+          rawData = JSON.parse(data) as WitsDataType;
+        } catch (jsonError) {
+          console.warn("Failed to parse WebSocket data as JSON:", jsonError);
+          // If it's not valid JSON, treat it as raw data
+          this.buffer += data;
+          this.processDataBuffer();
+          return;
+        }
       } else if (data instanceof Blob) {
         const reader = new FileReader();
         reader.onload = (e) => {

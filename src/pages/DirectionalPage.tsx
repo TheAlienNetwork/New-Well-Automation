@@ -1136,7 +1136,7 @@ const DirectionalPage = () => {
               {/* Middle Column */}
               <div className="lg:col-span-2 space-y-6">
                 {/* 3D Trajectory */}
-                <div className="h-[500px] bg-gray-900 border border-gray-800 rounded-md overflow-hidden">
+                <div className="h-[900px] bg-gray-900 border border-gray-800 rounded-md overflow-hidden">
                   <ErrorBoundary>
                     <WellTrajectory3DInteractive
                       trajectoryData={trajectoryData}
@@ -1163,7 +1163,7 @@ const DirectionalPage = () => {
               </div>
 
               {/* Survey Table */}
-              <div className="mt-6">
+              <div className="mt-6 w-screen container flex flex-row-reverse">
                 <SurveyTable
                   surveys={surveys || []}
                   onEditSurvey={() => {}}

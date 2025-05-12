@@ -18,6 +18,8 @@ import {
   calculateSlideAhead,
   calculateProjectedInclination,
   calculateProjectedAzimuth,
+  calculateBuildRate,
+  calculateTurnRate,
 } from "@/utils/directionalCalculations";
 
 interface CurveDataWidgetProps {
