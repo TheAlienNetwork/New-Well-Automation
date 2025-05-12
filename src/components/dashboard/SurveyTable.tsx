@@ -33,6 +33,10 @@ import {
 } from "lucide-react";
 import { SurveyData } from "./SurveyPopup";
 import {
+  calculateDoglegSeverity,
+  calculateBuildRate,
+} from "@/utils/directionalCalculations";
+import {
   getLastDetectedHeaders,
   DetectedFileHeaders,
 } from "@/utils/surveyUtils";
@@ -101,29 +105,76 @@ const SurveyTable = ({
 
   // Calculate derived survey data once
   const surveysWithCalculations = useMemo(() => {
-    return filteredSurveys.map((survey) => {
-      const md =
-        survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
-      const inclinationRad = (survey.inclination * Math.PI) / 180;
-      const azimuthRad = (survey.azimuth * Math.PI) / 180;
+    // First, reverse the array to process from oldest to newest
+    // This ensures the latest survey (bottom row) has calculations based on the previous survey
+    const processedSurveys = [...filteredSurveys]
+      .reverse()
+      .map((survey, index, reversedArray) => {
+        const md =
+          survey.measuredDepth || survey.bitDepth - (survey.sensorOffset || 0);
+        const inclinationRad = (survey.inclination * Math.PI) / 180;
+        const azimuthRad = (survey.azimuth * Math.PI) / 180;
 
-      const tvd = md * Math.cos(inclinationRad);
-      const horizontalDistance = md * Math.sin(inclinationRad);
-      const ns = horizontalDistance * Math.cos(azimuthRad);
-      const ew = horizontalDistance * Math.sin(azimuthRad);
-      const aboveBelow = ns * 0.8 - tvd * 0.2;
-      const leftRight = ew * 0.8 - tvd * 0.1;
+        const tvd = md * Math.cos(inclinationRad);
+        const horizontalDistance = md * Math.sin(inclinationRad);
+        const ns = horizontalDistance * Math.cos(azimuthRad);
+        const ew = horizontalDistance * Math.sin(azimuthRad);
+        const aboveBelow = ns * 0.8 - tvd * 0.2;
+        const leftRight = ew * 0.8 - tvd * 0.1;
 
-      return {
-        ...survey,
-        md,
-        tvd,
-        ns,
-        ew,
-        aboveBelow,
-        leftRight,
-      };
-    });
+        // Use existing dogleg severity and build rate if available, otherwise calculate from previous survey
+        let doglegSeverity = survey.doglegSeverity || 0;
+        let buildRate = survey.buildRate || 0;
+        let courseLength = 0;
+
+        // If not available and we have a previous survey, calculate them
+        // In the reversed array, the previous survey is at index + 1
+        if (index < reversedArray.length - 1) {
+          const prevSurvey = reversedArray[index + 1]; // Previous chronologically
+          courseLength = Math.abs(
+            md -
+              (prevSurvey.measuredDepth ||
+                prevSurvey.bitDepth - (prevSurvey.sensorOffset || 0)),
+          );
+
+          if (courseLength > 0) {
+            if (!doglegSeverity) {
+              doglegSeverity = calculateDoglegSeverity(
+                prevSurvey.inclination,
+                prevSurvey.azimuth,
+                survey.inclination,
+                survey.azimuth,
+                courseLength,
+              );
+            }
+
+            if (!buildRate) {
+              buildRate = calculateBuildRate(
+                prevSurvey.inclination,
+                survey.inclination,
+                prevSurvey.bitDepth,
+                survey.bitDepth,
+              );
+            }
+          }
+        }
+
+        return {
+          ...survey,
+          md,
+          tvd,
+          ns,
+          ew,
+          aboveBelow,
+          leftRight,
+          doglegSeverity,
+          buildRate,
+          courseLength,
+        };
+      });
+
+    // Reverse back to original order (newest to oldest) for display
+    return processedSurveys.reverse();
   }, [filteredSurveys]);
 
   // Memoized quality status styles
@@ -244,6 +295,11 @@ const SurveyTable = ({
         `${survey.leftRight >= 0 ? "+" : ""}${survey.leftRight.toFixed(2)}`,
       lateral: () =>
         `${survey.leftRight >= 0 ? "+" : ""}${survey.leftRight.toFixed(2)}`,
+
+      // Course length
+      course: () => (survey.courseLength || 0).toFixed(2),
+      length: () => (survey.courseLength || 0).toFixed(2),
+      "course length": () => (survey.courseLength || 0).toFixed(2),
     };
 
     for (const [key, fn] of Object.entries(mappings)) {
@@ -267,12 +323,15 @@ const SurveyTable = ({
       { key: "tvd", label: "TVD (ft)" },
       { key: "ns", label: "NS (ft)" },
       { key: "ew", label: "EW (ft)" },
-      { key: "bTotal", label: "B Total" },
-      { key: "aTotal", label: "A Total" },
       { key: "dip", label: "Dip (°)" },
       { key: "toolTemp", label: "Temp (°F)" },
+      { key: "doglegSeverity", label: "DLS (°/100ft)" },
+      { key: "buildRate", label: "Build Rate (°/100ft)" },
+      { key: "bTotal", label: "B Total" },
+      { key: "aTotal", label: "A Total" },
       { key: "aboveBelow", label: "Above/Below" },
       { key: "leftRight", label: "Left/Right" },
+      { key: "courseLength", label: "Course Length (ft)" },
     ],
     [],
   );

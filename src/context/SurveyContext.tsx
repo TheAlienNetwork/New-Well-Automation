@@ -30,7 +30,7 @@ const AUTO_EXPORT_ENABLED_KEY = "mwd_auto_export_enabled";
 
 // Define SurveyProvider component as a named function declaration
 // This ensures consistent exports for Fast Refresh
-function SurveyProvider({ children }: { children: ReactNode }) {
+export function SurveyProvider({ children }: { children: ReactNode }) {
   // Initialize state from localStorage if available
   const [surveys, setSurveys] = useState<SurveyData[]>(() => {
     try {
@@ -132,6 +132,8 @@ function SurveyProvider({ children }: { children: ReactNode }) {
                     updated_at: new Date().toISOString(),
                     sensor_offset: survey.sensorOffset,
                     measured_depth: survey.measuredDepth,
+                    dogleg_severity: survey.doglegSeverity || 0,
+                    build_rate: survey.buildRate || 0,
                   },
                 ]);
               }
@@ -193,6 +195,8 @@ function SurveyProvider({ children }: { children: ReactNode }) {
                 sensorOffset: survey.sensor_offset,
                 measuredDepth: survey.measured_depth,
                 wellId: survey.well_id,
+                doglegSeverity: survey.dogleg_severity || 0,
+                buildRate: survey.build_rate || 0,
               }));
 
               // Set the surveys in state
@@ -294,6 +298,60 @@ function SurveyProvider({ children }: { children: ReactNode }) {
     const currentWellId =
       survey.wellId || localStorage.getItem("currentWellId") || undefined;
 
+    // Calculate dogleg severity and build rate if we have previous surveys
+    let doglegSeverity = 0;
+    let buildRate = 0;
+
+    // Get previous survey to calculate dogleg severity and build rate
+    try {
+      const storedSurveys = localStorage.getItem(SURVEYS_STORAGE_KEY);
+      const previousSurveys = storedSurveys ? JSON.parse(storedSurveys) : [];
+
+      if (previousSurveys.length > 0) {
+        // Sort surveys by bit depth to find the previous survey
+        const sortedSurveys = [...previousSurveys].sort(
+          (a, b) => b.bitDepth - a.bitDepth,
+        );
+
+        // Find the most recent survey that has a lower bit depth than the current one
+        const previousSurvey = sortedSurveys.find(
+          (s) => s.bitDepth < survey.bitDepth,
+        );
+
+        if (previousSurvey) {
+          // Import dynamically to avoid circular dependencies
+          const {
+            calculateDoglegSeverity,
+            calculateBuildRate,
+          } = require("@/utils/directionalCalculations");
+
+          // Calculate dogleg severity
+          const courseLength = Math.abs(
+            survey.bitDepth - previousSurvey.bitDepth,
+          );
+          if (courseLength > 0) {
+            doglegSeverity = calculateDoglegSeverity(
+              previousSurvey.inclination,
+              previousSurvey.azimuth,
+              survey.inclination,
+              survey.azimuth,
+              courseLength,
+            );
+
+            // Calculate build rate
+            buildRate = calculateBuildRate(
+              previousSurvey.inclination,
+              survey.inclination,
+              previousSurvey.bitDepth,
+              survey.bitDepth,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error calculating dogleg severity or build rate:", error);
+    }
+
     return {
       ...survey,
       // Ensure ID exists
@@ -330,6 +388,9 @@ function SurveyProvider({ children }: { children: ReactNode }) {
           (isNaN(survey.sensorOffset)
             ? Number(localStorage.getItem("sensorOffset")) || 0
             : survey.sensorOffset),
+      // Add calculated dogleg severity and build rate
+      doglegSeverity: survey.doglegSeverity || doglegSeverity,
+      buildRate: survey.buildRate || buildRate,
     };
   };
 
@@ -451,6 +512,8 @@ function SurveyProvider({ children }: { children: ReactNode }) {
                 updated_at: new Date().toISOString(),
                 sensor_offset: sanitizedSurvey.sensorOffset,
                 measured_depth: sanitizedSurvey.measuredDepth,
+                dogleg_severity: sanitizedSurvey.doglegSeverity || 0,
+                build_rate: sanitizedSurvey.buildRate || 0,
               },
             ]);
 
@@ -534,6 +597,8 @@ function SurveyProvider({ children }: { children: ReactNode }) {
                 updated_at: new Date().toISOString(),
                 sensor_offset: sanitizedSurvey.sensorOffset,
                 measured_depth: sanitizedSurvey.measuredDepth,
+                dogleg_severity: sanitizedSurvey.doglegSeverity || 0,
+                build_rate: sanitizedSurvey.buildRate || 0,
               })
               .eq("id", String(sanitizedSurvey.id));
 
@@ -565,6 +630,8 @@ function SurveyProvider({ children }: { children: ReactNode }) {
                 updated_at: new Date().toISOString(),
                 sensor_offset: sanitizedSurvey.sensorOffset,
                 measured_depth: sanitizedSurvey.measuredDepth,
+                dogleg_severity: sanitizedSurvey.doglegSeverity || 0,
+                build_rate: sanitizedSurvey.buildRate || 0,
               },
             ]);
 
@@ -695,6 +762,8 @@ function SurveyProvider({ children }: { children: ReactNode }) {
           sensorOffset: survey.sensor_offset || wellData?.sensor_offset || 0,
           measuredDepth: survey.measured_depth,
           wellId: survey.well_id,
+          doglegSeverity: survey.dogleg_severity || 0,
+          buildRate: survey.build_rate || 0,
         }));
 
         // Set the surveys in state
@@ -831,6 +900,8 @@ function SurveyProvider({ children }: { children: ReactNode }) {
                       updated_at: new Date().toISOString(),
                       sensor_offset: survey.sensorOffset,
                       measured_depth: survey.measuredDepth,
+                      dogleg_severity: survey.doglegSeverity || 0,
+                      build_rate: survey.buildRate || 0,
                     },
                   ]);
 
@@ -939,5 +1010,5 @@ export const useSurveys = () => {
   return context;
 };
 
-// Export the provider as a named export to ensure consistent exports for Fast Refresh
-export { SurveyProvider };
+// Export the context for direct import if needed
+export { SurveyContext };

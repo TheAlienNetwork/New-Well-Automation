@@ -37,6 +37,8 @@ export interface SurveyData {
   wellName?: string; // Added for well information
   rigName?: string; // Added for rig information
   wellId?: string; // Added to track which well this survey belongs to
+  doglegSeverity?: number; // Added for dogleg severity calculation
+  buildRate?: number; // Added for build rate calculation
 }
 
 interface SurveyPopupProps {

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { OppSupportButton } from "@/components/dashboard/OppSupportButton";
 
 const DirectionalPage = () => {
   // Get survey data from context
@@ -645,6 +646,7 @@ const DirectionalPage = () => {
       return (
         <div className="min-h-screen bg-gray-950 text-gray-200">
           <Navbar />
+          <OppSupportButton />
           <StatusBar />
           <div className="container mx-auto px-4 py-6">
             {/* WITS Connection Status */}
@@ -660,21 +662,7 @@ const DirectionalPage = () => {
             <div className="flex justify-between items-center mb-6">
               <h1 className="text-2xl font-bold">Directional Drilling</h1>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Export Data
-                </Button>
-                <Button
-                  variant="outline"
-                  className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
-                  onClick={() => setShowTargetInputs(!showTargetInputs)}
-                >
-                  <Settings className="h-4 w-4 mr-2" />
-                  Target Line
-                </Button>
+                {/* OppSupportButton moved to fixed position */}
               </div>
             </div>
 

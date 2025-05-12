@@ -57,6 +57,8 @@ import {
   calculateProjectedAzimuth,
 } from "@/utils/directionalCalculations";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { OppSupportButton } from "@/components/dashboard/OppSupportButton";
+import { NotificationCenter } from "@/components/dashboard/NotificationCenter";
 
 const SurveysPage = () => {
   const { witsData, isReceiving } = useWits();
@@ -901,6 +903,7 @@ const SurveysPage = () => {
       return (
         <div className="min-h-screen bg-gray-950 text-gray-200">
           <Navbar />
+          <OppSupportButton />
           <StatusBar
             wellName={wellInfo.wellName}
             sensorOffset={wellInfo.sensorOffset}
@@ -910,6 +913,7 @@ const SurveysPage = () => {
               <div className="flex justify-between items-center mb-4">
                 <h1 className="text-2xl font-bold">Survey Management</h1>
                 <div className="flex gap-2">
+                  <NotificationCenter />
                   <Button
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                     onClick={() => {

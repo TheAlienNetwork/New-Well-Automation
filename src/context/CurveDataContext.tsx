@@ -87,11 +87,7 @@ const CurveDataContext = createContext<CurveDataContextType | undefined>(
 export function CurveDataProvider({ children }: { children: ReactNode }) {
   const { surveys } = useSurveys();
   // Initialize with default values in case WitsContext is not available
-  const witsContext = useContext(
-    useWits
-      ? React.createContext({ witsData: {} })
-      : React.createContext({ witsData: {} }),
-  );
+  const witsContext = useWits ? useWits() : { witsData: {} };
   const witsData = witsContext?.witsData || {};
   const [config, setConfig] = useState<CurveDataConfig>(DEFAULT_CONFIG);
 

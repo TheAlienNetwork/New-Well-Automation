@@ -10,9 +10,6 @@ import OppSupportPage from "./pages/OppSupportPage";
 import ProfilePage from "./pages/ProfilePage";
 import DatabaseManagementPage from "./pages/DatabaseManagementPage";
 import routes from "tempo-routes";
-import { WitsProvider } from "./context/WitsContext";
-import { UserProvider } from "./context/UserContext";
-import { SurveyProvider } from "./context/SurveyContext";
 
 function App() {
   // Store the result of useRoutes in a variable instead of using it directly in JSX
@@ -21,33 +18,24 @@ function App() {
 
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <UserProvider>
-        <SurveyProvider>
-          <WitsProvider>
-            <>
-              {/* Render tempo routes first */}
-              {tempoRoutes}
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/surveys" element={<SurveysPage />} />
-                <Route path="/directional" element={<DirectionalPage />} />
-                <Route path="/torquedrag" element={<TorqueDragPage />} />
-                <Route path="/witsconfig" element={<WitsConfigPage />} />
-                <Route
-                  path="/parameters"
-                  element={<DrillingParametersPage />}
-                />
-                <Route path="/oppsupport" element={<OppSupportPage />} />
-                <Route path="/profile" element={<ProfilePage />} />
-                <Route path="/database" element={<DatabaseManagementPage />} />
-                {import.meta.env.VITE_TEMPO === "true" && (
-                  <Route path="/tempobook/*" />
-                )}
-              </Routes>
-            </>
-          </WitsProvider>
-        </SurveyProvider>
-      </UserProvider>
+      <>
+        {/* Render tempo routes first */}
+        {tempoRoutes}
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/surveys" element={<SurveysPage />} />
+          <Route path="/directional" element={<DirectionalPage />} />
+          <Route path="/torquedrag" element={<TorqueDragPage />} />
+          <Route path="/witsconfig" element={<WitsConfigPage />} />
+          <Route path="/parameters" element={<DrillingParametersPage />} />
+          <Route path="/oppsupport" element={<OppSupportPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/database" element={<DatabaseManagementPage />} />
+          {import.meta.env.VITE_TEMPO === "true" && (
+            <Route path="/tempobook/*" />
+          )}
+        </Routes>
+      </>
     </Suspense>
   );
 }
