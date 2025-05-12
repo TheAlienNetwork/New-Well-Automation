@@ -17,17 +17,21 @@ import {
   Area,
 } from "recharts";
 import { SurveyData } from "./SurveyPopup";
-import { Brain, Download, BarChart3, TrendingUp } from "lucide-react";
+import { Brain, Download, BarChart3, TrendingUp, Box } from "lucide-react";
 import { useSurveys } from "@/context/SurveyContext";
 
 interface SurveyAnalyticsProps {
   surveys?: SurveyData[];
   onExport?: () => void;
+  trajectory?: React.ReactNode;
+  gamma?: React.ReactNode;
 }
 
 const SurveyAnalytics = ({
   surveys: propSurveys,
   onExport = () => {},
+  trajectory,
+  gamma,
 }: SurveyAnalyticsProps) => {
   // Get surveys from context if not provided as props
   const { surveys: contextSurveys, exportSurveys } = useSurveys();
@@ -153,7 +157,7 @@ const SurveyAnalytics = ({
 
       <CardContent className="p-0 flex-grow flex flex-col">
         <Tabs defaultValue="trends" className="flex-grow flex flex-col">
-          <TabsList className="grid grid-cols-3 bg-gray-800/50 rounded-none border-b border-gray-800">
+          <TabsList className="grid grid-cols-5 bg-gray-800/50 rounded-none border-b border-gray-800">
             <TabsTrigger
               value="trends"
               className="data-[state=active]:bg-gray-900 data-[state=active]:text-cyan-400 py-2"
@@ -174,6 +178,20 @@ const SurveyAnalytics = ({
             >
               <Brain className="h-4 w-4 mr-2" />
               Quality Analysis
+            </TabsTrigger>
+            <TabsTrigger
+              value="trajectory"
+              className="data-[state=active]:bg-gray-900 data-[state=active]:text-cyan-400 py-2"
+            >
+              <TrendingUp className="h-4 w-4 mr-2" />
+              3D Trajectory
+            </TabsTrigger>
+            <TabsTrigger
+              value="gamma"
+              className="data-[state=active]:bg-gray-900 data-[state=active]:text-cyan-400 py-2"
+            >
+              <BarChart3 className="h-4 w-4 mr-2" />
+              Gamma Plot
             </TabsTrigger>
           </TabsList>
 
@@ -829,6 +847,36 @@ const SurveyAnalytics = ({
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value="trajectory"
+            className="flex-grow p-4 h-[600px] overflow-auto"
+          >
+            {trajectory ? (
+              trajectory
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-gray-500">
+                  3D trajectory visualization not available
+                </p>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value="gamma"
+            className="flex-grow p-4 h-[600px] overflow-auto"
+          >
+            {gamma ? (
+              gamma
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-gray-500">
+                  Gamma plot visualization not available
+                </p>
               </div>
             )}
           </TabsContent>

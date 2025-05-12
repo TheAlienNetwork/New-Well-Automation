@@ -8,6 +8,8 @@ import SurveyEmailSettings from "@/components/dashboard/SurveyEmailSettings";
 import SurveyImport from "@/components/dashboard/SurveyImport";
 import CurveDataWidget from "@/components/dashboard/CurveDataWidget";
 import WellInformationWidget from "@/components/dashboard/WellInformationWidget";
+import WellTrajectory3DInteractive from "@/components/dashboard/WellTrajectory3DInteractive";
+import GammaPlot from "@/components/dashboard/GammaPlot";
 import { SurveyData } from "@/components/dashboard/SurveyPopup";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +36,8 @@ import {
   XCircle,
   Info,
   Save,
+  BarChart3,
+  Box,
 } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
 import { useSurveys } from "@/context/SurveyContext";
@@ -993,6 +997,85 @@ const SurveysPage = () => {
                   <SurveyAnalytics
                     surveys={surveys}
                     onExport={handleExportSurveys}
+                    trajectory={
+                      <div className="bg-gray-900 border border-gray-800 rounded-md p-4 h-full">
+                        <WellTrajectory3DInteractive
+                          surveys={surveys.map((survey) => ({
+                            md: survey.bitDepth || 0,
+                            inc: survey.inclination || 0,
+                            az: survey.azimuth || 0,
+                            tvd: 0, // Will be calculated by the component
+                            ns: 0, // Will be calculated by the component
+                            ew: 0, // Will be calculated by the component
+                          }))}
+                          manualCurveData={{
+                            motorYield: latestSurvey
+                              ? calculateMotorYield(30, 2.0, 5)
+                              : null,
+                            doglegNeeded: latestSurvey
+                              ? calculateDoglegNeeded(
+                                  latestSurvey.inclination || 0,
+                                  latestSurvey.azimuth || 0,
+                                  35,
+                                  275,
+                                  100,
+                                )
+                              : null,
+                            slideSeen: latestSurvey
+                              ? calculateSlideSeen(
+                                  calculateMotorYield(30, 2.0, 5),
+                                  30,
+                                  typeof witsData?.rotaryRpm === "number"
+                                    ? witsData.rotaryRpm > 5
+                                    : false,
+                                )
+                              : null,
+                            slideAhead: latestSurvey
+                              ? calculateSlideAhead(
+                                  calculateMotorYield(30, 2.0, 5),
+                                  30,
+                                  5,
+                                  typeof witsData?.rotaryRpm === "number"
+                                    ? witsData.rotaryRpm > 5
+                                    : false,
+                                )
+                              : null,
+                            projectedInc: latestSurvey
+                              ? calculateProjectedInclination(
+                                  latestSurvey.inclination || 0,
+                                  2.5,
+                                  100,
+                                )
+                              : null,
+                            projectedAz: latestSurvey
+                              ? calculateProjectedAzimuth(
+                                  latestSurvey.azimuth || 0,
+                                  1.8,
+                                  100,
+                                )
+                              : null,
+                          }}
+                        />
+                      </div>
+                    }
+                    gamma={
+                      <div className="bg-gray-900 border border-gray-800 rounded-md p-4 h-full">
+                        <GammaPlot
+                          isRealtime={isReceiving}
+                          data={surveys.map((survey) => ({
+                            tvd: survey.measuredDepth || survey.bitDepth || 0,
+                            gamma: witsData.gamma || 50, // Use current gamma or default
+                          }))}
+                          onRefresh={() => {
+                            toast({
+                              title: "Gamma Plot Refreshed",
+                              description:
+                                "The gamma plot data has been refreshed.",
+                            });
+                          }}
+                        />
+                      </div>
+                    }
                   />
                 </div>
 

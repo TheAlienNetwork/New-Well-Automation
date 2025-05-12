@@ -11,6 +11,8 @@ import ControlPanel from "./dashboard/ControlPanel";
 import StatusBar from "./dashboard/StatusBar";
 import GammaPlot from "./dashboard/GammaPlot";
 import SurveyPopup, { SurveyData } from "./dashboard/SurveyPopup";
+import SurveyAnalytics from "./dashboard/SurveyAnalytics";
+import TorqueDragAnalysis from "./dashboard/TorqueDragAnalysis";
 import ParameterCard from "./dashboard/widgets/ParameterCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -360,7 +362,7 @@ const Home = () => {
           <div className="col-span-12 lg:col-span-6 flex flex-col gap-4">
             {/* Horizontal Decoder - Larger height */}
             <div className="w-[16px] h-[33px]"></div>
-            <div className="relative h-[-500px-] h-[-450px-] h-[475px] h-[-450px-] bottom-[3.00rem]">
+            <div className="relative h-[-500px-] h-[-450px-] h-[425px] h-[-450px-] bottom-[3.00rem]">
               <HorizontalDecoder
                 isLive={isRecording && isReceiving}
                 noiseLevel={noiseFilterLevel}
@@ -369,23 +371,28 @@ const Home = () => {
                 onNoiseFilterChange={handleNoiseFilterChange}
               />
               <Button
-                className="absolute top-2 right-2 bg-blue-600 hover:bg-blue-700 text-white text-xs py-1 px-2 h-auto left-auto"
+                className="absolute top-2 left-1/2 transform -translate-x-1/2 z-10"
                 onClick={toggleReplayStand}
               >
                 Replay Stand
               </Button>
             </div>
-            {/* Gamma Plot */}
-            <div className="h-[600px]">
-              <GammaPlot className="h-[400px]" />
+            {/* Survey Analytics with all tabs (including Gamma Plot and 3D Trajectory) */}
+            <div className="h-[1800px]">
+              <SurveyAnalytics className="h-[600px]" />
             </div>
           </div>
 
           {/* Right column */}
           <div className="col-span-12 lg:col-span-3 flex flex-col gap-4 h-[-1604px-]">
-            {/* AI Analytics - Made larger */}
-            <div className="w-[360] h-[-1100px-] h-[-2000px-] h-[-1700px-] h-[-1700px-] h-[1700px]">
-              <AIAnalytics className="h-[700px]" />
+            {/* Torque & Drag Analysis */}
+            <div className="w-[360] h-[1100px] mb-4">
+              <TorqueDragAnalysis className="h-full" />
+            </div>
+
+            {/* AI Analytics */}
+            <div className="w-[360] h-[700px]">
+              <AIAnalytics className="h-full" />
             </div>
           </div>
         </div>
