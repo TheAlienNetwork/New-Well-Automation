@@ -10,6 +10,7 @@ import AIAnalytics from "./dashboard/AIAnalytics";
 import ControlPanel from "./dashboard/ControlPanel";
 import StatusBar from "./dashboard/StatusBar";
 import GammaPlot from "./dashboard/GammaPlot";
+import WellTrajectory3DInteractive from "./dashboard/WellTrajectory3DInteractive";
 import SurveyPopup, { SurveyData } from "./dashboard/SurveyPopup";
 import SurveyAnalytics from "./dashboard/SurveyAnalytics";
 import TorqueDragAnalysis from "./dashboard/TorqueDragAnalysis";
@@ -379,7 +380,11 @@ const Home = () => {
             </div>
             {/* Survey Analytics with all tabs (including Gamma Plot and 3D Trajectory) */}
             <div className="h-[1800px]">
-              <SurveyAnalytics className="h-[600px]" />
+              <SurveyAnalytics
+                className="h-[600px]"
+                trajectory={<WellTrajectory3DInteractive />}
+                gamma={<GammaPlot />}
+              />
             </div>
           </div>
 

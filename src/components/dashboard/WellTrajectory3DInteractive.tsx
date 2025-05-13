@@ -258,6 +258,7 @@ const WellTrajectory3DInteractive = ({
             const targetY = (surveys[newIndex].tvd * scale2D) / 100;
             setPan2D((prev) => ({ ...prev, y: -targetY + 200 }));
           }
+          // In 3D mode, the camera adjustment is handled by the useEffect that watches currentSurveyIndex
         }
       } else if (e.key === "ArrowDown") {
         if (surveys.length > 0) {
@@ -273,6 +274,7 @@ const WellTrajectory3DInteractive = ({
             const targetY = (surveys[newIndex].tvd * scale2D) / 100;
             setPan2D((prev) => ({ ...prev, y: -targetY + 200 }));
           }
+          // In 3D mode, the camera adjustment is handled by the useEffect that watches currentSurveyIndex
         }
       }
     };
@@ -512,6 +514,14 @@ const WellTrajectory3DInteractive = ({
     const centerY = canvas.height / 3; // Position higher to show more downward trajectory
     const scale = Math.min(canvas.width, canvas.height) * 0.2 * zoom;
 
+    // Add a subtle visual indicator that the camera is following the current point
+    if (currentSurveyIndex > 0 && surveys.length > 0) {
+      ctx.fillStyle = "rgba(0, 170, 255, 0.05)";
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 100, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.strokeStyle = "#2a4a6a";
     ctx.lineWidth = 1;
 
@@ -709,9 +719,19 @@ const WellTrajectory3DInteractive = ({
           rotation,
         );
 
+        // Add a pulsing glow effect to the current point
+        const pulseSize = 6 + Math.sin(Date.now() / 200) * 2;
+
+        // Outer glow
+        ctx.fillStyle = "rgba(0, 255, 170, 0.3)";
+        ctx.beginPath();
+        ctx.arc(currentPoint.x, currentPoint.y, pulseSize + 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner point
         ctx.fillStyle = "#00ffaa";
         ctx.beginPath();
-        ctx.arc(currentPoint.x, currentPoint.y, 6, 0, Math.PI * 2);
+        ctx.arc(currentPoint.x, currentPoint.y, pulseSize, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.fillStyle = "#ffffff";
@@ -776,20 +796,40 @@ const WellTrajectory3DInteractive = ({
       surveys.length > 0 &&
       currentSurveyIndex < surveys.length
     ) {
-      // In 3D mode, we adjust the rotation to keep the current point in view
-      // This is a simplified approach - a more sophisticated one would calculate the ideal rotation
+      // In 3D mode, we adjust the rotation and zoom to keep the current point centered in view
       const currentPoint = surveys[currentSurveyIndex];
       if (currentPoint) {
-        // Adjust rotation based on the current survey point's position
-        // This creates a subtle camera movement to follow the trajectory
-        const azRad = (currentPoint.az * Math.PI) / 180;
-        const incRad = (currentPoint.inc * Math.PI) / 180;
+        // Calculate the direction vector from the previous point to the current point
+        const prevIndex = Math.max(0, currentSurveyIndex - 1);
+        const prevPoint = surveys[prevIndex];
 
-        // Smooth transition to a rotation that shows the current point well
-        setRotation((prev) => ({
-          x: prev.x * 0.8 + incRad * 0.1 * 0.2,
-          y: prev.y * 0.8 + azRad * 0.1 * 0.2,
-        }));
+        // Calculate direction vector components
+        const dx = currentPoint.ew - prevPoint.ew;
+        const dy = currentPoint.tvd - prevPoint.tvd;
+        const dz = currentPoint.ns - prevPoint.ns;
+
+        // Calculate the azimuth and inclination based on the direction vector
+        const directionMagnitude = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (directionMagnitude > 0) {
+          // Calculate ideal camera rotation to look at the current point
+          // This is a more sophisticated approach that calculates the ideal viewing angle
+          const azRad = Math.atan2(dx, dz);
+          const incRad = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+
+          // Apply smooth transition to the new rotation
+          setRotation((prev) => ({
+            x: prev.x * 0.7 + incRad * 0.3,
+            y: prev.y * 0.7 + azRad * 0.3,
+          }));
+
+          // Adjust zoom based on depth to maintain perspective
+          const depthFactor = Math.min(
+            1.5,
+            Math.max(0.8, currentPoint.tvd / 5000),
+          );
+          setZoom((prev) => prev * 0.9 + depthFactor * 0.1);
+        }
       }
     }
   }, [currentSurveyIndex, surveys, viewMode]);
