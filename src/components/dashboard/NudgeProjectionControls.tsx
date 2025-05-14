@@ -418,15 +418,24 @@ export const NudgeProjectionControls = ({
               {/* Center point */}
               <div className="absolute inset-[46%] rounded-full bg-gray-600"></div>
 
-              {/* Tool face indicator - now centered properly */}
-              <div
-                className="absolute h-0.5 w-[48%] bg-gradient-to-r from-purple-500/90 to-purple-400 transform-gpu"
-                style={{
-                  transform: `translateX(50%) rotate(${toolFace}deg)`,
-                  transformOrigin: "center",
-                }}
-              >
-                <div className="absolute right-0 h-3 w-3 rounded-full bg-purple-400 transform -translate-y-1/2 shadow-[0_0_8px_rgba(168,85,247,0.8)]"></div>
+              {/* Tool face indicator - static line with rotating dot */}
+              <div className="absolute top-1/2 left-1/2 w-full h-0.5 -translate-x-1/2 -translate-y-1/2">
+                {/* Static line from center to edge */}
+                <div className="absolute top-0 left-0 w-1/2 h-0.5 bg-gray-600"></div>
+
+                {/* Rotating dot at the edge */}
+                <div
+                  className="absolute top-1/2 left-1/2 h-0 w-0"
+                  style={{
+                    transform: `rotate(${toolFace}deg)`,
+                    transformOrigin: "center",
+                  }}
+                >
+                  <div
+                    className="absolute h-3 w-3 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.8)]"
+                    style={{ right: "-1.5px", top: "-6px" }}
+                  ></div>
+                </div>
               </div>
 
               <div className="h-5 w-5 rounded-full bg-gray-800/80 border border-gray-700/50 flex items-center justify-center z-10">

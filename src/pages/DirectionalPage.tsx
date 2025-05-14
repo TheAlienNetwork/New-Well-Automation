@@ -7,12 +7,14 @@ import WellTrajectory3DInteractive from "@/components/dashboard/WellTrajectory3D
 import AIAnalytics from "@/components/dashboard/AIAnalytics";
 import SurveyTable from "@/components/dashboard/SurveyTable";
 import NudgeProjectionControls from "@/components/dashboard/NudgeProjectionControls";
+import TargetLineStatusWidget from "@/components/dashboard/TargetLineStatusWidget";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSurveys } from "@/context/SurveyContext";
 import { useWits } from "@/context/WitsContext";
+import { useCurveData } from "@/hooks/useCurveData";
 import { SurveyData } from "@/components/dashboard/SurveyPopup";
 import {
   Layers,
@@ -22,16 +24,27 @@ import {
   ArrowUp,
   Activity,
   AlertTriangle,
+  Target,
 } from "lucide-react";
 
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { OppSupportButton } from "@/components/dashboard/OppSupportButton";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 
 const DirectionalPage = () => {
   // Get survey data from context
   const { surveys } = useSurveys();
   // Get WITS data
   const { isConnected, isReceiving, witsData } = useWits();
+  // Get curve data from context
+  const { curveData, updateManualInput } = useCurveData();
 
   // Get the latest survey for calculations
   const [latestSurvey, setLatestSurvey] = useState<SurveyData | null>(null);
@@ -119,44 +132,7 @@ const DirectionalPage = () => {
   const [targetLineUpdated, setTargetLineUpdated] = useState(false);
   const [aboveBelow, setAboveBelow] = useState(0);
   const [leftRight, setLeftRight] = useState(0);
-
-  // State for manual curve data values
-  const [manualSlideSeen, setManualSlideSeen] = useState<number | null>(null);
-  const [manualSlideAhead, setManualSlideAhead] = useState<number | null>(null);
-  const [manualMotorYield, setManualMotorYield] = useState<number | null>(null);
-  const [manualDoglegNeeded, setManualDoglegNeeded] = useState<number | null>(
-    null,
-  );
-  const [manualProjectedInc, setManualProjectedInc] = useState<number | null>(
-    null,
-  );
-  const [manualProjectedAz, setManualProjectedAz] = useState<number | null>(
-    null,
-  );
-
-  // Create a single object with all manual curve data values for easier passing to components
-  const manualCurveData = {
-    slideSeen: manualSlideSeen,
-    slideAhead: manualSlideAhead,
-    motorYield: manualMotorYield,
-    doglegNeeded: manualDoglegNeeded,
-    projectedInc: manualProjectedInc,
-    projectedAz: manualProjectedAz,
-  };
-
-  // Default empty arrays for trajectory data
-  const [offsetWells, setOffsetWells] = useState([
-    {
-      name: "Alpha-122",
-      color: "#ff0088",
-      surveys: [],
-    },
-    {
-      name: "Alpha-124",
-      color: "#00ff88",
-      surveys: [],
-    },
-  ]);
+  const [distanceToTarget, setDistanceToTarget] = useState(0);
 
   // Calculate dogleg needed based on target line and current position
   const calculateDoglegNeeded = () => {
@@ -294,6 +270,51 @@ const DirectionalPage = () => {
     } catch (error) {
       console.error("Error calculating dogleg needed:", error);
       return 3.2; // Default value
+    }
+  };
+
+  // Handle target line input form
+  const handleTargetLineSubmit = () => {
+    setTargetLineUpdated(true);
+    setShowTargetInputs(false);
+    calculateTargetLine();
+  };
+
+  // Calculate target line metrics
+  const calculateTargetLine = () => {
+    try {
+      if (!latestSurvey) return;
+
+      // Calculate current position
+      const incRad = (latestSurvey.inclination * Math.PI) / 180;
+      const azRad = (latestSurvey.azimuth * Math.PI) / 180;
+      const targetAzRad = (targetAzimuth * Math.PI) / 180;
+
+      const currentTVD = latestSurvey.bitDepth * Math.cos(incRad);
+      const horizontalDistance = latestSurvey.bitDepth * Math.sin(incRad);
+
+      // Calculate above/below (vertical difference)
+      const aboveBelow = targetTVD - currentTVD;
+      setAboveBelow(aboveBelow);
+
+      // Calculate left/right (horizontal difference)
+      const currentNS = horizontalDistance * Math.cos(azRad);
+      const currentEW = horizontalDistance * Math.sin(azRad);
+      const targetNS = targetVS * Math.cos(targetAzRad);
+      const targetEW = targetVS * Math.sin(targetAzRad);
+
+      const leftRight = Math.sqrt(
+        Math.pow(targetNS - currentNS, 2) + Math.pow(targetEW - currentEW, 2),
+      );
+      setLeftRight(leftRight);
+
+      // Calculate total distance to target
+      const totalDistance = Math.sqrt(
+        Math.pow(aboveBelow, 2) + Math.pow(leftRight, 2),
+      );
+      setDistanceToTarget(totalDistance);
+    } catch (error) {
+      console.error("Error calculating target line:", error);
     }
   };
 
@@ -455,6 +476,17 @@ const DirectionalPage = () => {
       }
 
       setLeftRight(leftRight);
+
+      // Calculate total distance to target
+      const totalDistance = Math.sqrt(
+        Math.pow(aboveBelow, 2) + Math.pow(leftRight, 2),
+      );
+      if (isNaN(totalDistance) || !isFinite(totalDistance)) {
+        console.error("Invalid distance to target calculation:", totalDistance);
+        return;
+      }
+
+      setDistanceToTarget(totalDistance);
     } catch (error) {
       console.error("Error calculating target line metrics:", error);
       // Don't update state on error to keep previous valid values
@@ -662,161 +694,118 @@ const DirectionalPage = () => {
             <div className="flex justify-between items-center mb-6">
               <h1 className="text-2xl font-bold">Directional Drilling</h1>
               <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                  onClick={() => setShowTargetInputs(true)}
+                >
+                  <Target className="h-4 w-4 mr-2" />
+                  Set Target Line
+                </Button>
                 {/* OppSupportButton moved to fixed position */}
               </div>
             </div>
 
-            {showTargetInputs && (
-              <div className="mb-6 p-4 bg-gray-900 border border-gray-800 rounded-md">
-                <h2 className="text-lg font-medium text-gray-200 mb-4">
-                  Target Line Settings
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-sm text-gray-400">
-                      Target TVD (ft)
-                    </label>
-                    <div className="flex">
-                      <input
+            {/* Target Line Input Dialog */}
+            <Dialog open={showTargetInputs} onOpenChange={setShowTargetInputs}>
+              <DialogContent className="bg-gray-900 border-gray-800 text-gray-300">
+                <DialogHeader>
+                  <DialogTitle className="text-gray-200">
+                    Set Target Line Parameters
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="targetTVD"
+                        className="text-sm font-medium text-gray-400"
+                      >
+                        Target TVD (ft)
+                      </label>
+                      <Input
+                        id="targetTVD"
                         type="number"
                         value={targetTVD}
                         onChange={(e) =>
-                          setTargetTVD(parseFloat(e.target.value))
+                          setTargetTVD(parseFloat(e.target.value) || 0)
                         }
-                        className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                        className="bg-gray-800 border-gray-700 text-gray-200"
                       />
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm text-gray-400">
-                      Target VS (ft)
-                    </label>
-                    <div className="flex">
-                      <input
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="targetVS"
+                        className="text-sm font-medium text-gray-400"
+                      >
+                        Target VS (ft)
+                      </label>
+                      <Input
+                        id="targetVS"
                         type="number"
                         value={targetVS}
                         onChange={(e) =>
-                          setTargetVS(parseFloat(e.target.value))
+                          setTargetVS(parseFloat(e.target.value) || 0)
                         }
-                        className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                        className="bg-gray-800 border-gray-700 text-gray-200"
                       />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm text-gray-400">
-                      Target Inclination (°)
-                    </label>
-                    <div className="flex">
-                      <input
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="targetInclination"
+                        className="text-sm font-medium text-gray-400"
+                      >
+                        Target Inclination (°)
+                      </label>
+                      <Input
+                        id="targetInclination"
                         type="number"
                         value={targetInclination}
                         onChange={(e) =>
-                          setTargetInclination(parseFloat(e.target.value))
+                          setTargetInclination(parseFloat(e.target.value) || 0)
                         }
-                        className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                        className="bg-gray-800 border-gray-700 text-gray-200"
                       />
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm text-gray-400">
-                      Target Azimuth (°)
-                    </label>
-                    <div className="flex">
-                      <input
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="targetAzimuth"
+                        className="text-sm font-medium text-gray-400"
+                      >
+                        Target Azimuth (°)
+                      </label>
+                      <Input
+                        id="targetAzimuth"
                         type="number"
                         value={targetAzimuth}
                         onChange={(e) =>
-                          setTargetAzimuth(parseFloat(e.target.value))
+                          setTargetAzimuth(parseFloat(e.target.value) || 0)
                         }
-                        className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-gray-200"
+                        className="bg-gray-800 border-gray-700 text-gray-200"
                       />
                     </div>
                   </div>
-                  <div className="flex justify-end mt-4">
-                    <Button
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                      onClick={() => {
-                        setTargetLineUpdated(true);
-                        setShowTargetInputs(false);
-                      }}
-                    >
-                      Update Target Line
-                    </Button>
-                  </div>
                 </div>
-                <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800 rounded-md">
-                  <div className="flex items-start gap-2">
-                    <svg
-                      className="h-5 w-5 text-blue-400 mt-0.5"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <path d="M12 16v-4"></path>
-                      <path d="M12 8h.01"></path>
-                    </svg>
-                    <div>
-                      <p className="text-sm text-gray-300">
-                        Target line settings will be used to calculate curve
-                        data and above/below/left/right values based on current
-                        surveys.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {targetLineUpdated && (
-              <div className="mb-6 p-4 bg-gray-900 border border-gray-800 rounded-md">
-                <h2 className="text-lg font-medium text-gray-200 mb-4">
-                  Target Line Status
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
-                    <div className="text-sm text-gray-400 mb-1">
-                      Above/Below
-                    </div>
-                    <div
-                      className={`text-xl font-bold ${aboveBelow > 0 ? "text-red-400" : "text-green-400"}`}
-                    >
-                      {aboveBelow > 0 ? "Below" : "Above"}{" "}
-                      {Math.abs(aboveBelow).toFixed(1)} ft
-                    </div>
-                  </div>
-                  <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
-                    <div className="text-sm text-gray-400 mb-1">Left/Right</div>
-                    <div className="text-xl font-bold text-yellow-400">
-                      {leftRight.toFixed(1)} ft
-                    </div>
-                  </div>
-                  <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
-                    <div className="text-sm text-gray-400 mb-1">
-                      Distance to Target
-                    </div>
-                    <div className="text-xl font-bold text-blue-400">
-                      {Math.sqrt(
-                        aboveBelow * aboveBelow + leftRight * leftRight,
-                      ).toFixed(1)}{" "}
-                      ft
-                    </div>
-                  </div>
-                  <div className="p-3 bg-gray-800/50 rounded-md border border-gray-700">
-                    <div className="text-sm text-gray-400 mb-1">
-                      Dogleg Needed
-                    </div>
-                    <div className="text-xl font-bold text-purple-400">
-                      {calculateDoglegNeeded().toFixed(2)}°/100ft
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowTargetInputs(false)}
+                    className="bg-gray-800 border-gray-700 hover:bg-gray-700 text-gray-300"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleTargetLineSubmit}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    Apply
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Left Column */}
@@ -829,72 +818,6 @@ const DirectionalPage = () => {
                 {/* Curve Data Widget */}
                 <div className="h-[250px]">
                   <CurveDataWidget
-                    motorYield={
-                      manualMotorYield !== null
-                        ? manualMotorYield
-                        : latestSurvey &&
-                            typeof latestSurvey.inclination === "number"
-                          ? calculateMotorYield(30, 2.0, 5)
-                          : getParameterValue(witsData.motorYield)
-                    }
-                    doglegNeeded={
-                      manualDoglegNeeded !== null
-                        ? manualDoglegNeeded
-                        : calculateDoglegNeeded()
-                    }
-                    slideSeen={
-                      manualSlideSeen !== null
-                        ? manualSlideSeen
-                        : latestSurvey &&
-                            typeof latestSurvey.inclination === "number"
-                          ? calculateSlideSeen(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : getParameterValue(witsData.slideSeen)
-                    }
-                    slideAhead={
-                      manualSlideAhead !== null
-                        ? manualSlideAhead
-                        : latestSurvey &&
-                            typeof latestSurvey.inclination === "number"
-                          ? calculateSlideAhead(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              5,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : getParameterValue(witsData.slideAhead)
-                    }
-                    projectedInc={
-                      manualProjectedInc !== null
-                        ? manualProjectedInc
-                        : latestSurvey &&
-                            typeof latestSurvey.inclination === "number"
-                          ? calculateProjectedInclination(
-                              latestSurvey.inclination,
-                              2.5,
-                              100,
-                            )
-                          : targetInclination
-                    }
-                    projectedAz={
-                      manualProjectedAz !== null
-                        ? manualProjectedAz
-                        : latestSurvey &&
-                            typeof latestSurvey.azimuth === "number"
-                          ? calculateProjectedAzimuth(
-                              latestSurvey.azimuth,
-                              1.8,
-                              100,
-                            )
-                          : targetAzimuth
-                    }
                     isRealtime={isConnected && isReceiving}
                     slideDistance={30}
                     bendAngle={2.0}
@@ -902,84 +825,25 @@ const DirectionalPage = () => {
                     targetInc={targetInclination}
                     targetAz={targetAzimuth}
                     distance={100}
-                    onSlideSeenChange={(value) => setManualSlideSeen(value)}
-                    onSlideAheadChange={(value) => setManualSlideAhead(value)}
-                    onMotorYieldChange={(value) => setManualMotorYield(value)}
+                    onSlideSeenChange={(value) =>
+                      updateManualInput("slideSeen", value)
+                    }
+                    onSlideAheadChange={(value) =>
+                      updateManualInput("slideAhead", value)
+                    }
+                    onMotorYieldChange={(value) =>
+                      updateManualInput("motorYield", value)
+                    }
                     onDoglegNeededChange={(value) =>
-                      setManualDoglegNeeded(value)
+                      updateManualInput("doglegNeeded", value)
                     }
                     onProjectedIncChange={(value) =>
-                      setManualProjectedInc(value)
+                      updateManualInput("projectedInc", value)
                     }
-                    onProjectedAzChange={(value) => setManualProjectedAz(value)}
+                    onProjectedAzChange={(value) =>
+                      updateManualInput("projectedAz", value)
+                    }
                   />
-                  {/* Add debug logging to help identify data discrepancies */}
-                  {console.log("DirectionalPage - CurveDataWidget props:", {
-                    motorYield:
-                      latestSurvey &&
-                      typeof latestSurvey.inclination === "number"
-                        ? calculateMotorYield(30, 2.0, 5)
-                        : getParameterValue(witsData.motorYield),
-                    doglegNeeded: calculateDoglegNeeded(),
-                    slideSeen:
-                      manualSlideSeen !== null
-                        ? manualSlideSeen
-                        : latestSurvey &&
-                            typeof latestSurvey.inclination === "number"
-                          ? calculateSlideSeen(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : getParameterValue(witsData.slideSeen),
-                    slideAhead:
-                      manualSlideAhead !== null
-                        ? manualSlideAhead
-                        : latestSurvey &&
-                            typeof latestSurvey.inclination === "number"
-                          ? calculateSlideAhead(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              5,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : getParameterValue(witsData.slideAhead),
-                    projectedInc:
-                      latestSurvey &&
-                      typeof latestSurvey.inclination === "number"
-                        ? calculateProjectedInclination(
-                            latestSurvey.inclination,
-                            2.5,
-                            100,
-                          )
-                        : targetInclination,
-                    projectedAz:
-                      latestSurvey && typeof latestSurvey.azimuth === "number"
-                        ? calculateProjectedAzimuth(
-                            latestSurvey.azimuth,
-                            1.8,
-                            100,
-                          )
-                        : targetAzimuth,
-                    isRealtime: isConnected && isReceiving,
-                    rotaryRpm: witsData?.rotaryRpm,
-                    isRotating:
-                      typeof witsData?.rotaryRpm === "number"
-                        ? witsData.rotaryRpm > 5
-                        : false,
-                    latestSurveyData: latestSurvey
-                      ? {
-                          inclination: latestSurvey.inclination,
-                          azimuth: latestSurvey.azimuth,
-                        }
-                      : null,
-                    manualSlideSeen,
-                    manualSlideAhead,
-                  })}
                 </div>
 
                 {/* Directional Metrics */}
@@ -1123,17 +987,54 @@ const DirectionalPage = () => {
 
               {/* Middle Column */}
               <div className="lg:col-span-2 space-y-6">
+                {/* Target Line Status Widget */}
+                {targetLineUpdated && (
+                  <div className="h-[200px]">
+                    <TargetLineStatusWidget
+                      aboveBelow={aboveBelow}
+                      leftRight={leftRight}
+                      distanceToTarget={distanceToTarget}
+                      doglegNeeded={calculateDoglegNeeded()}
+                      targetAzimuth={targetAzimuth}
+                      targetInclination={targetInclination}
+                      isRealtime={isConnected && isReceiving}
+                      wellInfo={{
+                        wellName: "Current Well",
+                        rigName: "Current Rig",
+                      }}
+                    />
+                  </div>
+                )}
+
                 {/* 3D Trajectory */}
-                <div className="h-[900px] bg-gray-900 border border-gray-800 rounded-md overflow-hidden">
+                <div className="h-[700px] bg-gray-900 border border-gray-800 rounded-md overflow-hidden">
                   <ErrorBoundary>
                     <WellTrajectory3DInteractive
                       trajectoryData={trajectoryData}
-                      offsetWells={offsetWells}
+                      offsetWells={[
+                        {
+                          name: "Alpha-122",
+                          color: "#ff0088",
+                          surveys: [],
+                        },
+                        {
+                          name: "Alpha-124",
+                          color: "#00ff88",
+                          surveys: [],
+                        },
+                      ]}
                       targetTVD={targetTVD}
                       targetVS={targetVS}
                       targetAzimuth={targetAzimuth}
                       showTargetLine={targetLineUpdated}
-                      manualCurveData={manualCurveData}
+                      manualCurveData={{
+                        motorYield: curveData.motorYield,
+                        doglegNeeded: curveData.doglegNeeded,
+                        slideSeen: curveData.slideSeen,
+                        slideAhead: curveData.slideAhead,
+                        projectedInc: curveData.projectedInc,
+                        projectedAz: curveData.projectedAz,
+                      }}
                     />
                   </ErrorBoundary>
                 </div>
@@ -1145,7 +1046,14 @@ const DirectionalPage = () => {
                     isReceiving={isReceiving}
                     witsData={witsData}
                     surveys={surveys}
-                    manualCurveData={manualCurveData}
+                    manualCurveData={{
+                      motorYield: curveData.motorYield,
+                      doglegNeeded: curveData.doglegNeeded,
+                      slideSeen: curveData.slideSeen,
+                      slideAhead: curveData.slideAhead,
+                      projectedInc: curveData.projectedInc,
+                      projectedAz: curveData.projectedAz,
+                    }}
                   />
                 </div>
               </div>

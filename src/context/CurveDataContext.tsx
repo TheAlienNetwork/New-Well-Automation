@@ -14,6 +14,8 @@ import {
   calculateSlideAhead,
   calculateProjectedInclination,
   calculateProjectedAzimuth,
+  calculateBuildRate,
+  calculateTurnRate,
 } from "@/utils/directionalCalculations";
 
 interface CurveDataConfig {
@@ -52,17 +54,23 @@ export interface CurveData {
 interface CurveDataContextType {
   curveData: CurveData;
   manualInputs: {
-    motorYield: number;
+    motorYield: number | null;
+    doglegNeeded: number | null;
+    slideSeen: number | null;
+    slideAhead: number | null;
+    projectedInc: number | null;
+    projectedAz: number | null;
     buildRate: number;
     turnRate: number;
     slideDistance: number;
     bitToBendDistance: number;
     bendAngle: number;
   };
-  updateManualInput: (field: string, value: number) => void;
+  updateManualInput: (field: string, value: number | null) => void;
   isRotating: boolean;
   config: CurveDataConfig;
   updateConfig: (newConfig: Partial<CurveDataConfig>) => void;
+  latestSurveyData: any;
 }
 
 const DEFAULT_CONFIG: CurveDataConfig = {
@@ -86,10 +94,10 @@ const CurveDataContext = createContext<CurveDataContextType | undefined>(
 
 export function CurveDataProvider({ children }: { children: ReactNode }) {
   const { surveys } = useSurveys();
-  // Initialize with default values in case WitsContext is not available
-  const witsContext = useWits ? useWits() : { witsData: {} };
+  const witsContext = useWits();
   const witsData = witsContext?.witsData || {};
   const [config, setConfig] = useState<CurveDataConfig>(DEFAULT_CONFIG);
+  const [latestSurveyData, setLatestSurveyData] = useState<any>(null);
 
   // State for calculated curve data
   const [curveData, setCurveData] = useState<CurveData>({
@@ -112,7 +120,12 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
 
   // State for manual inputs
   const [manualInputs, setManualInputs] = useState({
-    motorYield: 2.5,
+    motorYield: null as number | null,
+    doglegNeeded: null as number | null,
+    slideSeen: null as number | null,
+    slideAhead: null as number | null,
+    projectedInc: null as number | null,
+    projectedAz: null as number | null,
     buildRate: 2.5,
     turnRate: 1.8,
     slideDistance: 30,
@@ -127,6 +140,60 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
   const [rawIsRotating, setRawIsRotating] = useState(false);
   const [debouncedIsRotating, setDebouncedIsRotating] = useState(false);
 
+  // Get the latest survey data when surveys change
+  useEffect(() => {
+    try {
+      if (surveys && Array.isArray(surveys) && surveys.length > 0) {
+        // Sort surveys by timestamp (newest first)
+        const sortedSurveys = [...surveys].sort((a, b) => {
+          try {
+            return (
+              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            );
+          } catch (dateError) {
+            console.error("Error comparing survey dates:", dateError);
+            return 0; // Return 0 if date comparison fails
+          }
+        });
+
+        // Validate the survey data before setting it
+        const latestSurvey = sortedSurveys[0];
+        if (latestSurvey && typeof latestSurvey === "object") {
+          // Log when a new latest survey is detected
+          console.log("CurveDataContext: New latest survey detected", {
+            id: latestSurvey.id,
+            timestamp: latestSurvey.timestamp,
+            inclination: latestSurvey.inclination,
+            azimuth: latestSurvey.azimuth,
+          });
+
+          setLatestSurveyData(latestSurvey);
+
+          // Take the most recent surveys for moving average
+          setRecentSurveys(
+            sortedSurveys.slice(0, config.movingAverageCount || 3),
+          );
+        } else {
+          console.warn(
+            "CurveDataContext: No valid survey found in sorted surveys",
+          );
+          setLatestSurveyData(null);
+        }
+      } else {
+        console.log(
+          "CurveDataContext: No surveys available or surveys is not an array",
+        );
+        setLatestSurveyData(null);
+      }
+    } catch (error) {
+      console.error(
+        "Error updating latest survey data in CurveDataContext:",
+        error,
+      );
+      setLatestSurveyData(null);
+    }
+  }, [surveys, config.movingAverageCount]);
+
   // Debounce the rotation state
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -135,21 +202,6 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
 
     return () => clearTimeout(timer);
   }, [rawIsRotating, config.debounceMs]);
-
-  // Update recent surveys when surveys change
-  useEffect(() => {
-    if (surveys && surveys.length > 0) {
-      // Sort surveys by timestamp (newest first)
-      const sortedSurveys = [...surveys].sort(
-        (a, b) =>
-          new Date(b.timestamp || 0).getTime() -
-          new Date(a.timestamp || 0).getTime(),
-      );
-
-      // Take the most recent surveys for moving average
-      setRecentSurveys(sortedSurveys.slice(0, config.movingAverageCount || 3));
-    }
-  }, [surveys, config.movingAverageCount]);
 
   // Calculate moving averages for build and turn rates
   const calculateMovingAverages = () => {
@@ -207,13 +259,11 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
     const calculateCurveData = async () => {
       try {
         // Get current inclination and azimuth from survey or WITS data with validation
-        const latestSurvey = recentSurveys[0] || {};
-
         const currentInc =
-          typeof latestSurvey?.inclination === "number" &&
-          !isNaN(latestSurvey.inclination) &&
-          isFinite(latestSurvey.inclination)
-            ? latestSurvey.inclination
+          typeof latestSurveyData?.inclination === "number" &&
+          !isNaN(latestSurveyData.inclination) &&
+          isFinite(latestSurveyData.inclination)
+            ? latestSurveyData.inclination
             : typeof witsData?.inclination === "number" &&
                 !isNaN(witsData.inclination) &&
                 isFinite(witsData.inclination)
@@ -221,10 +271,10 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
               : 0;
 
         const currentAz =
-          typeof latestSurvey?.azimuth === "number" &&
-          !isNaN(latestSurvey.azimuth) &&
-          isFinite(latestSurvey.azimuth)
-            ? latestSurvey.azimuth
+          typeof latestSurveyData?.azimuth === "number" &&
+          !isNaN(latestSurveyData.azimuth) &&
+          isFinite(latestSurveyData.azimuth)
+            ? latestSurveyData.azimuth
             : typeof witsData?.azimuth === "number" &&
                 !isNaN(witsData.azimuth) &&
                 isFinite(witsData.azimuth)
@@ -253,10 +303,11 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
         const targetAz = curveData.targetAz;
 
         // Calculate motor yield using the most appropriate method
-        let motorYield = manualInputs.motorYield;
+        let motorYield =
+          manualInputs.motorYield !== null ? manualInputs.motorYield : 2.5;
 
         // Try to calculate from survey data if we have two recent surveys
-        if (recentSurveys.length >= 2) {
+        if (recentSurveys.length >= 2 && manualInputs.motorYield === null) {
           const current = recentSurveys[0];
           const previous = recentSurveys[1];
 
@@ -292,8 +343,8 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // If we couldn't calculate from survey data, try legacy calculation
-        if (motorYield === manualInputs.motorYield) {
+        // If we couldn't calculate from survey data and no manual input, try legacy calculation
+        if (manualInputs.motorYield === null && motorYield === 2.5) {
           const legacyMotorYield = calculateMotorYield(
             undefined,
             undefined,
@@ -314,43 +365,54 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // Calculate slide seen
-        const slideSeen = calculateSlideSeen(
-          motorYield,
-          slideDistance,
-          debouncedIsRotating, // Use debounced rotation state
-        );
+        // Calculate dogleg needed or use manual value
+        const doglegNeeded =
+          manualInputs.doglegNeeded !== null
+            ? manualInputs.doglegNeeded
+            : calculateDoglegNeeded(
+                currentInc,
+                currentAz,
+                targetInc,
+                targetAz,
+                targetDistance,
+              );
 
-        // Calculate slide ahead
-        const slideAhead = calculateSlideAhead(
-          motorYield,
-          slideDistance,
-          bitToBendDistance,
-          debouncedIsRotating, // Use debounced rotation state
-        );
+        // Calculate slide seen or use manual value
+        const slideSeen =
+          manualInputs.slideSeen !== null
+            ? manualInputs.slideSeen
+            : calculateSlideSeen(
+                motorYield,
+                slideDistance,
+                debouncedIsRotating, // Use debounced rotation state
+              );
 
-        // Calculate projected inclination
-        const projectedInc = calculateProjectedInclination(
-          currentInc,
-          buildRate,
-          targetDistance,
-        );
+        // Calculate slide ahead or use manual value
+        const slideAhead =
+          manualInputs.slideAhead !== null
+            ? manualInputs.slideAhead
+            : calculateSlideAhead(
+                motorYield,
+                slideDistance,
+                bitToBendDistance,
+                debouncedIsRotating, // Use debounced rotation state
+              );
 
-        // Calculate projected azimuth
-        const projectedAz = calculateProjectedAzimuth(
-          currentAz,
-          turnRate,
-          targetDistance,
-        );
+        // Calculate projected inclination or use manual value
+        const projectedInc =
+          manualInputs.projectedInc !== null
+            ? manualInputs.projectedInc
+            : calculateProjectedInclination(
+                currentInc,
+                buildRate,
+                targetDistance,
+              );
 
-        // Calculate dogleg needed
-        const doglegNeeded = calculateDoglegNeeded(
-          currentInc,
-          currentAz,
-          targetInc,
-          targetAz,
-          targetDistance,
-        );
+        // Calculate projected azimuth or use manual value
+        const projectedAz =
+          manualInputs.projectedAz !== null
+            ? manualInputs.projectedAz
+            : calculateProjectedAzimuth(currentAz, turnRate, targetDistance);
 
         // Update the calculated curve data
         setCurveData({
@@ -376,10 +438,28 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
     };
 
     calculateCurveData();
-  }, [witsData, recentSurveys, debouncedIsRotating, manualInputs, config]);
+  }, [
+    witsData,
+    latestSurveyData,
+    recentSurveys,
+    debouncedIsRotating,
+    manualInputs,
+    config,
+    curveData.targetDistance,
+    curveData.targetInc,
+    curveData.targetAz,
+  ]);
 
   // Function to update manual inputs with validation
-  const updateManualInput = (field: string, value: number) => {
+  const updateManualInput = (field: string, value: number | null) => {
+    if (value === null) {
+      setManualInputs((prev) => ({
+        ...prev,
+        [field]: null,
+      }));
+      return;
+    }
+
     const constraints =
       config.manualInputConstraints || DEFAULT_CONFIG.manualInputConstraints;
     const fieldConstraints = constraints?.[field as keyof typeof constraints];
@@ -424,6 +504,7 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
         isRotating: debouncedIsRotating,
         config,
         updateConfig,
+        latestSurveyData,
       }}
     >
       {children}

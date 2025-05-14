@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useSurveys } from "@/context/SurveyContext";
 import { useWits } from "@/context/WitsContext";
+import { useCurveData } from "@/hooks/useCurveData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -55,11 +56,13 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
   isRealtime: propIsRealtime,
   wellInfo,
 }) => {
+  // Use the shared curve data context
+  const { curveData: contextCurveData } = useCurveData();
   const { surveys } = useSurveys();
   const { witsData, isReceiving } = useWits();
   const [latestSurvey, setLatestSurvey] = useState<any>(null);
 
-  // Get the latest survey data
+  // Get the latest survey for calculations
   useEffect(() => {
     try {
       if (surveys && Array.isArray(surveys) && surveys.length > 0) {
@@ -370,6 +373,14 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
       );
     }
   }
+
+  // Use props if provided, otherwise use context values
+  const displayMotorYield = motorYield ?? contextCurveData.motorYield;
+  const displayDoglegNeeded = doglegNeeded ?? contextCurveData.doglegNeeded;
+  const displaySlideSeen = slideSeen ?? contextCurveData.slideSeen;
+  const displaySlideAhead = slideAhead ?? contextCurveData.slideAhead;
+  const displayProjectedInc = projectedInc ?? contextCurveData.projectedInc;
+  const displayProjectedAz = projectedAz ?? contextCurveData.projectedAz;
 
   const slideSeen = safeCalculate(
     calculateSlideSeen,
@@ -705,7 +716,7 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
             <div>
               <p className="text-xs text-gray-500">Motor Yield</p>
               <p className="text-sm font-medium text-cyan-400">
-                {motorYield.toFixed(2)}°/100ft
+                {displayMotorYield.toFixed(2)}°/100ft
               </p>
             </div>
           </div>
@@ -718,7 +729,7 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
             <div>
               <p className="text-xs text-gray-500">Dogleg Needed</p>
               <p className="text-sm font-medium text-yellow-400">
-                {doglegNeeded.toFixed(2)}°/100ft
+                {displayDoglegNeeded.toFixed(2)}°/100ft
               </p>
             </div>
           </div>
@@ -731,7 +742,7 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
             <div>
               <p className="text-xs text-gray-500">Slide Seen</p>
               <p className="text-sm font-medium text-green-400">
-                {slideSeen.toFixed(2)}°
+                {displaySlideSeen.toFixed(2)}°
               </p>
             </div>
           </div>
@@ -744,7 +755,7 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
             <div>
               <p className="text-xs text-gray-500">Slide Ahead</p>
               <p className="text-sm font-medium text-blue-400">
-                {slideAhead.toFixed(2)}°
+                {displaySlideAhead.toFixed(2)}°
               </p>
             </div>
           </div>
@@ -757,7 +768,7 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
             <div>
               <p className="text-xs text-gray-500">Proj. Inc</p>
               <p className="text-sm font-medium text-purple-400">
-                {projectedInc.toFixed(2)}°
+                {displayProjectedInc.toFixed(2)}°
               </p>
             </div>
           </div>
@@ -767,11 +778,62 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
             <div className="h-8 w-8 rounded-full bg-orange-900/30 flex items-center justify-center">
               <Compass className="h-4 w-4 text-orange-400" />
             </div>
-            <div>
-              <p className="text-xs text-gray-500">Proj. Az</p>
-              <p className="text-sm font-medium text-orange-400">
-                {projectedAz.toFixed(2)}°
-              </p>
+            <div className="flex-grow">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">Proj. Az</p>
+                {manualEditMode && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() =>
+                            setIsEditingProjectedAz(!isEditingProjectedAz)
+                          }
+                          className="ml-1 p-1 rounded-full hover:bg-gray-700/50"
+                        >
+                          <Edit className="h-3 w-3 text-gray-500" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="text-xs">Edit projected azimuth value</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
+              {manualEditMode && isEditingProjectedAz ? (
+                <Input
+                  type="number"
+                  value={manualProjectedAz}
+                  onChange={(e) => setManualProjectedAz(e.target.value)}
+                  className="h-6 text-sm font-medium text-orange-400 bg-gray-800 border-gray-700 w-full"
+                  placeholder={displayProjectedAz.toFixed(2)}
+                  onBlur={() => {
+                    if (manualProjectedAz === "") {
+                      setIsEditingProjectedAz(false);
+                    } else {
+                      const parsedValue = parseFloat(manualProjectedAz);
+                      if (!isNaN(parsedValue) && isFinite(parsedValue)) {
+                        updateManualInput("projectedAz", parsedValue);
+                        setIsEditingProjectedAz(false);
+                      }
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const parsedValue = parseFloat(manualProjectedAz);
+                      if (!isNaN(parsedValue) && isFinite(parsedValue)) {
+                        updateManualInput("projectedAz", parsedValue);
+                        setIsEditingProjectedAz(false);
+                      }
+                    }
+                  }}
+                />
+              ) : (
+                <p className="text-sm font-medium text-orange-400">
+                  {displayProjectedAz.toFixed(2)}°
+                </p>
+              )}
             </div>
           </div>
 

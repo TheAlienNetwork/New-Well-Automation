@@ -602,7 +602,7 @@ const SurveyPopup = ({
           </TabsContent>
         </Tabs>
 
-        <DialogFooter className="mt-6">
+        <DialogFooter className="mt-4 pt-2 border-t border-gray-800">
           <Button
             variant="outline"
             onClick={onClose}

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Compass, Ruler, ArrowUp, RotateCw, Zap, Edit } from "lucide-react";
 import { useWits } from "@/context/WitsContext";
 import { useSurveys } from "@/context/SurveyContext";
+import { useCurveData } from "@/context/CurveDataContext";
 import { Input } from "@/components/ui/input";
 import {
   Tooltip,
@@ -72,7 +73,12 @@ const CurveDataWidget = ({
 }: CurveDataWidgetProps) => {
   const { isReceiving, witsData } = useWits();
   const { surveys } = useSurveys();
-  const [latestSurveyData, setLatestSurveyData] = useState<any>(null);
+  const {
+    curveData: contextCurveData,
+    manualInputs,
+    updateManualInput,
+    latestSurveyData,
+  } = useCurveData();
 
   // State for manual input values
   const [manualSlideSeen, setManualSlideSeen] = useState<string>(
@@ -107,383 +113,16 @@ const CurveDataWidget = ({
   const [isEditingProjectedAz, setIsEditingProjectedAz] =
     useState<boolean>(false);
 
-  // Get the latest survey data when surveys change
-  useEffect(() => {
-    try {
-      if (surveys && Array.isArray(surveys) && surveys.length > 0) {
-        // Sort surveys by timestamp (newest first)
-        const sortedSurveys = [...surveys].sort((a, b) => {
-          try {
-            return (
-              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-            );
-          } catch (dateError) {
-            console.error("Error comparing survey dates:", dateError);
-            return 0; // Return 0 if date comparison fails
-          }
-        });
-
-        // Validate the survey data before setting it
-        const latestSurvey = sortedSurveys[0];
-        if (latestSurvey && typeof latestSurvey === "object") {
-          // Log when a new latest survey is detected
-          console.log("CurveDataWidget: New latest survey detected", {
-            id: latestSurvey.id,
-            timestamp: latestSurvey.timestamp,
-            inclination: latestSurvey.inclination,
-            azimuth: latestSurvey.azimuth,
-          });
-
-          setLatestSurveyData(latestSurvey);
-        } else {
-          console.warn(
-            "CurveDataWidget: No valid survey found in sorted surveys",
-          );
-          setLatestSurveyData(null);
-        }
-      } else {
-        console.log(
-          "CurveDataWidget: No surveys available or surveys is not an array",
-        );
-        setLatestSurveyData(null);
-      }
-    } catch (error) {
-      console.error(
-        "Error updating latest survey data in CurveDataWidget:",
-        error,
-      );
-      setLatestSurveyData(null);
-    }
-  }, [surveys]);
-
-  // Calculate values using directional calculation functions
-  const calculateValues = () => {
-    try {
-      // Always prioritize the latest survey data for calculations
-      // Ensure we have valid numeric values with explicit type checking
-      const currentInc =
-        typeof latestSurveyData?.inclination === "number" &&
-        !isNaN(latestSurveyData.inclination) &&
-        isFinite(latestSurveyData.inclination)
-          ? latestSurveyData.inclination
-          : typeof witsData?.inclination === "number" &&
-              !isNaN(witsData.inclination) &&
-              isFinite(witsData.inclination)
-            ? witsData.inclination
-            : 0;
-
-      const currentAz =
-        typeof latestSurveyData?.azimuth === "number" &&
-        !isNaN(latestSurveyData.azimuth) &&
-        isFinite(latestSurveyData.azimuth)
-          ? latestSurveyData.azimuth
-          : typeof witsData?.azimuth === "number" &&
-              !isNaN(witsData.azimuth) &&
-              isFinite(witsData.azimuth)
-            ? witsData.azimuth
-            : 0;
-
-      // Log the source of the data for debugging
-      console.log("CurveDataWidget calculation using:", {
-        incSource:
-          typeof latestSurveyData?.inclination === "number" ? "survey" : "wits",
-        azSource:
-          typeof latestSurveyData?.azimuth === "number" ? "survey" : "wits",
-        currentInc,
-        currentAz,
-      });
-
-      // Get previous survey for calculations if available
-      const getPreviousSurvey = () => {
-        try {
-          if (surveys && Array.isArray(surveys) && surveys.length > 1) {
-            // Sort surveys by timestamp (newest first)
-            const sortedSurveys = [...surveys].sort((a, b) => {
-              try {
-                return (
-                  new Date(b.timestamp).getTime() -
-                  new Date(a.timestamp).getTime()
-                );
-              } catch (dateError) {
-                console.error("Error sorting survey timestamps:", dateError);
-                return 0;
-              }
-            });
-
-            // Return the second survey (previous to latest)
-            return sortedSurveys[1];
-          }
-          return null;
-        } catch (error) {
-          console.error("Error getting previous survey:", error);
-          return null;
-        }
-      };
-
-      const previousSurvey = getPreviousSurvey();
-
-      // Calculate motor yield using survey data if available
-      let calculatedMotorYield = 0;
-      if (previousSurvey && latestSurveyData) {
-        const prevInc = previousSurvey.inclination;
-        const prevDepth =
-          previousSurvey.measuredDepth || previousSurvey.bitDepth;
-        const currentDepth =
-          latestSurveyData.measuredDepth || latestSurveyData.bitDepth;
-
-        if (
-          typeof prevInc === "number" &&
-          typeof currentInc === "number" &&
-          typeof prevDepth === "number" &&
-          typeof currentDepth === "number"
-        ) {
-          const bitToBitDistance = Math.abs(currentDepth - prevDepth);
-          calculatedMotorYield = calculateMotorYield(
-            currentInc,
-            prevInc,
-            bitToBitDistance,
-          );
-
-          console.log(
-            "CurveDataWidget - Motor yield calculation from surveys:",
-            {
-              currentInc,
-              prevInc,
-              bitToBitDistance,
-              result: calculatedMotorYield,
-            },
-          );
-        } else {
-          // Fallback to legacy calculation
-          calculatedMotorYield = calculateMotorYield(
-            undefined,
-            undefined,
-            undefined,
-            slideDistance,
-            bendAngle,
-            bitToBendDistance,
-          );
-
-          console.log("CurveDataWidget - Motor yield legacy calculation:", {
-            slideDistance,
-            bendAngle,
-            bitToBendDistance,
-            result: calculatedMotorYield,
-          });
-        }
-      } else {
-        // Fallback to legacy calculation
-        calculatedMotorYield = calculateMotorYield(
-          undefined,
-          undefined,
-          undefined,
-          slideDistance,
-          bendAngle,
-          bitToBendDistance,
-        );
-
-        console.log("CurveDataWidget - Motor yield legacy calculation:", {
-          slideDistance,
-          bendAngle,
-          bitToBendDistance,
-          result: calculatedMotorYield,
-        });
-      }
-
-      // Calculate build and turn rates if we have survey data
-      let buildRate = 2.5; // Default value
-      let turnRate = 1.8; // Default value
-
-      if (previousSurvey && latestSurveyData) {
-        const prevInc = previousSurvey.inclination;
-        const prevAz = previousSurvey.azimuth;
-        const prevDepth =
-          previousSurvey.measuredDepth || previousSurvey.bitDepth;
-        const currentDepth =
-          latestSurveyData.measuredDepth || latestSurveyData.bitDepth;
-
-        if (
-          typeof prevInc === "number" &&
-          typeof currentInc === "number" &&
-          typeof prevAz === "number" &&
-          typeof currentAz === "number" &&
-          typeof prevDepth === "number" &&
-          typeof currentDepth === "number"
-        ) {
-          buildRate = calculateBuildRate(
-            prevInc,
-            currentInc,
-            prevDepth,
-            currentDepth,
-          );
-
-          turnRate = calculateTurnRate(
-            prevAz,
-            currentAz,
-            prevDepth,
-            currentDepth,
-          );
-
-          console.log("CurveDataWidget - Build and turn rate calculations:", {
-            prevInc,
-            currentInc,
-            prevAz,
-            currentAz,
-            prevDepth,
-            currentDepth,
-            buildRate,
-            turnRate,
-          });
-        }
-      }
-
-      // Determine if the tool is rotating based on rotary RPM
-      // If rotary RPM is above a threshold (e.g., 5 RPM), consider it rotating
-      const rotationThreshold = 5; // RPM threshold for rotation
-      const isRotating =
-        typeof witsData?.rotaryRpm === "number"
-          ? witsData.rotaryRpm > rotationThreshold
-          : false;
-
-      console.log("Rotation status:", {
-        rotaryRpm: witsData?.rotaryRpm,
-        isRotating,
-        source: "CurveDataWidget calculation",
-      });
-
-      // Calculate slide seen with rotation status
-      const calculatedSlideSeen = calculateSlideSeen(
-        calculatedMotorYield,
-        slideDistance,
-        isRotating,
-      );
-
-      // Use manual slide seen value if available and valid
-      let finalSlideSeen = calculatedSlideSeen;
-      if (manualSlideSeen !== "") {
-        const parsedSlideSeen = parseFloat(manualSlideSeen);
-        if (!isNaN(parsedSlideSeen) && isFinite(parsedSlideSeen)) {
-          finalSlideSeen = parsedSlideSeen;
-          // Notify parent component of the change if callback is provided
-          if (onSlideSeenChange) {
-            onSlideSeenChange(parsedSlideSeen);
-          }
-        }
-      }
-
-      console.log("CurveDataWidget - Slide seen calculation:", {
-        motorYield: calculatedMotorYield,
-        slideDistance,
-        isRotating,
-        calculatedValue: calculatedSlideSeen,
-        manualValue: manualSlideSeen,
-        finalValue: finalSlideSeen,
-      });
-
-      // Calculate slide ahead with rotation status
-      const calculatedSlideAhead = calculateSlideAhead(
-        calculatedMotorYield,
-        slideDistance,
-        bitToBendDistance,
-        isRotating,
-      );
-
-      // Use manual slide ahead value if available and valid
-      let finalSlideAhead = calculatedSlideAhead;
-      if (manualSlideAhead !== "") {
-        const parsedSlideAhead = parseFloat(manualSlideAhead);
-        if (!isNaN(parsedSlideAhead) && isFinite(parsedSlideAhead)) {
-          finalSlideAhead = parsedSlideAhead;
-          // Notify parent component of the change if callback is provided
-          if (onSlideAheadChange) {
-            onSlideAheadChange(parsedSlideAhead);
-          }
-        }
-      }
-
-      console.log("CurveDataWidget - Slide ahead calculation:", {
-        motorYield: calculatedMotorYield,
-        slideDistance,
-        bitToBendDistance,
-        isRotating,
-        calculatedValue: calculatedSlideAhead,
-        manualValue: manualSlideAhead,
-        finalValue: finalSlideAhead,
-      });
-
-      // Calculate projected inclination using build rate
-      const calculatedProjectedInc = calculateProjectedInclination(
-        currentInc,
-        buildRate,
-        distance,
-      );
-
-      console.log("CurveDataWidget - Projected inclination calculation:", {
-        currentInc,
-        buildRate,
-        distance,
-        result: calculatedProjectedInc,
-      });
-
-      // Calculate projected azimuth
-      const calculatedProjectedAz = calculateProjectedAzimuth(
-        currentAz,
-        turnRate,
-        distance,
-      );
-
-      console.log("CurveDataWidget - Projected azimuth calculation:", {
-        currentAz,
-        turnRate,
-        distance,
-        result: calculatedProjectedAz,
-      });
-
-      // Calculate dogleg needed
-      const calculatedDoglegNeeded = calculateDoglegNeeded(
-        currentInc,
-        currentAz,
-        targetInc,
-        targetAz,
-        distance,
-      );
-
-      console.log("CurveDataWidget - Dogleg needed calculation:", {
-        currentInc,
-        currentAz,
-        targetInc,
-        targetAz,
-        distance,
-        result: calculatedDoglegNeeded,
-      });
-
-      return {
-        motorYield: calculatedMotorYield,
-        slideSeen: finalSlideSeen,
-        slideAhead: finalSlideAhead,
-        projectedInc: calculatedProjectedInc,
-        projectedAz: calculatedProjectedAz,
-        doglegNeeded: calculatedDoglegNeeded,
-        // Include the rotation status so it can be used elsewhere
-        isRotating,
-      };
-    } catch (error) {
-      console.error("Error calculating values in CurveDataWidget:", error);
-      // Return default values if calculation fails
-      return {
-        motorYield: 0,
-        slideSeen: 0,
-        slideAhead: 0,
-        projectedInc: 0,
-        projectedAz: 0,
-        doglegNeeded: 0,
-        isRotating: false,
-      };
-    }
+  // Use values from context instead of calculating them locally
+  const calculatedValues = {
+    motorYield: contextCurveData.motorYield,
+    slideSeen: contextCurveData.slideSeen,
+    slideAhead: contextCurveData.slideAhead,
+    projectedInc: contextCurveData.projectedInc,
+    projectedAz: contextCurveData.projectedAz,
+    doglegNeeded: contextCurveData.doglegNeeded,
+    isRotating: contextCurveData.isRotating,
   };
-
-  // Get calculated values - recalculate on every render to ensure latest data is used
-  const calculatedValues = calculateValues();
 
   // Use props first, then calculated values, regardless of connection status
   // This ensures values are always displayed and updated correctly
@@ -510,25 +149,31 @@ const CurveDataWidget = ({
   // Extract rotation status from calculated values
   const isRotating = calculatedValues.isRotating;
 
-  // Update manual input fields when props change
+  // Update manual input fields when props change and sync with context
   useEffect(() => {
     if (propMotorYield !== undefined) {
       setManualMotorYield(propMotorYield.toString());
+      updateManualInput("motorYield", propMotorYield);
     }
     if (propDoglegNeeded !== undefined) {
       setManualDoglegNeeded(propDoglegNeeded.toString());
+      updateManualInput("doglegNeeded", propDoglegNeeded);
     }
     if (propSlideSeen !== undefined) {
       setManualSlideSeen(propSlideSeen.toString());
+      updateManualInput("slideSeen", propSlideSeen);
     }
     if (propSlideAhead !== undefined) {
       setManualSlideAhead(propSlideAhead.toString());
+      updateManualInput("slideAhead", propSlideAhead);
     }
     if (propProjectedInc !== undefined) {
       setManualProjectedInc(propProjectedInc.toString());
+      updateManualInput("projectedInc", propProjectedInc);
     }
     if (propProjectedAz !== undefined) {
       setManualProjectedAz(propProjectedAz.toString());
+      updateManualInput("projectedAz", propProjectedAz);
     }
   }, [
     propMotorYield,
@@ -537,6 +182,7 @@ const CurveDataWidget = ({
     propSlideAhead,
     propProjectedInc,
     propProjectedAz,
+    updateManualInput,
   ]);
 
   // Log the values for debugging
@@ -637,6 +283,7 @@ const CurveDataWidget = ({
                         onMotorYieldChange
                       ) {
                         onMotorYieldChange(parsedValue);
+                        updateManualInput("motorYield", parsedValue);
                       }
                     }
                   }}
@@ -650,6 +297,7 @@ const CurveDataWidget = ({
                         onMotorYieldChange
                       ) {
                         onMotorYieldChange(parsedValue);
+                        updateManualInput("motorYield", parsedValue);
                       }
                     }
                   }}
@@ -705,6 +353,7 @@ const CurveDataWidget = ({
                         onDoglegNeededChange
                       ) {
                         onDoglegNeededChange(parsedValue);
+                        updateManualInput("doglegNeeded", parsedValue);
                       }
                     }
                   }}
@@ -718,6 +367,7 @@ const CurveDataWidget = ({
                         onDoglegNeededChange
                       ) {
                         onDoglegNeededChange(parsedValue);
+                        updateManualInput("doglegNeeded", parsedValue);
                       }
                     }
                   }}
@@ -773,6 +423,7 @@ const CurveDataWidget = ({
                         onSlideSeenChange
                       ) {
                         onSlideSeenChange(parsedValue);
+                        updateManualInput("slideSeen", parsedValue);
                       }
                     }
                   }}
@@ -786,6 +437,7 @@ const CurveDataWidget = ({
                         onSlideSeenChange
                       ) {
                         onSlideSeenChange(parsedValue);
+                        updateManualInput("slideSeen", parsedValue);
                       }
                     }
                   }}
@@ -841,6 +493,7 @@ const CurveDataWidget = ({
                         onSlideAheadChange
                       ) {
                         onSlideAheadChange(parsedValue);
+                        updateManualInput("slideAhead", parsedValue);
                       }
                     }
                   }}
@@ -854,6 +507,7 @@ const CurveDataWidget = ({
                         onSlideAheadChange
                       ) {
                         onSlideAheadChange(parsedValue);
+                        updateManualInput("slideAhead", parsedValue);
                       }
                     }
                   }}
@@ -911,6 +565,7 @@ const CurveDataWidget = ({
                         onProjectedIncChange
                       ) {
                         onProjectedIncChange(parsedValue);
+                        updateManualInput("projectedInc", parsedValue);
                       }
                     }
                   }}
@@ -924,6 +579,7 @@ const CurveDataWidget = ({
                         onProjectedIncChange
                       ) {
                         onProjectedIncChange(parsedValue);
+                        updateManualInput("projectedInc", parsedValue);
                       }
                     }
                   }}
@@ -979,6 +635,7 @@ const CurveDataWidget = ({
                         onProjectedAzChange
                       ) {
                         onProjectedAzChange(parsedValue);
+                        updateManualInput("projectedAz", parsedValue);
                       }
                     }
                   }}
@@ -992,6 +649,7 @@ const CurveDataWidget = ({
                         onProjectedAzChange
                       ) {
                         onProjectedAzChange(parsedValue);
+                        updateManualInput("projectedAz", parsedValue);
                       }
                     }
                   }}

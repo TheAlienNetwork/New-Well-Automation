@@ -1109,69 +1109,6 @@ const SurveysPage = () => {
                   {/* Curve Data Widget */}
                   <div className="h-[250px]" data-testid="curve-data-container">
                     <CurveDataWidget
-                      motorYield={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateMotorYield(30, 2.0, 5)
-                          : 0
-                      }
-                      doglegNeeded={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number" &&
-                        typeof latestSurvey.azimuth === "number"
-                          ? calculateDoglegNeeded(
-                              latestSurvey.inclination,
-                              latestSurvey.azimuth,
-                              35,
-                              275,
-                              100,
-                            )
-                          : 3.2
-                      }
-                      slideSeen={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateSlideSeen(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : 0
-                      }
-                      slideAhead={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateSlideAhead(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              5,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : 0
-                      }
-                      projectedInc={
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateProjectedInclination(
-                              latestSurvey.inclination,
-                              2.5,
-                              100,
-                            )
-                          : 0
-                      }
-                      projectedAz={
-                        latestSurvey && typeof latestSurvey.azimuth === "number"
-                          ? calculateProjectedAzimuth(
-                              latestSurvey.azimuth,
-                              1.8,
-                              100,
-                            )
-                          : 0
-                      }
                       isRealtime={isReceiving || false}
                       slideDistance={30}
                       bendAngle={2.0}
@@ -1180,79 +1117,29 @@ const SurveysPage = () => {
                       targetAz={275}
                       distance={100}
                       wellInfo={wellInfo}
+                      onSlideSeenChange={(value) =>
+                        console.log("Slide seen changed:", value)
+                      }
+                      onSlideAheadChange={(value) =>
+                        console.log("Slide ahead changed:", value)
+                      }
+                      onMotorYieldChange={(value) =>
+                        console.log("Motor yield changed:", value)
+                      }
+                      onDoglegNeededChange={(value) =>
+                        console.log("Dogleg needed changed:", value)
+                      }
+                      onProjectedIncChange={(value) =>
+                        console.log("Projected inc changed:", value)
+                      }
+                      onProjectedAzChange={(value) =>
+                        console.log("Projected az changed:", value)
+                      }
                     />
-                    {/* Add debug logging to help identify data discrepancies */}
-                    {console.log("SurveysPage - CurveDataWidget props:", {
-                      motorYield:
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateMotorYield(30, 2.0, 5)
-                          : 0,
-                      doglegNeeded:
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number" &&
-                        typeof latestSurvey.azimuth === "number"
-                          ? calculateDoglegNeeded(
-                              latestSurvey.inclination,
-                              latestSurvey.azimuth,
-                              35,
-                              275,
-                              100,
-                            )
-                          : 3.2,
-                      slideSeen:
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateSlideSeen(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : 0,
-                      slideAhead:
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateSlideAhead(
-                              calculateMotorYield(30, 2.0, 5),
-                              30,
-                              5,
-                              typeof witsData?.rotaryRpm === "number"
-                                ? witsData.rotaryRpm > 5
-                                : false,
-                            )
-                          : 0,
-                      projectedInc:
-                        latestSurvey &&
-                        typeof latestSurvey.inclination === "number"
-                          ? calculateProjectedInclination(
-                              latestSurvey.inclination,
-                              2.5,
-                              100,
-                            )
-                          : 0,
-                      projectedAz:
-                        latestSurvey && typeof latestSurvey.azimuth === "number"
-                          ? calculateProjectedAzimuth(
-                              latestSurvey.azimuth,
-                              1.8,
-                              100,
-                            )
-                          : 0,
-                      isRealtime: isReceiving || false,
-                      rotaryRpm: witsData?.rotaryRpm,
-                      isRotating:
-                        typeof witsData?.rotaryRpm === "number"
-                          ? witsData.rotaryRpm > 5
-                          : false,
-                      latestSurveyData: latestSurvey
-                        ? {
-                            inclination: latestSurvey.inclination,
-                            azimuth: latestSurvey.azimuth,
-                          }
-                        : null,
-                    })}
+                    {/* Using the shared context data instead of calculating locally */}
+                    {console.log(
+                      "SurveysPage - Using shared CurveData context",
+                    )}
                   </div>
                 </div>
               </div>
