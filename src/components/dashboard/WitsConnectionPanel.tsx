@@ -159,6 +159,17 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
         maxReconnectAttempts: 100, // Allow up to 100 reconnect attempts
       });
 
+      // Add a timeout to detect connection failures
+      const connectionTimeout = setTimeout(() => {
+        if (!isConnected) {
+          clearError();
+          clearError(
+            "Connection timed out. Please check server availability and network settings.",
+          );
+          console.error("WITS connection timeout");
+        }
+      }, 10000); // 10 second timeout
+
       // Connect with appropriate options
       try {
         if (witsProtocol === "serial") {
@@ -169,23 +180,48 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
             dataBits: 8,
             parity: "none",
             stopBits: 1,
-          });
+          })
+            .then(() => {
+              clearTimeout(connectionTimeout);
+            })
+            .catch(() => {
+              clearTimeout(connectionTimeout);
+            });
         } else if (witsProtocol === "tcp") {
           connect(witsHost, witsPort, witsProtocol, {
             // Add TCP-specific options
             delimiter: "\r\n", // Use CRLF for TCP
             keepAlive: true, // Enable TCP keepalive
             noDelay: true, // Disable Nagle's algorithm
-          });
+          })
+            .then(() => {
+              clearTimeout(connectionTimeout);
+            })
+            .catch(() => {
+              clearTimeout(connectionTimeout);
+            });
         } else if (witsProtocol === "udp") {
           connect(witsHost, witsPort, witsProtocol, {
             // Add UDP-specific options
             delimiter: "\n", // Use LF for UDP
-          });
+          })
+            .then(() => {
+              clearTimeout(connectionTimeout);
+            })
+            .catch(() => {
+              clearTimeout(connectionTimeout);
+            });
         } else {
-          connect(witsHost, witsPort, witsProtocol);
+          connect(witsHost, witsPort, witsProtocol)
+            .then(() => {
+              clearTimeout(connectionTimeout);
+            })
+            .catch(() => {
+              clearTimeout(connectionTimeout);
+            });
         }
       } catch (error) {
+        clearTimeout(connectionTimeout);
         clearError();
       }
     } else {
@@ -215,8 +251,25 @@ const WitsConnectionPanel: React.FC<WitsConnectionPanelProps> = ({
         autoConnect,
       });
 
+      // Add a timeout to detect connection failures
+      const connectionTimeout = setTimeout(() => {
+        if (!isConnected) {
+          clearError();
+          clearError(
+            "Connection timed out. Please check server availability and network settings.",
+          );
+          console.error("WITSML connection timeout");
+        }
+      }, 10000); // 10 second timeout
+
       // Connect to WITSML server
-      connect();
+      connect()
+        .then(() => {
+          clearTimeout(connectionTimeout);
+        })
+        .catch(() => {
+          clearTimeout(connectionTimeout);
+        });
     }
   };
 

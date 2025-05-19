@@ -282,6 +282,13 @@ class WitsConnection {
       const tcpHost = this.options.tcpHost || "localhost";
       const tcpPort = this.options.tcpPort || 5000;
 
+      // Validate TCP host and port before setting query parameters
+      if (!tcpHost || !tcpPort) {
+        console.error("Missing TCP host or port for proxy mode");
+        this.notifyErrorCallbacks("Missing TCP host or port for proxy mode");
+        throw new Error("Missing TCP host or port for proxy mode");
+      }
+
       queryParams.set("host", tcpHost);
       queryParams.set("port", String(tcpPort));
       // Add protocol type for proxy to know what kind of connection to make
@@ -573,7 +580,13 @@ class WitsConnection {
 
       case "serial":
         if (!this.SerialPort) {
-          throw new Error("SerialPort module not available");
+          console.error(
+            "SerialPort module not available. Cannot establish serial connection.",
+          );
+          this.notifyErrorCallbacks(
+            "SerialPort module not available. Please use TCP or WebSocket connection instead.",
+          );
+          return;
         }
 
         this.socket = new this.SerialPort(
@@ -902,12 +915,23 @@ class WitsConnection {
     this.connecting = false;
     this.notifyConnectionCallbacks(false);
 
+    let errorMessage: string | null = null;
+
     if (code === 1006) {
-      this.notifyErrorCallbacks("Connection closed abnormally");
+      errorMessage = "Connection closed abnormally";
+      // Add context for Electron proxy connections
+      if (this.options.isElectron && this.options.usingElectronProxy) {
+        errorMessage =
+          "Connection closed abnormally - Check Electron proxy status";
+      }
+      this.notifyErrorCallbacks(errorMessage);
     } else if (code !== 1000) {
-      this.notifyErrorCallbacks(
-        `Connection closed: ${reason || "Unknown reason"}`,
-      );
+      errorMessage = `Connection closed: ${reason || "Unknown reason"}`;
+      this.notifyErrorCallbacks(errorMessage);
+    }
+
+    if (errorMessage) {
+      this.lastError = errorMessage;
     }
 
     this.attemptReconnect();
@@ -1000,18 +1024,45 @@ class WitsConnection {
     this.reconnectAttempts++;
     const reconnectInterval = this.options.reconnectInterval || 10000;
 
-    // Use exponential backoff with a cap to avoid hammering the server
-    // but still maintain reasonable reconnection times
+    // Enhanced exponential backoff with improved jitter to prevent reconnection storms
     const baseInterval = reconnectInterval;
     const maxInterval = 60000; // Cap at 60 seconds
     const exponentialFactor = Math.min(
       Math.pow(1.5, Math.min(this.reconnectAttempts, 10) - 1),
       6,
     );
-    const adjustedInterval = Math.min(
-      baseInterval * exponentialFactor,
+
+    // Add jitter to prevent reconnection storms (±25% randomization)
+    const jitter = 0.75 + Math.random() * 0.5;
+
+    let adjustedInterval = Math.min(
+      baseInterval * exponentialFactor * jitter,
       maxInterval,
     );
+
+    // Implement circuit breaker pattern after multiple consecutive failures
+    const circuitBreakerThreshold = 20;
+    if (this.reconnectAttempts > circuitBreakerThreshold) {
+      console.log(
+        `Circuit breaker activated after ${this.reconnectAttempts} failed attempts`,
+      );
+      // Double the delay when circuit breaker is triggered to prevent resource exhaustion
+      adjustedInterval = Math.min(adjustedInterval * 2, 120000); // Cap at 2 minutes
+
+      // Log detailed error for monitoring systems
+      console.error({
+        type: "CIRCUIT_BREAKER_ACTIVATED",
+        reconnectAttempts: this.reconnectAttempts,
+        nextAttemptDelay: adjustedInterval,
+        connectionOptions: {
+          host: this.options.host,
+          port: this.options.port,
+          protocol: this.options.protocol,
+        },
+        lastError: this.lastError,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     console.log(
       `Scheduling reconnect attempt ${this.reconnectAttempts}/${maxAttempts} in ${adjustedInterval / 1000} seconds`,

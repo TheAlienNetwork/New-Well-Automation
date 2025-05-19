@@ -1,8 +1,9 @@
-import React, { useRef } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Mail } from "lucide-react";
+import { Copy, Mail, Check } from "lucide-react";
 import { useCurveData } from "@/context/CurveDataContext";
+import { useWits } from "@/context/WitsContext";
 import html2canvas from "html2canvas";
 import GammaPlot from "./GammaPlot";
 import TargetLineStatusWidget from "./TargetLineStatusWidget";
@@ -15,6 +16,7 @@ import {
   calculateProjectedAzimuth,
 } from "@/utils/directionalCalculations";
 import clsx from "clsx";
+import { useToast } from "@/components/ui/use-toast";
 
 interface SurveyEmailPreviewProps {
   emailSubject: string;
@@ -35,6 +37,8 @@ interface SurveyEmailPreviewProps {
     toolFace?: number;
     bitDepth?: number;
     measuredDepth?: number;
+    wellName?: string;
+    rigName?: string;
   };
   witsData?: {
     inclination?: number;
@@ -43,6 +47,8 @@ interface SurveyEmailPreviewProps {
     rotaryRpm?: number;
     gravity?: number;
     magneticField?: number;
+    gamma?: number;
+    tvd?: number;
   };
   slideDistance?: number;
   bendAngle?: number;
@@ -67,7 +73,53 @@ const SurveyEmailPreview = ({
   targetDistance = 100,
 }: SurveyEmailPreviewProps) => {
   // Get curve data from context
-  const { curveData: contextCurveData } = useCurveData();
+  const { manualInputs } = useCurveData();
+  const { witsData: liveWitsData } = useWits();
+  const { toast } = useToast();
+
+  // State for copy button
+  const [isCopying, setIsCopying] = useState(false);
+  // State for real-time gamma data toggle
+  const [isRealtimeGamma, setIsRealtimeGamma] = useState(false);
+
+  // Get real gamma data from context or use default data if not available
+  const [gammaData, setGammaData] = useState([
+    { tvd: 8000, gamma: 45 },
+    { tvd: 8010, gamma: 52 },
+    { tvd: 8020, gamma: 48 },
+    { tvd: 8030, gamma: 65 },
+    { tvd: 8040, gamma: 72 },
+    { tvd: 8050, gamma: 58 },
+    { tvd: 8060, gamma: 42 },
+    { tvd: 8070, gamma: 38 },
+    { tvd: 8080, gamma: 45 },
+    { tvd: 8090, gamma: 50 },
+  ]);
+
+  // Update gamma data when WITS data changes
+  useEffect(() => {
+    if (liveWitsData?.gamma && liveWitsData?.tvd) {
+      // Add new data point to the beginning of the array
+      setGammaData((prevData) => {
+        const newDataPoint = {
+          tvd: liveWitsData.tvd,
+          gamma: liveWitsData.gamma,
+        };
+        // Check if this is a new data point (avoid duplicates)
+        const isDuplicate = prevData.some(
+          (point) =>
+            point.tvd === newDataPoint.tvd &&
+            point.gamma === newDataPoint.gamma,
+        );
+
+        if (!isDuplicate) {
+          return [newDataPoint, ...prevData.slice(0, 9)]; // Keep only 10 points
+        }
+        return prevData;
+      });
+    }
+  }, [liveWitsData?.gamma, liveWitsData?.tvd]);
+
   const calculateCurveData = () => {
     try {
       // Use curveData from props if available, then context, otherwise calculate from survey/wits data
@@ -236,44 +288,74 @@ const SurveyEmailPreview = ({
   const copyToClipboard = async () => {
     if (emailPreviewRef.current) {
       try {
+        setIsCopying(true);
         const canvas = await html2canvas(emailPreviewRef.current);
         canvas.toBlob((blob) => {
           if (blob) {
-            navigator.clipboard.write([
-              new ClipboardItem({
-                "image/png": blob,
-              }),
-            ]);
-            alert("Email preview copied to clipboard!");
+            navigator.clipboard
+              .write([
+                new ClipboardItem({
+                  "image/png": blob,
+                }),
+              ])
+              .then(() => {
+                toast({
+                  title: "Success",
+                  description: "Email preview copied to clipboard!",
+                  variant: "default",
+                });
+                setTimeout(() => setIsCopying(false), 1500);
+              })
+              .catch((err) => {
+                console.error("Error copying to clipboard:", err);
+                toast({
+                  title: "Error",
+                  description: "Failed to copy to clipboard",
+                  variant: "destructive",
+                });
+                setIsCopying(false);
+              });
           }
         });
       } catch (error) {
         console.error("Error copying to clipboard:", error);
-        alert("Failed to copy to clipboard");
+        toast({
+          title: "Error",
+          description: "Failed to copy to clipboard",
+          variant: "destructive",
+        });
+        setIsCopying(false);
       }
     }
   };
 
   // Function to open email in Outlook
   const openInOutlook = () => {
-    const subject = encodeURIComponent(emailSubject);
-    const body = encodeURIComponent(emailBody.replace(/<[^>]*>/g, ""));
-    window.open(`mailto:?subject=${subject}&body=${body}`, "_blank");
-  };
+    try {
+      // Format the email body properly for Outlook
+      const plainTextBody = emailBody.replace(/<[^>]*>/g, "");
+      const formattedBody = encodeURIComponent(plainTextBody);
+      const formattedSubject = encodeURIComponent(emailSubject);
 
-  // Sample gamma data for the plot
-  const gammaData = [
-    { tvd: 8000, gamma: 45 },
-    { tvd: 8010, gamma: 52 },
-    { tvd: 8020, gamma: 48 },
-    { tvd: 8030, gamma: 65 },
-    { tvd: 8040, gamma: 72 },
-    { tvd: 8050, gamma: 58 },
-    { tvd: 8060, gamma: 42 },
-    { tvd: 8070, gamma: 38 },
-    { tvd: 8080, gamma: 45 },
-    { tvd: 8090, gamma: 50 },
-  ];
+      // Try to use the MS-Outlook protocol first (works better on Windows)
+      const outlookUrl = `ms-outlook:compose?subject=${formattedSubject}&body=${formattedBody}`;
+
+      // Open the URL
+      window.location.href = outlookUrl;
+
+      // Fallback to mailto if ms-outlook protocol fails
+      setTimeout(() => {
+        const mailtoUrl = `mailto:?subject=${formattedSubject}&body=${formattedBody}`;
+        window.open(mailtoUrl, "_blank");
+      }, 1000);
+    } catch (error) {
+      console.error("Error opening Outlook:", error);
+      // Fallback to standard mailto
+      const plainTextBody = emailBody.replace(/<[^>]*>/g, "");
+      const mailtoUrl = `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(plainTextBody)}`;
+      window.open(mailtoUrl, "_blank");
+    }
+  };
 
   // Target line data for the widget
   const targetLineData = {
@@ -281,6 +363,10 @@ const SurveyEmailPreview = ({
     leftRight: 8.7,
     distanceToTarget: 10.1,
   };
+
+  // Get well name from survey data or use default
+  const wellName = surveyData?.wellName || "Demo Well";
+  const rigName = surveyData?.rigName || "Demo Rig";
 
   return (
     <div>
@@ -290,9 +376,14 @@ const SurveyEmailPreview = ({
           size="sm"
           className="flex items-center gap-2"
           onClick={copyToClipboard}
+          disabled={isCopying}
         >
-          <Copy className="h-4 w-4" />
-          Copy to Clipboard
+          {isCopying ? (
+            <Check className="h-4 w-4 text-green-500" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
+          {isCopying ? "Copied!" : "Copy to Clipboard"}
         </Button>
         <Button
           variant="outline"
@@ -342,11 +433,32 @@ const SurveyEmailPreview = ({
 
           {/* Gamma Plot */}
           <div className="mt-4">
-            <h3 className="text-base font-semibold mb-3 text-gray-800 dark:text-white">
-              Gamma Ray Log
-            </h3>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-base font-semibold text-gray-800 dark:text-white">
+                Gamma Ray Log
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  Real-time data:
+                </span>
+                <button
+                  onClick={() => setIsRealtimeGamma(!isRealtimeGamma)}
+                  className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                    isRealtimeGamma
+                      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
+                      : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+                  }`}
+                >
+                  {isRealtimeGamma ? "ON" : "OFF"}
+                </button>
+              </div>
+            </div>
             <div className="h-[300px] bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden">
-              <GammaPlot data={gammaData} isRealtime={false} />
+              <GammaPlot
+                data={gammaData}
+                isRealtime={isRealtimeGamma}
+                className="h-[300px]"
+              />
             </div>
           </div>
 
@@ -365,8 +477,8 @@ const SurveyEmailPreview = ({
                 targetInclination={targetInc}
                 isRealtime={false}
                 wellInfo={{
-                  wellName: "Demo Well",
-                  rigName: "Demo Rig",
+                  wellName: wellName,
+                  rigName: rigName,
                 }}
               />
             </div>

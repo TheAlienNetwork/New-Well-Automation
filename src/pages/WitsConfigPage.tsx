@@ -832,8 +832,10 @@ const WitsConfigPage = () => {
     // Log the configuration being saved
     console.log("Saving WITS configuration:", updatedConfig);
     if (updatedConfig.proxyMode) {
+      const targetHost = updatedConfig.tcpHost || "localhost";
+      const targetPort = updatedConfig.tcpPort || 5000;
       console.log(
-        `WebSocket-to-TCP proxy enabled: ${updatedConfig.tcpHost}:${updatedConfig.tcpPort}`,
+        `WebSocket-to-TCP proxy enabled: ${targetHost}:${targetPort}`,
       );
     }
 

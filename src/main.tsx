@@ -12,7 +12,9 @@ import { WitsProvider } from "./context/WitsContext";
 
 TempoDevtools.init();
 
-const basename = import.meta.env.BASE_URL;
+// Use empty basename for Electron (file protocol) and BASE_URL for web
+const basename =
+  window.location.protocol === "file:" ? "" : import.meta.env.BASE_URL || "";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

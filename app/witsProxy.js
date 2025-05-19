@@ -102,6 +102,36 @@ const activeConnections = new Map();
 // Store TCP connections for multiplexing (multiple WebSocket clients can share a TCP connection)
 const tcpConnections = new Map(); // key: "host:port", value: { socket, clients: Set, buffer: string }
 
+// Create a circular buffer for data recovery
+class CircularBuffer {
+  constructor(maxSize = 1000) {
+    this.buffer = [];
+    this.maxSize = maxSize;
+  }
+
+  add(item) {
+    this.buffer.push(item);
+    if (this.buffer.length > this.maxSize) {
+      this.buffer.shift();
+    }
+  }
+
+  getAll() {
+    return [...this.buffer];
+  }
+
+  getLast(n = 1) {
+    return this.buffer.slice(-n);
+  }
+
+  clear() {
+    this.buffer = [];
+  }
+}
+
+// Store data buffers for each TCP connection
+const dataBuffers = new Map(); // key: "host:port", value: CircularBuffer
+
 // Status endpoint
 app.get("/status", (req, res) => {
   res.json({
@@ -242,6 +272,11 @@ wss.on("connection", (ws, req) => {
         clients: new Set([connectionId]),
         buffer: "",
       });
+
+      // Create a circular buffer for this connection
+      if (!dataBuffers.has(tcpKey)) {
+        dataBuffers.set(tcpKey, new CircularBuffer(1000));
+      }
     }
 
     tcpSocket.connect(tcpPort, tcpHost, () => {
@@ -367,6 +402,17 @@ wss.on("connection", (ws, req) => {
     // Process each complete record
     records.forEach((record) => {
       if (record.trim().length > 0) {
+        // Store record in circular buffer if multiplexing is enabled
+        if (config.enableMultiplexing) {
+          const tcpKey = `${tcpHost}:${tcpPort}`;
+          if (dataBuffers.has(tcpKey)) {
+            dataBuffers.get(tcpKey).add({
+              data: record,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+
         // Forward the record to the WebSocket client
         try {
           ws.send(record);

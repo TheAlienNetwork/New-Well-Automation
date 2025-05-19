@@ -152,10 +152,60 @@ const SurveyImport = ({ onImportSurveys }: SurveyImportProps) => {
             // Use the standard parser for other formats
             console.log("Using standard delimited file parser");
             try {
-              parsedSurveys = parseDelimitedFile(content);
-              console.log(
-                `Parsed ${parsedSurveys.length} surveys using parseDelimitedFile`,
-              );
+              // Check if the content has checkbox and timestamp columns
+              const lines = content.split("\n");
+              if (lines.length > 0) {
+                const headerLine = lines[0];
+                const headers = headerLine.split(",").map((h) => h.trim());
+                let startColumnIndex = 0;
+
+                // Check for checkbox column (usually first column)
+                if (
+                  headers.length > 0 &&
+                  (headers[0].toLowerCase().includes("select") ||
+                    headers[0].toLowerCase().includes("check"))
+                ) {
+                  startColumnIndex++;
+                  console.log(
+                    "Detected checkbox column in CSV, skipping first column",
+                  );
+                }
+
+                // Check for timestamp column (usually second column)
+                if (
+                  headers.length > startColumnIndex &&
+                  (headers[startColumnIndex].toLowerCase().includes("time") ||
+                    headers[startColumnIndex].toLowerCase().includes("date"))
+                ) {
+                  startColumnIndex++;
+                  console.log(
+                    "Detected timestamp column in CSV, skipping column",
+                  );
+                }
+
+                // If we detected special columns, create a modified content
+                if (startColumnIndex > 0) {
+                  const modifiedLines = lines.map((line) => {
+                    const columns = line.split(",");
+                    return columns.slice(startColumnIndex).join(",");
+                  });
+                  const modifiedContent = modifiedLines.join("\n");
+                  parsedSurveys = parseDelimitedFile(modifiedContent);
+                  console.log(
+                    `Parsed ${parsedSurveys.length} surveys using parseDelimitedFile with ${startColumnIndex} columns skipped`,
+                  );
+                } else {
+                  parsedSurveys = parseDelimitedFile(content);
+                  console.log(
+                    `Parsed ${parsedSurveys.length} surveys using parseDelimitedFile`,
+                  );
+                }
+              } else {
+                parsedSurveys = parseDelimitedFile(content);
+                console.log(
+                  `Parsed ${parsedSurveys.length} surveys using parseDelimitedFile`,
+                );
+              }
             } catch (error) {
               console.error("Error in parseDelimitedFile:", error);
               // Fallback to direct parsing if delimited file parsing fails

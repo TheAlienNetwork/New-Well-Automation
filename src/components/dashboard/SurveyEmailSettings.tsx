@@ -245,60 +245,94 @@ const SurveyEmailSettings = ({
   const processSelectedFiles = (files: FileList) => {
     if (!files || files.length === 0) return;
 
-    // Get the folder path from the first file
-    const firstFile = files[0];
-    const folderPath = firstFile.webkitRelativePath.split("/")[0];
-    setAttachmentFolder(`/${folderPath}`);
+    try {
+      // Get the folder path from the first file
+      const firstFile = files[0];
+      const folderPath = firstFile.webkitRelativePath.split("/")[0];
+      setAttachmentFolder(`/${folderPath}`);
 
-    // Process selected files
-    const selectedFiles: AttachmentFile[] = [];
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      // Only include files, not directories
-      if (file.size > 0) {
-        // Format file size
-        let fileSize = "";
-        if (file.size < 1024) {
-          fileSize = `${file.size} B`;
-        } else if (file.size < 1024 * 1024) {
-          fileSize = `${(file.size / 1024).toFixed(1)} KB`;
-        } else {
-          fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+      // Process selected files
+      const selectedFiles: AttachmentFile[] = [];
+      let totalSize = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        // Only include files, not directories
+        if (file.size > 0) {
+          totalSize += file.size;
+
+          // Format file size
+          let fileSize = "";
+          if (file.size < 1024) {
+            fileSize = `${file.size} B`;
+          } else if (file.size < 1024 * 1024) {
+            fileSize = `${(file.size / 1024).toFixed(1)} KB`;
+          } else {
+            fileSize = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+          }
+
+          // Determine file type
+          let fileType = "Unknown";
+          const extension = file.name.split(".").pop()?.toLowerCase();
+          if (extension === "pdf") fileType = "PDF";
+          else if (
+            ["png", "jpg", "jpeg", "gif", "bmp"].includes(extension || "")
+          )
+            fileType = "Image";
+          else if (["xlsx", "xls", "csv"].includes(extension || ""))
+            fileType = "Excel";
+          else if (["docx", "doc"].includes(extension || "")) fileType = "Word";
+          else if (["pptx", "ppt"].includes(extension || ""))
+            fileType = "PowerPoint";
+          else if (["txt", "log"].includes(extension || "")) fileType = "Text";
+
+          // Get the full path for the file (important for Electron)
+          let filePath = file.path || `/${folderPath}/${file.name}`;
+
+          selectedFiles.push({
+            name: file.name,
+            size: fileSize,
+            type: fileType,
+            path: filePath,
+            lastModified: file.lastModified,
+            file: file, // Store the actual file object for attachment
+          });
         }
+      }
 
-        // Determine file type
-        let fileType = "Unknown";
-        const extension = file.name.split(".").pop()?.toLowerCase();
-        if (extension === "pdf") fileType = "PDF";
-        else if (["png", "jpg", "jpeg", "gif", "bmp"].includes(extension || ""))
-          fileType = "Image";
-        else if (["xlsx", "xls", "csv"].includes(extension || ""))
-          fileType = "Excel";
-        else if (["docx", "doc"].includes(extension || "")) fileType = "Word";
-        else if (["pptx", "ppt"].includes(extension || ""))
-          fileType = "PowerPoint";
-        else if (["txt", "log"].includes(extension || "")) fileType = "Text";
-
-        selectedFiles.push({
-          name: file.name,
-          size: fileSize,
-          type: fileType,
-          path: `/${folderPath}/${file.name}`,
-          lastModified: file.lastModified,
-          file: file, // Store the actual file object for attachment
+      // Show a warning if total size is large
+      if (totalSize > 10 * 1024 * 1024) {
+        // 10MB
+        toast({
+          title: "Large Attachments",
+          description: `Total attachment size is ${(totalSize / (1024 * 1024)).toFixed(1)} MB. This may cause issues with some email clients.`,
+          variant: "warning",
         });
       }
+
+      setAttachments(selectedFiles);
+
+      // Show success message
+      toast({
+        title: "Files Added",
+        description: `${selectedFiles.length} file(s) added from ${folderPath}`,
+      });
+
+      // Reset the file input to allow selecting the same folder again
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      // Set up folder watching
+      setupFolderWatching();
+    } catch (error) {
+      console.error("Error processing selected files:", error);
+      toast({
+        title: "File Processing Error",
+        description: "There was an error processing the selected files.",
+        variant: "destructive",
+      });
     }
-
-    setAttachments(selectedFiles);
-
-    // Reset the file input to allow selecting the same folder again
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-
-    // Set up folder watching
-    setupFolderWatching();
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {

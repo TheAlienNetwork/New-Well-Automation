@@ -9,7 +9,10 @@
     "build-no-errors": "tsc ; vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "types:supabase": "npx supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > src/types/supabase.ts"
+    "types:supabase": "npx supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > src/types/supabase.ts",
+    "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:package": "electron-builder --dir"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.6.0",
@@ -52,6 +55,7 @@
     "framer-motion": "^11.18.0",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.394.0",
+    "net": "^1.0.2",
     "react": "^18.2.0",
     "react-day-picker": "^8.10.1",
     "react-dnd": "^16.0.1",
@@ -63,10 +67,12 @@
     "react-router": "^6.23.1",
     "react-router-dom": "^6.23.1",
     "recharts": "^2.15.2",
+    "serialport": "^12.0.0",
     "tailwind-merge": "^2.3.0",
     "tailwindcss-animate": "^1.0.7",
     "usehooks-ts": "^3.1.1",
     "vaul": "^0.9.1",
+    "ws": "^8.18.2",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
@@ -75,12 +81,37 @@
     "@types/node": "^20.14.2",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
-    "@vitejs/plugin-react-swc": "3.5.0",
+    "@vitejs/plugin-react-swc": "^3.9.0",
     "autoprefixer": "^10.4.19",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^36.2.1",
+    "electron-builder": "^26.0.12",
     "postcss": "^8.4.38",
     "tailwindcss": "3.4.1",
     "tempo-devtools": "^2.0.102",
     "typescript": "^5.2.2",
-    "vite": "^5.2.0"
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.3"
+  },
+  "main": "electron/main.js",
+  "build": {
+    "appId": "com.mwd.surface",
+    "productName": "MWD Surface Software",
+    "files": "[dist/**/*,electron/**/*]",
+    "extraResources": "[to:app]",
+    "directories": {
+      "buildResources": "assets",
+      "output": "release"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "[nsis]"
+    },
+    "linux": {
+      "target": "[AppImage,deb]"
+    }
   }
 }

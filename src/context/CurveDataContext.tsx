@@ -88,7 +88,7 @@ const DEFAULT_CONFIG: CurveDataConfig = {
   },
 };
 
-const CurveDataContext = createContext<CurveDataContextType | undefined>(
+export const CurveDataContext = createContext<CurveDataContextType | undefined>(
   undefined,
 );
 
@@ -256,6 +256,8 @@ export function CurveDataProvider({ children }: { children: ReactNode }) {
 
   // Update curve data when WITS data, surveys, or debounced rotation state changes
   useEffect(() => {
+    // Skip effect if witsContext is not available
+    if (!witsContext) return;
     const calculateCurveData = async () => {
       try {
         // Get current inclination and azimuth from survey or WITS data with validation

@@ -4,6 +4,13 @@ import { useWits } from "@/context/WitsContext";
 import { useCurveData } from "@/hooks/useCurveData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Compass,
   Ruler,
@@ -57,10 +64,16 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
   wellInfo,
 }) => {
   // Use the shared curve data context
-  const { curveData: contextCurveData } = useCurveData();
+  const { curveData: contextCurveData, updateManualInput } = useCurveData();
   const { surveys } = useSurveys();
   const { witsData, isReceiving } = useWits();
   const [latestSurvey, setLatestSurvey] = useState<any>(null);
+
+  // State for manual editing
+  const [manualEditMode, setManualEditMode] = useState<boolean>(false);
+  const [isEditingProjectedAz, setIsEditingProjectedAz] =
+    useState<boolean>(false);
+  const [manualProjectedAz, setManualProjectedAz] = useState<string>("");
 
   // Get the latest survey for calculations
   useEffect(() => {
@@ -374,6 +387,49 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
     }
   }
 
+  // Calculate dogleg needed, slide seen, slide ahead, projected inclination and azimuth
+  const doglegNeeded = safeCalculate(
+    calculateDoglegNeeded,
+    [currentInc, currentAz, targetInc, targetAz, targetDistance],
+    0,
+    "doglegNeeded",
+  );
+
+  const slideSeen = safeCalculate(
+    calculateSlideSeen,
+    [currentToolFace, currentInc, currentAz, targetInc, targetAz],
+    0,
+    "slideSeen",
+  );
+
+  const slideAhead = safeCalculate(
+    calculateSlideAhead,
+    [currentToolFace, currentInc, currentAz, targetInc, targetAz, motorYield],
+    0,
+    "slideAhead",
+  );
+
+  const projectedInc = safeCalculate(
+    calculateProjectedInclination,
+    [currentInc, currentToolFace, slideDistance, motorYield],
+    currentInc,
+    "projectedInc",
+  );
+
+  const projectedAz = safeCalculate(
+    calculateProjectedAzimuth,
+    [
+      currentAz,
+      currentInc,
+      projectedInc,
+      currentToolFace,
+      slideDistance,
+      motorYield,
+    ],
+    currentAz,
+    "projectedAz",
+  );
+
   // Use props if provided, otherwise use context values
   const displayMotorYield = motorYield ?? contextCurveData.motorYield;
   const displayDoglegNeeded = doglegNeeded ?? contextCurveData.doglegNeeded;
@@ -382,77 +438,16 @@ const DirectionalMetricsPanel: React.FC<DirectionalMetricsPanelProps> = ({
   const displayProjectedInc = projectedInc ?? contextCurveData.projectedInc;
   const displayProjectedAz = projectedAz ?? contextCurveData.projectedAz;
 
-  const slideSeen = safeCalculate(
-    calculateSlideSeen,
-    [motorYield, slideDistance, isRotating],
-    0,
-    "slideSeen",
-  );
-
-  console.log("DirectionalMetricsPanel - Slide seen calculation:", {
+  // Log the calculated values for debugging
+  console.log("DirectionalMetricsPanel - Calculated values:", {
     motorYield,
-    slideDistance,
+    slideSeen,
+    slideAhead,
+    projectedInc,
+    projectedAz,
+    doglegNeeded,
     isRotating,
-    result: slideSeen,
-  });
-
-  const slideAhead = safeCalculate(
-    calculateSlideAhead,
-    [motorYield, slideDistance, bitToBendDistance, isRotating],
-    0,
-    "slideAhead",
-  );
-
-  console.log("DirectionalMetricsPanel - Slide ahead calculation:", {
-    motorYield,
-    slideDistance,
-    bitToBendDistance,
-    isRotating,
-    result: slideAhead,
-  });
-
-  const projectedInc = safeCalculate(
-    calculateProjectedInclination,
-    [currentInc, calculatedBuildRate, targetDistance],
-    currentInc,
-    "projectedInc",
-  );
-
-  console.log("DirectionalMetricsPanel - Projected inclination calculation:", {
-    currentInc,
-    calculatedBuildRate,
-    distance: targetDistance,
-    result: projectedInc,
-  });
-
-  const projectedAz = safeCalculate(
-    calculateProjectedAzimuth,
-    [currentAz, calculatedTurnRate, targetDistance],
-    currentAz,
-    "projectedAz",
-  );
-
-  console.log("DirectionalMetricsPanel - Projected azimuth calculation:", {
-    currentAz,
-    calculatedTurnRate,
-    distance: targetDistance,
-    result: projectedAz,
-  });
-
-  const doglegNeeded = safeCalculate(
-    calculateDoglegNeeded,
-    [currentInc, currentAz, targetInc, targetAz, targetDistance],
-    0,
-    "doglegNeeded",
-  );
-
-  console.log("DirectionalMetricsPanel - Dogleg needed calculation:", {
-    currentInc,
-    currentAz,
-    targetInc,
-    targetAz,
-    distance: targetDistance,
-    result: doglegNeeded,
+    rotaryRpm: witsData?.rotaryRpm,
   });
 
   // Log the calculated values for debugging

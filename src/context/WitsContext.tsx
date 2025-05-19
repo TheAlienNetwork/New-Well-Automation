@@ -488,6 +488,10 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    // Check if running in Electron environment
+    const isElectronEnv =
+      typeof window !== "undefined" && window.electron !== undefined;
+
     // Prepare connection options with optimized settings for production use
     const options: any = {
       host: connectHost,
@@ -501,6 +505,8 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
       keepAliveInterval: 30000, // 30 second keepalive interval
       noDelay: true, // Disable Nagle's algorithm
       socketTimeout: 300000, // 5 minute socket timeout
+      // Flag to indicate if running in Electron
+      isElectron: isElectronEnv,
     };
 
     // Add WebSocket specific options if using WebSocket protocol
@@ -523,6 +529,12 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
           console.warn("Missing TCP target host or port for proxy mode");
           options.tcpHost = "localhost";
           options.tcpPort = 5000;
+        }
+
+        // If running in Electron, add a flag to indicate we're using the built-in proxy
+        if (isElectronEnv) {
+          options.usingElectronProxy = true;
+          console.log("Using Electron's built-in WebSocket-to-TCP proxy");
         }
 
         console.log(
@@ -864,6 +876,7 @@ const WitsProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
+// Define the hook outside of the provider component for Fast Refresh compatibility
 const useWits = () => {
   const context = useContext(WitsContext);
   if (context === undefined) {
@@ -873,5 +886,4 @@ const useWits = () => {
 };
 
 // Export the hook and provider
-export { useWits };
-export { WitsProvider };
+export { useWits, WitsProvider };

@@ -364,6 +364,8 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
   });
 };
 
+import { isElectron, getElectronBridge } from "@/lib/electronBridge";
+
 /**
  * New function to handle the complete Outlook email creation flow
  */
@@ -405,6 +407,7 @@ export const createOutlookEmailWithSurveyData = async (
     embedScreenshot: options.embedScreenshot,
     replaceBodyWithScreenshot: options.replaceBodyWithScreenshot,
     attachmentsCount: options.fileAttachments?.length || 0,
+    isElectronApp: isElectron(),
   });
 
   try {
@@ -427,6 +430,71 @@ export const createOutlookEmailWithSurveyData = async (
     // Prepare recipients
     const recipientList = options.recipients?.join(";") || "";
     const ccList = options.ccRecipients?.join(";") || "";
+
+    // Check if we're running in Electron and can use native APIs
+    if (isElectron() && getElectronBridge()?.openEmailClient) {
+      const electronBridge = getElectronBridge();
+      let screenshotPath = null;
+
+      // If we have a screenshot and want to use it, save it to a temp file
+      if (
+        options.emailPreviewImage &&
+        options.embedScreenshot &&
+        electronBridge?.saveScreenshotToTemp
+      ) {
+        try {
+          // Convert blob to base64
+          const reader = new FileReader();
+          const imageDataPromise = new Promise<string>((resolve) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(options.emailPreviewImage!);
+          });
+          const imageData = await imageDataPromise;
+
+          // Save screenshot to temp file using Electron
+          screenshotPath = await electronBridge.saveScreenshotToTemp(imageData);
+          console.log("Screenshot saved to temp file:", screenshotPath);
+        } catch (err) {
+          console.error("Failed to save screenshot:", err);
+        }
+      }
+
+      // Prepare attachment paths for Electron
+      const attachmentPaths: string[] = [];
+
+      // Add screenshot if available
+      if (screenshotPath) {
+        attachmentPaths.push(screenshotPath);
+      }
+
+      // Add file attachments if available
+      if (options.fileAttachments && options.fileAttachments.length > 0) {
+        options.fileAttachments.forEach((attachment) => {
+          if (attachment.path) {
+            attachmentPaths.push(attachment.path);
+          }
+        });
+      }
+
+      // Open email client using Electron
+      const success = await electronBridge.openEmailClient!({
+        to: recipientList,
+        cc: ccList,
+        subject: subject,
+        body:
+          options.replaceBodyWithScreenshot && screenshotPath ? "" : htmlBody,
+        attachmentPaths: attachmentPaths,
+      });
+
+      if (success) {
+        console.log("Successfully opened email client via Electron");
+        return;
+      } else {
+        console.warn(
+          "Failed to open email client via Electron, falling back to browser method",
+        );
+      }
+    }
 
     // If we have a screenshot and want to use it, we'll need to handle it differently
     if (options.emailPreviewImage && options.embedScreenshot) {
